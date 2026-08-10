@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:collection';
 
+import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
 import 'package:process/process.dart';
 import 'package:webkit_inspection_protocol/webkit_inspection_protocol.dart' hide StackTrace;
@@ -15,25 +17,25 @@ import '../base/io.dart';
 import '../base/logger.dart';
 import '../base/os.dart';
 import '../base/platform.dart';
-import '../convert.dart';
+import '../base/utils.dart';
 
 /// An environment variable used to override the location of Google Chrome.
-const String kChromeEnvironment = 'CHROME_EXECUTABLE';
+const kChromeEnvironment = 'CHROME_EXECUTABLE';
 
 /// An environment variable used to override the location of Microsoft Edge.
-const String kEdgeEnvironment = 'EDGE_ENVIRONMENT';
+const kEdgeEnvironment = 'EDGE_ENVIRONMENT';
 
 /// The expected executable name on linux.
-const String kLinuxExecutable = 'google-chrome';
+const kLinuxExecutable = 'google-chrome';
 
 /// The expected executable name on macOS.
-const String kMacOSExecutable = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const kMacOSExecutable = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 /// The expected Chrome executable name on Windows.
-const String kWindowsExecutable = r'Google\Chrome\Application\chrome.exe';
+const kWindowsExecutable = r'Google\Chrome\Application\chrome.exe';
 
 /// The expected Edge executable name on Windows.
-const String kWindowsEdgeExecutable = r'Microsoft\Edge\Application\msedge.exe';
+const kWindowsEdgeExecutable = r'Microsoft\Edge\Application\msedge.exe';
 
 /// Used by [ChromiumLauncher] to detect a glibc bug and retry launching the
 /// browser.
@@ -45,7 +47,7 @@ const String kWindowsEdgeExecutable = r'Microsoft\Edge\Application\msedge.exe';
 /// When this happens Chrome spits out something like the following then exits with code 127:
 ///
 ///     Inconsistency detected by ld.so: ../elf/dl-tls.c: 493: _dl_allocate_tls_init: Assertion `listp->slotinfo[cnt].gen <= GL(dl_tls_generation)' failed!
-const String _kGlibcError = 'Inconsistency detected by ld.so';
+const _kGlibcError = 'Inconsistency detected by ld.so';
 
 typedef BrowserFinder = String Function(Platform, FileSystem);
 
@@ -64,7 +66,7 @@ String findChromeExecutable(Platform platform, FileSystem fileSystem) {
   }
   if (platform.isWindows) {
     /// The possible locations where the chrome executable can be located on windows.
-    final List<String> kWindowsPrefixes = <String>[
+    final kWindowsPrefixes = <String>[
       if (platform.environment.containsKey('LOCALAPPDATA')) platform.environment['LOCALAPPDATA']!,
       if (platform.environment.containsKey('PROGRAMFILES')) platform.environment['PROGRAMFILES']!,
       if (platform.environment.containsKey('PROGRAMFILES(X86)'))
@@ -88,7 +90,7 @@ String findEdgeExecutable(Platform platform, FileSystem fileSystem) {
   }
   if (platform.isWindows) {
     /// The possible locations where the Edge executable can be located on windows.
-    final List<String> kWindowsPrefixes = <String>[
+    final kWindowsPrefixes = <String>[
       if (platform.environment.containsKey('LOCALAPPDATA')) platform.environment['LOCALAPPDATA']!,
       if (platform.environment.containsKey('PROGRAMFILES')) platform.environment['PROGRAMFILES']!,
       if (platform.environment.containsKey('PROGRAMFILES(X86)'))
@@ -127,6 +129,8 @@ class ChromiumLauncher {
   final BrowserFinder _browserFinder;
   final Logger _logger;
 
+  bool get _isMacosArm => _operatingSystemUtils.hostPlatform == HostPlatform.darwin_arm64;
+
   bool get hasChromeInstance => currentCompleter.isCompleted;
 
   @visibleForTesting
@@ -144,6 +148,31 @@ class ChromiumLauncher {
 
   /// The executable this launcher will use.
   String findExecutable() => _browserFinder(_platform, _fileSystem);
+
+  /// Creates a user data directory for Chrome based on provided flags or creates a temporary one.
+  ///
+  /// This method handles the creation of Chrome's user data directory in two ways:
+  /// 1. If webBrowserFlags contains a --user-data-dir flag, it uses that directory
+  /// 2. Otherwise, it creates a temporary directory in the system's temp location
+  ///
+  /// The user data directory is where Chrome stores user preferences, cookies,
+  /// and other session data. Using a temporary directory ensures a clean state
+  /// for each launch, while allowing custom directories through flags for
+  /// persistent configurations.
+  Directory _createUserDataDirectory(List<String> webBrowserFlags) {
+    if (webBrowserFlags.isNotEmpty) {
+      final String? userDataDirFlag = webBrowserFlags.firstWhereOrNull(
+        (String flag) => flag.startsWith('--user-data-dir='),
+      );
+
+      if (userDataDirFlag != null) {
+        final Directory userDataDir = _fileSystem.directory(userDataDirFlag.split('=')[1]);
+        webBrowserFlags.remove(userDataDirFlag);
+        return userDataDir;
+      }
+    }
+    return _fileSystem.systemTempDirectory.createTempSync('flutter_tools_chrome_device.');
+  }
 
   /// Launch a Chromium browser to a particular `host` page.
   ///
@@ -189,9 +218,7 @@ class ChromiumLauncher {
       }
     }
 
-    final Directory userDataDir = _fileSystem.systemTempDirectory.createTempSync(
-      'flutter_tools_chrome_device.',
-    );
+    final Directory userDataDir = _createUserDataDirectory(webBrowserFlags);
 
     if (cacheDir != null) {
       // Seed data dir with previous state.
@@ -199,7 +226,7 @@ class ChromiumLauncher {
     }
 
     final int port = debugPort ?? await _operatingSystemUtils.findFreePort();
-    final List<String> args = <String>[
+    final args = <String>[
       chromeExecutable,
       // Using a tmp directory ensures that a new instance of chrome launches
       // allowing for the remote debug port to be enabled.
@@ -207,6 +234,7 @@ class ChromiumLauncher {
       '--remote-debugging-port=$port',
       // When the DevTools has focus we don't want to slow down the application.
       '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
       // Since we are using a temp profile, disable features that slow the
       // Chrome launch.
       '--disable-extensions',
@@ -216,23 +244,44 @@ class ChromiumLauncher {
       '--no-default-browser-check',
       '--disable-default-apps',
       '--disable-translate',
+      '--password-store=basic',
+      if (_platform.isMacOS) '--use-mock-keychain',
 
       // Remove the search engine choice screen. It's irrelevant for app
       // debugging purposes.
       // See: https://github.com/flutter/flutter/issues/153928
       '--disable-search-engine-choice-screen',
 
+      // SwiftShader support on ARM macs is disabled until they upgrade to a newer
+      // version of LLVM, see https://issuetracker.google.com/issues/165000222. In
+      // headless Chrome, the default is to use SwiftShader as a software renderer
+      // for WebGL contexts. In order to work around this limitation, we can force
+      // GPU rendering with this flag.
+      if (_isMacosArm && headless) '--use-angle=metal',
+
+      // TODO(kevmoo): Refactor Chrome argument construction to share code across spawning locations.
       if (headless) ...<String>[
-        '--headless',
-        '--disable-gpu',
         '--no-sandbox',
-        '--window-size=2400,1800',
+        '--headless',
+        '--window-size=1024,1024',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--disable-client-side-phishing-detection',
+        '--disable-notifications',
+        '--disable-features=GCM',
+        if (_platform.isLinux) ...<String>[
+          '--use-gl=angle',
+          '--use-angle=swiftshader',
+          '--enable-unsafe-swiftshader',
+          '--disable-gpu-sandbox',
+        ],
       ],
       ...webBrowserFlags,
       url,
     ];
 
-    final Process process = await _spawnChromiumProcess(args, chromeExecutable);
+    final _SpawnResult spawnResult = await _spawnChromiumProcess(args, chromeExecutable);
+    final Process process = spawnResult.process;
 
     // When the process exits, copy the user settings back to the provided data-dir.
     if (cacheDir != null) {
@@ -256,85 +305,94 @@ class ChromiumLauncher {
         process: process,
         chromiumLauncher: this,
         logger: _logger,
+        logBuffer: spawnResult.logBuffer,
       ),
       skipCheck,
     );
   }
 
-  Future<Process> _spawnChromiumProcess(List<String> args, String chromeExecutable) async {
-    if (_operatingSystemUtils.hostPlatform == HostPlatform.darwin_arm64) {
-      final ProcessResult result = _processManager.runSync(<String>['file', chromeExecutable]);
-      // Check if ARM Chrome is installed.
-      // Mach-O 64-bit executable arm64
-      if ((result.stdout as String).contains('arm64')) {
-        _logger.printTrace(
-          'Found ARM Chrome installation at $chromeExecutable, forcing native launch.',
-        );
-        // If so, force Chrome to launch natively.
-        args.insertAll(0, <String>['/usr/bin/arch', '-arm64']);
-      }
-    }
-
+  Future<_SpawnResult> _spawnChromiumProcess(List<String> args, String chromeExecutable) async {
     // Keep attempting to launch the browser until one of:
     // - Chrome launched successfully, in which case we just return from the loop.
     // - The tool reached the maximum retry count, in which case we throw ToolExit.
-    const int kMaxRetries = 3;
-    int retry = 0;
+    const kMaxRetries = 3;
+    var retry = 0;
     while (true) {
       final Process process = await _processManager.start(args);
+      final logBuffer = ListQueue<String>(200);
 
-      process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((String line) {
+      void addLog(String type, String line) {
         _logger.printTrace('[CHROME]: $line');
-      });
+        final logLine = '[$type]: $line';
+        logBuffer.add(logLine);
+        if (logBuffer.length > 200) {
+          logBuffer.removeFirst();
+        }
+      }
 
-      // Wait until the DevTools are listening before trying to connect. This is
-      // only required for flutter_test --platform=chrome and not flutter run.
-      bool hitGlibcBug = false;
-      bool shouldRetry = false;
-      final List<String> errors = <String>[];
-      await process.stderr
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .map((String line) {
-            _logger.printTrace('[CHROME]: $line');
-            errors.add('[CHROME]:$line');
-            if (line.contains(_kGlibcError)) {
-              hitGlibcBug = true;
-              shouldRetry = true;
+      final StreamSubscription<String> stdoutSub = process.stdout.transform(utf8LineDecoder).listen(
+        (String line) {
+          addLog('CHROME STDOUT', line);
+        },
+      );
+
+      final devToolsListening = Completer<void>();
+      var hitGlibcBug = false;
+      var shouldRetry = false;
+
+      final StreamSubscription<String> stderrSub = process.stderr.transform(utf8LineDecoder).listen(
+        (String line) {
+          addLog('CHROME STDERR', line);
+          if (line.contains(_kGlibcError)) {
+            hitGlibcBug = true;
+            shouldRetry = true;
+          }
+          if (line.startsWith('DevTools listening')) {
+            if (!devToolsListening.isCompleted) {
+              devToolsListening.complete();
             }
-            return line;
-          })
-          .firstWhere(
-            (String line) => line.startsWith('DevTools listening'),
-            orElse: () {
-              if (hitGlibcBug) {
-                _logger.printTrace(
-                  'Encountered glibc bug https://sourceware.org/bugzilla/show_bug.cgi?id=19329. '
-                  'Will try launching browser again.',
-                );
-                // Return value unused.
-                return '';
-              }
-              if (retry >= kMaxRetries) {
-                errors.forEach(_logger.printError);
-                _logger.printError(
-                  'Failed to launch browser after $kMaxRetries tries. Command used to launch it: ${args.join(' ')}',
-                );
-                throwToolExit(
-                  'Failed to launch browser. Make sure you are using an up-to-date '
-                  'Chrome or Edge. Otherwise, consider using -d web-server instead '
-                  'and filing an issue at https://github.com/flutter/flutter/issues.',
-                );
-              }
-              shouldRetry = true;
-              return '';
-            },
+          }
+        },
+      );
+
+      // Handle premature process exit.
+      unawaited(
+        process.exitCode.then((int code) {
+          if (!devToolsListening.isCompleted) {
+            devToolsListening.completeError(
+              Exception('Chrome process exited with code $code before DevTools listening.'),
+            );
+          }
+        }),
+      );
+
+      try {
+        await devToolsListening.future;
+      } on Object catch (error) {
+        if (retry >= kMaxRetries) {
+          logBuffer.forEach(_logger.printError);
+          _logger.printError(
+            'Failed to launch browser after $kMaxRetries tries. Command used to launch it: ${args.join(' ')}',
           );
+          throwToolExit(
+            'Failed to launch browser. Make sure you are using an up-to-date '
+            'Chrome or Edge. Otherwise, consider using -d web-server instead '
+            'and filing an issue at https://github.com/flutter/flutter/issues.\n'
+            'Error: $error',
+          );
+        }
+        shouldRetry = true;
+      }
 
       if (!hitGlibcBug && !shouldRetry) {
-        return process;
+        return _SpawnResult(process, logBuffer.toList());
       }
+
       retry += 1;
+
+      // Clean up subscriptions.
+      await stdoutSub.cancel();
+      await stderrSub.cancel();
 
       // A precaution that avoids accumulating browser processes, in case the
       // glibc bug doesn't cause the browser to quit and we keep looping and
@@ -472,9 +530,23 @@ class Chromium {
     required Process process,
     required ChromiumLauncher chromiumLauncher,
     required Logger logger,
+    List<String> logBuffer = const <String>[],
   }) : _process = process,
        _chromiumLauncher = chromiumLauncher,
-       _logger = logger;
+       _logger = logger,
+       _logBuffer = logBuffer {
+    unawaited(
+      _process.exitCode.then((int code) {
+        if (!_didClose && code != 0) {
+          _logger.printError(
+            'Chrome process PID $pid exited unexpectedly with code $code.\n'
+            'Last 200 lines of Chrome output:\n'
+            '${_logBuffer.join('\n')}',
+          );
+        }
+      }),
+    );
+  }
 
   final String? url;
   final int debugPort;
@@ -482,7 +554,9 @@ class Chromium {
   final ChromeConnection chromeConnection;
   final ChromiumLauncher _chromiumLauncher;
   final Logger _logger;
-  bool _hasValidChromeConnection = false;
+  final List<String> _logBuffer;
+  var _hasValidChromeConnection = false;
+  var _didClose = false;
 
   /// Resolves to browser's main process' exit code, when the browser exits.
   Future<int> get onExit async => _process.exitCode;
@@ -493,7 +567,10 @@ class Chromium {
   @visibleForTesting
   Process get process => _process;
 
-  /// Gets the first [chrome] tab in order to verify that the connection to
+  /// The process ID of this Chromium instance.
+  int get pid => _process.pid;
+
+  /// Gets the first Chrome tab in order to verify that the connection to
   /// the Chrome debug protocol is working properly.
   ///
   /// Retries getting tabs from Chrome for a few seconds and retries finding
@@ -504,12 +581,14 @@ class Chromium {
   // (We should just keep waiting forever, and print a warning when it's
   // taking too long.)
   Future<void> _validateChromeConnection() async {
-    const Duration retryFor = Duration(seconds: 2);
-    const int attempts = 5;
+    const retryFor = Duration(seconds: 2);
+    const attempts = 5;
 
-    for (int i = 1; i <= attempts; i++) {
+    for (var i = 1; i <= attempts; i++) {
       try {
-        final List<ChromeTab> tabs = await chromeConnection.getTabs(retryFor: retryFor);
+        final List<ChromeTab> tabs = await chromeConnection
+            .getTabs(retryFor: retryFor)
+            .timeout(const Duration(seconds: 20));
 
         if (tabs.isNotEmpty) {
           _hasValidChromeConnection = true;
@@ -526,6 +605,10 @@ class Chromium {
         if (i == attempts) {
           rethrow;
         }
+      } on TimeoutException {
+        if (i == attempts) {
+          rethrow;
+        }
       }
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
@@ -533,6 +616,7 @@ class Chromium {
 
   /// Closes all connections to the browser and asks the browser to exit.
   Future<void> close() async {
+    _didClose = true;
     if (_logger.isVerbose) {
       _logger.printTrace('Shutting down Chromium.');
     }
@@ -555,10 +639,10 @@ class Chromium {
           await wipConnection.close();
           sigtermDelay = const Duration(seconds: 1);
         }
-      } on IOException {
+      } on IOException catch (_) {
         // Chrome is not responding to the debug protocol and probably has
         // already been closed.
-      }
+      } on Object catch (_) {}
     }
     chromeConnection.close();
     _hasValidChromeConnection = false;
@@ -627,4 +711,10 @@ Future<ChromeTab?> getChromeTabGuarded(
     }
     return null;
   }
+}
+
+class _SpawnResult {
+  _SpawnResult(this.process, this.logBuffer);
+  final Process process;
+  final List<String> logBuffer;
 }

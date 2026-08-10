@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets('Toggleable exists in widget layer', (WidgetTester tester) async {
-    final TestPainter testPainter = TestPainter();
+    final testPainter = TestPainter();
     expect(testPainter, isA<ToggleablePainter>());
     expect(testPainter, isNot(throwsException));
   });
 
   testWidgets('Toggleable exists in widget layer', (WidgetTester tester) async {
-    await tester.pumpWidget(const MaterialApp(home: TestToggleable()));
+    await tester.pumpWidget(const TestWidgetsApp(home: TestToggleable()));
     final TestToggleableState state = tester.state<TestToggleableState>(
       find.byType(TestToggleable),
     );
@@ -51,7 +51,8 @@ class TestToggleableState extends State<TestToggleable>
   }
 
   @override
-  ValueChanged<bool?>? get onChanged => (bool? value) => this.value = value;
+  ValueChanged<bool?>? get onChanged =>
+      (bool? value) => this.value = value;
 
   @override
   bool tristate = true;

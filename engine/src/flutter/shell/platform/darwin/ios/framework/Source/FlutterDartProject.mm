@@ -9,11 +9,12 @@
 #import <Metal/Metal.h>
 #import <UIKit/UIKit.h>
 
-#include <syslog.h>
+#include <sstream>
 
 #include "flutter/common/constants.h"
 #include "flutter/fml/build_config.h"
 #include "flutter/shell/common/switches.h"
+#import "flutter/shell/platform/darwin/common/InternalFlutterSwiftCommon/InternalFlutterSwiftCommon.h"
 #include "flutter/shell/platform/darwin/common/command_line.h"
 
 FLUTTER_ASSERT_ARC
@@ -38,6 +39,15 @@ static BOOL DoesHardwareSupportWideGamut() {
   return result;
 }
 
+NSNumber* _Nullable FLTEnableWideGamutFromBundle(NSBundle* _Nullable bundle,
+                                                 NSBundle* _Nullable mainBundle) {
+  NSNumber* nsEnableWideGamut = [bundle objectForInfoDictionaryKey:@"FLTEnableWideGamut"];
+  if (nsEnableWideGamut == nil && bundle != mainBundle) {
+    nsEnableWideGamut = [mainBundle objectForInfoDictionaryKey:@"FLTEnableWideGamut"];
+  }
+  return nsEnableWideGamut;
+}
+
 flutter::Settings FLTDefaultSettingsForBundle(NSBundle* bundle, NSProcessInfo* processInfoOrNil) {
   auto command_line = flutter::CommandLineFromNSProcessInfo(processInfoOrNil);
 
@@ -55,7 +65,11 @@ flutter::Settings FLTDefaultSettingsForBundle(NSBundle* bundle, NSProcessInfo* p
     bundle = FLTFrameworkBundleWithIdentifier([FlutterDartProject defaultBundleIdentifier]);
   }
 
-  auto settings = flutter::SettingsFromCommandLine(command_line);
+  auto settings = flutter::SettingsFromCommandLine(command_line, true);
+
+  FML_CHECK(settings.merged_platform_ui_thread !=
+            flutter::Settings::MergedPlatformUIThread::kMergeAfterLaunch)
+      << "merged-platform-ui-thread=mergeAfterLaunch is not supported on iOS.";
 
   settings.task_observer_add = [](intptr_t key, const fml::closure& callback) {
     fml::TaskQueueId queue_id = fml::MessageLoop::GetCurrentTaskQueueId();
@@ -68,15 +82,13 @@ flutter::Settings FLTDefaultSettingsForBundle(NSBundle* bundle, NSProcessInfo* p
   };
 
   settings.log_message_callback = [](const std::string& tag, const std::string& message) {
-    // TODO(cbracken): replace this with os_log-based approach.
-    // https://github.com/flutter/flutter/issues/44030
     std::stringstream stream;
     if (!tag.empty()) {
       stream << tag << ": ";
     }
     stream << message;
     std::string log = stream.str();
-    syslog(LOG_ALERT, "%.*s", (int)log.size(), log.c_str());
+    [FlutterLogger logDirect:[NSString stringWithUTF8String:log.c_str()]];
   };
 
   settings.enable_platform_isolates = true;
@@ -96,32 +108,32 @@ flutter::Settings FLTDefaultSettingsForBundle(NSBundle* bundle, NSProcessInfo* p
     if (hasExplicitBundle) {
       NSString* executablePath = bundle.executablePath;
       if ([[NSFileManager defaultManager] fileExistsAtPath:executablePath]) {
-        settings.application_library_path.push_back(executablePath.UTF8String);
+        settings.application_library_paths.push_back(executablePath.UTF8String);
       }
     }
 
     // No application bundle specified.  Try a known location from the main bundle's Info.plist.
-    if (settings.application_library_path.empty()) {
+    if (settings.application_library_paths.empty()) {
       NSString* libraryName = [mainBundle objectForInfoDictionaryKey:@"FLTLibraryPath"];
       NSString* libraryPath = [mainBundle pathForResource:libraryName ofType:@""];
       if (libraryPath.length > 0) {
         NSString* executablePath = [NSBundle bundleWithPath:libraryPath].executablePath;
         if (executablePath.length > 0) {
-          settings.application_library_path.push_back(executablePath.UTF8String);
+          settings.application_library_paths.push_back(executablePath.UTF8String);
         }
       }
     }
 
     // In case the application bundle is still not specified, look for the App.framework in the
     // Frameworks directory.
-    if (settings.application_library_path.empty()) {
+    if (settings.application_library_paths.empty()) {
       NSString* applicationFrameworkPath = [mainBundle pathForResource:@"Frameworks/App.framework"
                                                                 ofType:@""];
       if (applicationFrameworkPath.length > 0) {
         NSString* executablePath =
             [NSBundle bundleWithPath:applicationFrameworkPath].executablePath;
         if (executablePath.length > 0) {
-          settings.application_library_path.push_back(executablePath.UTF8String);
+          settings.application_library_paths.push_back(executablePath.UTF8String);
         }
       }
     }
@@ -167,21 +179,27 @@ flutter::Settings FLTDefaultSettingsForBundle(NSBundle* bundle, NSProcessInfo* p
   // Removes unused function warning.
   (void)DoesHardwareSupportWideGamut;
 #else
-  NSNumber* nsEnableWideGamut = [mainBundle objectForInfoDictionaryKey:@"FLTEnableWideGamut"];
+  NSNumber* nsEnableWideGamut = FLTEnableWideGamutFromBundle(bundle, mainBundle);
   BOOL enableWideGamut =
       (nsEnableWideGamut ? nsEnableWideGamut.boolValue : YES) && DoesHardwareSupportWideGamut();
   settings.enable_wide_gamut = enableWideGamut;
 #endif
 
-  NSNumber* nsAntialiasLines = [mainBundle objectForInfoDictionaryKey:@"FLTAntialiasLines"];
-  settings.impeller_antialiased_lines = (nsAntialiasLines ? nsAntialiasLines.boolValue : NO);
-
   settings.warn_on_impeller_opt_out = true;
+
+  NSNumber* nsEnableSDFs = [mainBundle objectForInfoDictionaryKey:@"FLTEnableSDFs"];
+  settings.impeller_use_sdfs = (nsEnableSDFs ? nsEnableSDFs.boolValue : NO);
 
   NSNumber* enableTraceSystrace = [mainBundle objectForInfoDictionaryKey:@"FLTTraceSystrace"];
   // Change the default only if the option is present.
   if (enableTraceSystrace != nil) {
     settings.trace_systrace = enableTraceSystrace.boolValue;
+  }
+
+  NSNumber* profileMicrotasks = [mainBundle objectForInfoDictionaryKey:@"FLTProfileMicrotasks"];
+  // Change the default only if the option is present.
+  if (profileMicrotasks != nil) {
+    settings.profile_microtasks = profileMicrotasks.boolValue;
   }
 
   NSNumber* enableDartAsserts = [mainBundle objectForInfoDictionaryKey:@"FLTEnableDartAsserts"];
@@ -195,6 +213,12 @@ flutter::Settings FLTDefaultSettingsForBundle(NSBundle* bundle, NSProcessInfo* p
     settings.enable_dart_profiling = enableDartProfiling.boolValue;
   }
 
+  NSNumber* profileStartup = [mainBundle objectForInfoDictionaryKey:@"FLTProfileStartup"];
+  // Change the default only if the option is present.
+  if (profileStartup != nil) {
+    settings.profile_startup = profileStartup.boolValue;
+  }
+
   // Leak Dart VM settings, set whether leave or clean up the VM after the last shell shuts down.
   NSNumber* leakDartVM = [mainBundle objectForInfoDictionaryKey:@"FLTLeakDartVM"];
   // It will change the default leak_vm value in settings only if the key exists.
@@ -205,9 +229,8 @@ flutter::Settings FLTDefaultSettingsForBundle(NSBundle* bundle, NSProcessInfo* p
   NSNumber* enableMergedPlatformUIThread =
       [mainBundle objectForInfoDictionaryKey:@"FLTEnableMergedPlatformUIThread"];
   if (enableMergedPlatformUIThread != nil) {
-    settings.merged_platform_ui_thread = enableMergedPlatformUIThread.boolValue
-                                             ? flutter::Settings::MergedPlatformUIThread::kEnabled
-                                             : flutter::Settings::MergedPlatformUIThread::kDisabled;
+    FML_CHECK(enableMergedPlatformUIThread.boolValue)
+        << "FLTEnableMergedPlatformUIThread=false is no longer allowed.";
   }
 
   NSNumber* enableFlutterGPU = [mainBundle objectForInfoDictionaryKey:@"FLTEnableFlutterGPU"];

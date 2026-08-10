@@ -7,7 +7,7 @@
 
 #include "flutter/display_list/display_list.h"
 #include "flutter/display_list/dl_builder.h"
-#include "flutter/impeller/golden_tests/screenshot.h"
+#include "flutter/impeller/testing/screenshot.h"
 #include "impeller/playground/playground_test.h"
 #include "third_party/skia/include/core/SkFont.h"
 
@@ -31,7 +31,7 @@ class DlPlayground : public PlaygroundTest {
   std::unique_ptr<testing::Screenshot> MakeScreenshot(
       const sk_sp<flutter::DisplayList>& list);
 
-  SkFont CreateTestFontOfSize(SkScalar scalar);
+  SkFont CreateTestFontOfSize(Scalar scalar);
 
   SkFont CreateTestFont();
 
@@ -43,6 +43,11 @@ class DlPlayground : public PlaygroundTest {
   DlPlayground(const DlPlayground&) = delete;
 
   DlPlayground& operator=(const DlPlayground&) = delete;
+};
+
+class DlPlaygroundWithGoldens : public DlPlayground {
+ protected:
+  bool IsGoldenTestSuite() const override { return true; }
 };
 
 }  // namespace impeller

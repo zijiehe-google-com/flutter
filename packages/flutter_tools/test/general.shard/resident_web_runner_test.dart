@@ -12,6 +12,7 @@ import 'package:flutter_tools/src/application_package.dart';
 import 'package:flutter_tools/src/asset.dart';
 import 'package:flutter_tools/src/base/dds.dart';
 import 'package:flutter_tools/src/base/file_system.dart';
+import 'package:flutter_tools/src/base/io.dart';
 import 'package:flutter_tools/src/base/logger.dart';
 import 'package:flutter_tools/src/base/platform.dart';
 import 'package:flutter_tools/src/base/terminal.dart';
@@ -19,19 +20,19 @@ import 'package:flutter_tools/src/base/time.dart';
 import 'package:flutter_tools/src/build_info.dart';
 import 'package:flutter_tools/src/build_system/build_system.dart';
 import 'package:flutter_tools/src/build_system/tools/shader_compiler.dart';
+import 'package:flutter_tools/src/bundle.dart';
 import 'package:flutter_tools/src/compile.dart';
 import 'package:flutter_tools/src/dart/pub.dart';
 import 'package:flutter_tools/src/devfs.dart';
 import 'package:flutter_tools/src/device.dart';
-import 'package:flutter_tools/src/features.dart';
 import 'package:flutter_tools/src/globals.dart' as globals;
 import 'package:flutter_tools/src/isolated/devfs_web.dart';
 import 'package:flutter_tools/src/isolated/resident_web_runner.dart';
 import 'package:flutter_tools/src/project.dart';
-import 'package:flutter_tools/src/resident_devtools_handler.dart';
 import 'package:flutter_tools/src/resident_runner.dart';
 import 'package:flutter_tools/src/vmservice.dart';
 import 'package:flutter_tools/src/web/chrome.dart';
+import 'package:flutter_tools/src/web/devfs_config.dart';
 import 'package:flutter_tools/src/web/web_device.dart';
 import 'package:package_config/package_config.dart';
 import 'package:package_config/package_config_types.dart';
@@ -43,18 +44,26 @@ import 'package:webkit_inspection_protocol/webkit_inspection_protocol.dart';
 import '../src/common.dart';
 import '../src/context.dart';
 import '../src/fake_process_manager.dart';
-import '../src/fake_pub_deps.dart';
 import '../src/fake_vm_services.dart';
 import '../src/fakes.dart' as test_fakes;
 import '../src/package_config.dart';
 import '../src/test_build_system.dart';
+import '../src/throwing_pub.dart';
+import 'resident_runner_helpers.dart';
 
-const List<VmServiceExpectation> kAttachLogExpectations = <VmServiceExpectation>[
+const kSetPauseIsolatesOnStartExpectations = <VmServiceExpectation>[
+  FakeVmServiceRequest(
+    method: 'setFlag',
+    args: <String, Object>{'name': 'pause_isolates_on_start', 'value': 'true'},
+  ),
+];
+
+const kAttachLogExpectations = <VmServiceExpectation>[
   FakeVmServiceRequest(method: 'streamListen', args: <String, Object>{'streamId': 'Stdout'}),
   FakeVmServiceRequest(method: 'streamListen', args: <String, Object>{'streamId': 'Stderr'}),
 ];
 
-const List<VmServiceExpectation> kAttachIsolateExpectations = <VmServiceExpectation>[
+const kAttachIsolateExpectations = <VmServiceExpectation>[
   FakeVmServiceRequest(method: 'streamListen', args: <String, Object>{'streamId': 'Service'}),
   FakeVmServiceRequest(method: 'streamListen', args: <String, Object>{'streamId': 'Isolate'}),
   FakeVmServiceRequest(
@@ -72,15 +81,18 @@ const List<VmServiceExpectation> kAttachIsolateExpectations = <VmServiceExpectat
   FakeVmServiceRequest(method: 'streamListen', args: <String, Object>{'streamId': 'Extension'}),
 ];
 
-const List<VmServiceExpectation> kAttachExpectations = <VmServiceExpectation>[
+const kAttachExpectations = <VmServiceExpectation>[
   ...kAttachLogExpectations,
   ...kAttachIsolateExpectations,
 ];
 
-const List<String> kDdcLibraryBundleFlags = <String>[
-  '--dartdevc-module-format=ddc',
-  '--dartdevc-canary',
+const kStartPausedAndAttachExpectations = <VmServiceExpectation>[
+  ...kSetPauseIsolatesOnStartExpectations,
+  ...kAttachLogExpectations,
+  ...kAttachIsolateExpectations,
 ];
+
+const kDdcLibraryBundleFlags = <String>['--dartdevc-module-format=ddc', '--dartdevc-canary'];
 
 void main() {
   late FakeDebugConnection debugConnection;
@@ -98,12 +110,6 @@ void main() {
   late ProcessManager processManager;
   late FakeAnalytics fakeAnalytics;
 
-  // TODO(matanlurey): Remove after `explicit-package-dependencies` is enabled by default.
-  // See https://github.com/flutter/flutter/issues/160257 for details.
-  FeatureFlags enableExplicitPackageDependencies() {
-    return test_fakes.TestFeatureFlags(isExplicitPackageDependenciesEnabled: true);
-  }
-
   setUp(() {
     fileSystem = MemoryFileSystem.test();
     processManager = FakeProcessManager.any();
@@ -116,15 +122,14 @@ void main() {
     chromeConnection = FakeChromeConnection();
     chromeTab = FakeChromeTab('index.html');
     webServerDevice = FakeWebServerDevice();
-    flutterDevice =
-        FakeFlutterDevice()
-          .._devFS = webDevFS
-          ..device = mockDevice
-          ..generator = residentCompiler;
+    flutterDevice = FakeFlutterDevice()
+      .._devFS = webDevFS
+      ..device = mockDevice
+      ..generator = residentCompiler;
     fileSystem.file('pubspec.yaml').writeAsStringSync('''
 name: my_app
 ''');
-    writePackageConfigFile(directory: fileSystem.currentDirectory, mainLibName: 'my_app');
+    writePackageConfigFiles(directory: fileSystem.currentDirectory, mainLibName: 'my_app');
     fakeAnalytics = getInitializedFakeAnalyticsInstance(
       fs: fileSystem,
       fakeFlutterVersion: test_fakes.FakeFlutterVersion(),
@@ -139,11 +144,13 @@ name: my_app
     debugConnection.fakeVmServiceHost = () => fakeVmServiceHost;
     webDevFS.result = ConnectionResult(appConnection, debugConnection, debugConnection.vmService);
     debugConnection.uri = 'ws://127.0.0.1/abcd/';
+    debugConnection.devToolsUri = 'http://127.0.0.1/abcd/';
+    debugConnection.dtdUri = 'ws://127.0.0.1/efgh/';
     chromeConnection.tabs.add(chromeTab);
   }
 
   testUsingContext(
-    'runner with web server device does not support debugging without --start-paused',
+    'runner with web server device supports debugging without --start-paused',
     () {
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice);
       flutterDevice.device = WebServerDevice(logger: BufferLogger.test());
@@ -161,7 +168,7 @@ name: my_app
         systemClock: globals.systemClock,
       );
 
-      expect(profileResidentWebRunner.debuggingEnabled, false);
+      expect(profileResidentWebRunner.debuggingEnabled, true);
 
       flutterDevice.device = chromeDevice;
 
@@ -243,32 +250,49 @@ name: my_app
   testUsingContext(
     'Can successfully run and connect to vmservice',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice, logger: logger);
       fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
       setupMocks();
 
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       final DebugConnectionInfo debugConnectionInfo = await connectionInfoCompleter.future;
 
       expect(appConnection.ranMain, true);
       expect(logger.statusText, contains('Debug service listening on ws://127.0.0.1/abcd/'));
       expect(debugConnectionInfo.wsUri.toString(), 'ws://127.0.0.1/abcd/');
+      expect(debugConnectionInfo.dtdUri.toString(), 'ws://127.0.0.1/efgh/');
     },
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
+    },
+  );
+
+  testUsingContext(
+    'Does not crash if the application exits during DDS startup',
+    () async {
+      // Regression test for https://github.com/flutter/flutter/issues/178151
+      final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice);
+      fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
+      setupMocks();
+      webDevFS.exception = DartDevelopmentServiceException.failedToStart();
+
+      await expectLater(residentWebRunner.run(), throwsToolExit());
+    },
+    overrides: <Type, Generator>{
+      FileSystem: () => fileSystem,
+      ProcessManager: () => processManager,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'WebRunner copies compiled app.dill to cache during startup',
     () async {
-      final DebuggingOptions debuggingOptions = DebuggingOptions.enabled(
+      final debuggingOptions = DebuggingOptions.enabled(
         const BuildInfo(
           BuildMode.debug,
           null,
@@ -284,21 +308,23 @@ name: my_app
       setupMocks();
 
       residentWebRunner.artifactDirectory.childFile('app.dill').writeAsStringSync('ABC');
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
 
-      expect(
-        await fileSystem.file(fileSystem.path.join('build', 'cache.dill')).readAsString(),
-        'ABC',
+      final String expectedPath = getDefaultCachedKernelPath(
+        trackWidgetCreation: false,
+        dartDefines: const <String>[],
+        config: globals.config,
+        fileSystem: fileSystem,
+        targetModel: TargetModel.dartdevc,
       );
+      expect(await fileSystem.file(expectedPath).readAsString(), 'ABC');
     },
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -310,23 +336,23 @@ name: my_app
       setupMocks();
 
       residentWebRunner.artifactDirectory.childFile('app.dill').writeAsStringSync('ABC');
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
 
-      expect(
-        await fileSystem
-            .file(fileSystem.path.join('build', 'cache.dill.track.dill'))
-            .readAsString(),
-        'ABC',
+      final String expectedPath = getDefaultCachedKernelPath(
+        trackWidgetCreation: true,
+        dartDefines: const <String>[],
+        config: globals.config,
+        fileSystem: fileSystem,
+        targetModel: TargetModel.dartdevc,
       );
+      expect(await fileSystem.file(expectedPath).readAsString(), 'ABC');
     },
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -347,19 +373,18 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Can successfully run without an index.html including status warning',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
       setupMocks();
       fileSystem.directory('web').deleteSync(recursive: true);
-      final ResidentWebRunner residentWebRunner = ResidentWebRunner(
+      final residentWebRunner = ResidentWebRunner(
         flutterDevice,
         flutterProject: FlutterProject.fromDirectoryTest(fileSystem.currentDirectory),
         debuggingOptions: DebuggingOptions.enabled(BuildInfo.debug),
@@ -371,7 +396,6 @@ name: my_app
         outputPreferences: OutputPreferences.test(),
         analytics: globals.analytics,
         systemClock: globals.systemClock,
-        devtoolsHandler: createNoOpHandler,
       );
 
       expect(await residentWebRunner.run(), 0);
@@ -380,8 +404,7 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -402,7 +425,6 @@ name: my_app
         outputPreferences: OutputPreferences.test(),
         analytics: globals.analytics,
         systemClock: globals.systemClock,
-        devtoolsHandler: createNoOpHandler,
       );
 
       expect(await residentWebRunner.run(), 0);
@@ -410,19 +432,18 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Detach keeps device running',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
       setupMocks();
       fileSystem.directory('web').deleteSync(recursive: true);
-      final ResidentWebRunner residentWebRunner = ResidentWebRunner(
+      final residentWebRunner = ResidentWebRunner(
         flutterDevice,
         flutterProject: FlutterProject.fromDirectoryTest(fileSystem.currentDirectory),
         debuggingOptions: DebuggingOptions.enabled(BuildInfo.debug),
@@ -433,14 +454,10 @@ name: my_app
         outputPreferences: OutputPreferences.test(),
         analytics: globals.analytics,
         systemClock: globals.systemClock,
-        devtoolsHandler: createNoOpHandler,
       );
 
-      mockDevice.dds = DartDevelopmentService(logger: logger);
-
       expect(mockDevice.isRunning, false);
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
       expect(mockDevice.isRunning, true);
@@ -453,19 +470,18 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Quit stops device',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
       setupMocks();
       fileSystem.directory('web').deleteSync(recursive: true);
-      final ResidentWebRunner residentWebRunner = ResidentWebRunner(
+      final residentWebRunner = ResidentWebRunner(
         flutterDevice,
         flutterProject: FlutterProject.fromDirectoryTest(fileSystem.currentDirectory),
         debuggingOptions: DebuggingOptions.enabled(BuildInfo.debug),
@@ -476,14 +492,10 @@ name: my_app
         outputPreferences: OutputPreferences.test(),
         analytics: globals.analytics,
         systemClock: globals.systemClock,
-        devtoolsHandler: createNoOpHandler,
       );
 
-      mockDevice.dds = DartDevelopmentService(logger: logger);
-
       expect(mockDevice.isRunning, false);
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
       expect(mockDevice.isRunning, true);
@@ -494,15 +506,14 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Listens to stdout and stderr streams before running main',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice, logger: logger);
       fakeVmServiceHost = FakeVmServiceHost(
         requests: <VmServiceExpectation>[
@@ -527,8 +538,7 @@ name: my_app
         ],
       );
       setupMocks();
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
 
@@ -538,8 +548,7 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -550,7 +559,7 @@ name: my_app
         flutterDevice,
         logger: testLogger,
       );
-      final List<VmServiceExpectation> requests = <VmServiceExpectation>[
+      final requests = <VmServiceExpectation>[
         ...kAttachExpectations,
         // This is the first error message of a session.
         FakeVmServiceStreamResponse(
@@ -649,8 +658,7 @@ name: my_app
       fakeVmServiceHost = FakeVmServiceHost(requests: requests.toList());
 
       setupMocks();
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
       assert(requests.length > 5, 'requests was modified');
@@ -664,6 +672,8 @@ name: my_app
         'Launching lib/main.dart on FakeDevice in debug mode...\n'
         'Waiting for connection from debug service on FakeDevice...\n'
         'Debug service listening on ws://127.0.0.1/abcd/\n'
+        'A Dart VM Service on FakeDevice is available at: http://127.0.0.1/abcd/\n'
+        'The Flutter DevTools debugger and profiler on FakeDevice is available at: http://127.0.0.1/abcd/\n'
         '\n'
         'first\n'
         '\n'
@@ -685,8 +695,40 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
+    },
+  );
+
+  testUsingContext(
+    'Outputs DTD URI when --print-dtd is provided',
+    () async {
+      // Regression test for https://github.com/flutter/flutter/issues/182052
+      final ResidentRunner residentWebRunner = setUpResidentRunner(
+        flutterDevice,
+        logger: testLogger,
+        debuggingOptions: DebuggingOptions.enabled(BuildInfo.debug, printDtd: true),
+      );
+      fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
+
+      setupMocks();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
+      unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
+      await connectionInfoCompleter.future;
+
+      expect(
+        testLogger.statusText,
+        'Launching lib/main.dart on FakeDevice in debug mode...\n'
+        'Waiting for connection from debug service on FakeDevice...\n'
+        'Debug service listening on ws://127.0.0.1/abcd/\n'
+        'A Dart VM Service on FakeDevice is available at: http://127.0.0.1/abcd/\n'
+        'The Dart Tooling Daemon is available at: ws://127.0.0.1/efgh/\n'
+        'The Flutter DevTools debugger and profiler on FakeDevice is available at: http://127.0.0.1/abcd/\n',
+      );
+    },
+    overrides: <Type, Generator>{
+      FileSystem: () => fileSystem,
+      ProcessManager: () => processManager,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -704,12 +746,10 @@ name: my_app
         outputPreferences: OutputPreferences.test(),
         analytics: globals.analytics,
         systemClock: globals.systemClock,
-        devtoolsHandler: createNoOpHandler,
       );
-      fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
+      fakeVmServiceHost = FakeVmServiceHost(requests: kStartPausedAndAttachExpectations.toList());
       setupMocks();
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
 
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
@@ -719,15 +759,14 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Can hot reload after attaching',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(
         flutterDevice,
         logger: logger,
@@ -739,7 +778,8 @@ name: my_app
             trackWidgetCreation: true,
             treeShakeIcons: false,
             packageConfigPath: '.dart_tool/package_config.json',
-            // Hot reload only supported with these flags for now.
+            // TODO(nshahan): Remove when hot reload can no longer be disabled.
+            webEnableHotReload: true,
             extraFrontEndOptions: kDdcLibraryBundleFlags,
           ),
         ),
@@ -747,9 +787,10 @@ name: my_app
       fakeVmServiceHost = FakeVmServiceHost(
         requests: <VmServiceExpectation>[
           ...kAttachExpectations,
+          FakeVmServiceRequest(method: 'getVM', jsonResponse: fakeVM.toJson()),
           const FakeVmServiceRequest(
             method: kReloadSourcesServiceName,
-            args: <String, Object>{'isolateId': ''},
+            args: <String, Object>{'isolateId': '1'},
             jsonResponse: <String, Object>{'type': 'ReloadReport', 'success': true},
           ),
           const FakeVmServiceRequest(
@@ -763,9 +804,9 @@ name: my_app
         ],
       );
       setupMocks();
-      final TestChromiumLauncher chromiumLauncher = TestChromiumLauncher();
-      final FakeProcess process = FakeProcess();
-      final Chromium chrome = Chromium(
+      final chromiumLauncher = TestChromiumLauncher();
+      final process = FakeProcess();
+      final chrome = Chromium(
         1,
         chromeConnection,
         chromiumLauncher: chromiumLauncher,
@@ -783,8 +824,7 @@ name: my_app
       );
       webDevFS.report = UpdateFSReport(success: true);
 
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       final DebugConnectionInfo debugConnectionInfo = await connectionInfoCompleter.future;
 
@@ -826,15 +866,14 @@ name: my_app
       Analytics: () => fakeAnalytics,
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
-    'Hot reload reject reports correct analytics',
+    'Can hot reload and evict dirty assets/shaders',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(
         flutterDevice,
         logger: logger,
@@ -846,24 +885,67 @@ name: my_app
             trackWidgetCreation: true,
             treeShakeIcons: false,
             packageConfigPath: '.dart_tool/package_config.json',
-            // Hot reload only supported with these flags for now.
+            webEnableHotReload: true,
             extraFrontEndOptions: kDdcLibraryBundleFlags,
           ),
         ),
       );
+
       fakeVmServiceHost = FakeVmServiceHost(
         requests: <VmServiceExpectation>[
           ...kAttachExpectations,
+          FakeVmServiceRequest(method: 'getVM', jsonResponse: fakeVM.toJson()),
           const FakeVmServiceRequest(
-            method: 'streamListen',
-            args: <String, Object>{'streamId': 'Isolate'},
+            method: kReloadSourcesServiceName,
+            args: <String, Object>{'isolateId': '1'},
+            jsonResponse: <String, Object>{'type': 'ReloadReport', 'success': true},
+          ),
+          const FakeVmServiceRequest(
+            method: '_flutter.listViews',
+            jsonResponse: <String, Object>{
+              'views': <Object>[
+                <String, Object>{
+                  'id': '1',
+                  'isolate': <String, Object>{'id': '1', 'name': 'isolate', 'number': '1'},
+                },
+              ],
+            },
+          ),
+          const FakeVmServiceRequest(
+            method: '_flutter.reloadAssetFonts',
+            args: <String, Object>{'isolateId': '1', 'viewId': '1'},
+            jsonResponse: <String, Object>{'type': 'Success'},
+          ),
+          const FakeVmServiceRequest(
+            method: 'ext.flutter.evict',
+            args: <String, Object>{'isolateId': '1', 'value': 'assets/foo.png'},
+            jsonResponse: <String, Object>{'type': 'Success'},
+          ),
+          // Note that shader paths are not evicted on the web yet.
+          // See https://github.com/flutter/flutter/issues/137265
+          // const FakeVmServiceRequest(
+          //   method: 'ext.ui.window.reinitializeShader',
+          //   args: <String, Object>{'isolateId': '1', 'assetKey': 'shaders/bar.frag'},
+          //   jsonResponse: <String, Object>{'type': 'Success'},
+          // ),
+          const FakeVmServiceRequest(
+            method: 'ext.flutter.reassemble',
+            jsonResponse: <String, Object>{'type': 'ReloadReport', 'success': true},
           ),
         ],
       );
       setupMocks();
-      final TestChromiumLauncher chromiumLauncher = TestChromiumLauncher();
-      final FakeProcess process = FakeProcess();
-      final Chromium chrome = Chromium(
+
+      // Populate dirty assets and shaders to evict.
+      webDevFS.assetPathsToEvict.add('assets/foo.png');
+      // Note that shader paths are not evicted on the web yet.
+      // See https://github.com/flutter/flutter/issues/137265
+      // webDevFS.shaderPathsToEvict.add('shaders/bar.frag');
+      webDevFS.didUpdateFontManifest = true;
+
+      final chromiumLauncher = TestChromiumLauncher();
+      final process = FakeProcess();
+      final chrome = Chromium(
         1,
         chromeConnection,
         chromiumLauncher: chromiumLauncher,
@@ -881,8 +963,84 @@ name: my_app
       );
       webDevFS.report = UpdateFSReport(success: true);
 
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
+      unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
+      final DebugConnectionInfo debugConnectionInfo = await connectionInfoCompleter.future;
+
+      expect(debugConnectionInfo, isNotNull);
+
+      final OperationResult result = await residentWebRunner.restart();
+
+      expect(logger.statusText, contains('Reloaded application in'));
+      expect(result.code, 0);
+      expect(webDevFS.mainUri.toString(), contains('entrypoint.dart'));
+
+      // Verifying the sets and trigger flags are successfully cleared after eviction
+      expect(webDevFS.assetPathsToEvict, isEmpty);
+      expect(webDevFS.shaderPathsToEvict, isEmpty);
+      expect(webDevFS.didUpdateFontManifest, false);
+
+      expect(fakeVmServiceHost.hasRemainingExpectations, false);
+    },
+    overrides: <Type, Generator>{
+      FileSystem: () => fileSystem,
+      ProcessManager: () => processManager,
+      Pub: ThrowingPub.new,
+    },
+  );
+
+  testUsingContext(
+    'Hot reload reject reports correct analytics',
+    () async {
+      final logger = BufferLogger.test();
+      final ResidentRunner residentWebRunner = setUpResidentRunner(
+        flutterDevice,
+        logger: logger,
+        systemClock: SystemClock.fixed(DateTime(2001)),
+        debuggingOptions: DebuggingOptions.enabled(
+          const BuildInfo(
+            BuildMode.debug,
+            null,
+            trackWidgetCreation: true,
+            treeShakeIcons: false,
+            packageConfigPath: '.dart_tool/package_config.json',
+            // TODO(nshahan): Remove when hot reload can no longer be disabled.
+            webEnableHotReload: true,
+            extraFrontEndOptions: kDdcLibraryBundleFlags,
+          ),
+        ),
+      );
+      fakeVmServiceHost = FakeVmServiceHost(
+        requests: <VmServiceExpectation>[
+          ...kAttachExpectations,
+          const FakeVmServiceRequest(
+            method: 'streamListen',
+            args: <String, Object>{'streamId': 'Isolate'},
+          ),
+        ],
+      );
+      setupMocks();
+      final chromiumLauncher = TestChromiumLauncher();
+      final process = FakeProcess();
+      final chrome = Chromium(
+        1,
+        chromeConnection,
+        chromiumLauncher: chromiumLauncher,
+        process: process,
+        logger: logger,
+      );
+      chromiumLauncher.setInstance(chrome);
+
+      flutterDevice.device = GoogleChromeDevice(
+        fileSystem: fileSystem,
+        chromiumLauncher: chromiumLauncher,
+        logger: BufferLogger.test(),
+        platform: FakePlatform(),
+        processManager: FakeProcessManager.any(),
+      );
+      webDevFS.report = UpdateFSReport(success: true);
+
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       final DebugConnectionInfo debugConnectionInfo = await connectionInfoCompleter.future;
 
@@ -911,8 +1069,7 @@ name: my_app
       Analytics: () => fakeAnalytics,
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -920,7 +1077,7 @@ name: my_app
   testUsingContext(
     'WASM builds report analysis without crashing',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(
         flutterDevice,
         logger: logger,
@@ -932,7 +1089,8 @@ name: my_app
             trackWidgetCreation: true,
             treeShakeIcons: false,
             packageConfigPath: '.dart_tool/package_config.json',
-            // Hot reload only supported with these flags for now.
+            // TODO(nshahan): Remove when hot reload can no longer be disabled.
+            webEnableHotReload: true,
             extraFrontEndOptions: kDdcLibraryBundleFlags,
           ),
           webUseWasm: true,
@@ -957,9 +1115,9 @@ name: my_app
         ],
       );
       setupMocks();
-      final TestChromiumLauncher chromiumLauncher = TestChromiumLauncher();
-      final FakeProcess process = FakeProcess();
-      final Chromium chrome = Chromium(
+      final chromiumLauncher = TestChromiumLauncher();
+      final process = FakeProcess();
+      final chrome = Chromium(
         1,
         chromeConnection,
         chromiumLauncher: chromiumLauncher,
@@ -977,8 +1135,7 @@ name: my_app
       );
       webDevFS.report = UpdateFSReport(success: true);
 
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       final DebugConnectionInfo debugConnectionInfo = await connectionInfoCompleter.future;
 
@@ -993,8 +1150,7 @@ name: my_app
       BuildSystem: () => TestBuildSystem.all(BuildResult(success: true)),
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -1002,15 +1158,16 @@ name: my_app
   // Test one extra config where `fullRestart` is false without the DDC library
   // bundle format - we should do a hot restart in this case because hot reload
   // is not available.
-  for (final (List<String> flags, bool fullRestart) in <(List<String>, bool)>[
-    (kDdcLibraryBundleFlags, true),
-    (<String>[], true),
-    (<String>[], false),
+  for (final (bool webEnableHotReload, bool fullRestart) in <(bool, bool)>[
+    (true, true),
+    (false, true),
+    (false, false),
   ]) {
     testUsingContext(
-      'Can hot restart after attaching with flags: $flags fullRestart: $fullRestart',
+      'Can hot restart after attaching with '
+      'webEnableHotReload: $webEnableHotReload fullRestart: $fullRestart',
       () async {
-        final BufferLogger logger = BufferLogger.test();
+        final logger = BufferLogger.test();
         final ResidentRunner residentWebRunner = setUpResidentRunner(
           flutterDevice,
           logger: logger,
@@ -1022,7 +1179,8 @@ name: my_app
               trackWidgetCreation: true,
               treeShakeIcons: false,
               packageConfigPath: '.dart_tool/package_config.json',
-              extraFrontEndOptions: flags,
+              extraFrontEndOptions: webEnableHotReload ? kDdcLibraryBundleFlags : const <String>[],
+              webEnableHotReload: webEnableHotReload,
             ),
           ),
         );
@@ -1036,9 +1194,9 @@ name: my_app
           ],
         );
         setupMocks();
-        final TestChromiumLauncher chromiumLauncher = TestChromiumLauncher();
-        final FakeProcess process = FakeProcess();
-        final Chromium chrome = Chromium(
+        final chromiumLauncher = TestChromiumLauncher();
+        final process = FakeProcess();
+        final chrome = Chromium(
           1,
           chromeConnection,
           chromiumLauncher: chromiumLauncher,
@@ -1056,8 +1214,7 @@ name: my_app
         );
         webDevFS.report = UpdateFSReport(success: true);
 
-        final Completer<DebugConnectionInfo> connectionInfoCompleter =
-            Completer<DebugConnectionInfo>();
+        final connectionInfoCompleter = Completer<DebugConnectionInfo>();
         unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
         await connectionInfoCompleter.future;
         final OperationResult result = await residentWebRunner.restart(fullRestart: fullRestart);
@@ -1106,8 +1263,7 @@ name: my_app
         Analytics: () => fakeAnalytics,
         FileSystem: () => fileSystem,
         ProcessManager: () => processManager,
-        FeatureFlags: enableExplicitPackageDependencies,
-        Pub: FakePubWithPrimedDeps.new,
+        Pub: ThrowingPub.new,
       },
     );
   }
@@ -1115,19 +1271,23 @@ name: my_app
   testUsingContext(
     'Can hot restart after attaching with web-server device',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(
         flutterDevice,
         logger: logger,
         systemClock: SystemClock.fixed(DateTime(2001)),
       );
-      fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations);
+      fakeVmServiceHost = FakeVmServiceHost(
+        requests: [
+          ...kAttachExpectations,
+          const FakeVmServiceRequest(method: 'hotRestart'),
+        ],
+      );
       setupMocks();
       flutterDevice.device = webServerDevice;
       webDevFS.report = UpdateFSReport(success: true);
 
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
       final OperationResult result = await residentWebRunner.restart(fullRestart: true);
@@ -1135,15 +1295,63 @@ name: my_app
       expect(logger.statusText, contains('Restarted application in'));
       expect(result.code, 0);
 
-      // web-server device does not send restart analytics
-      expect(fakeAnalytics.sentEvents, isEmpty);
+      expect(
+        fakeAnalytics.sentEvents,
+        contains(
+          Event.timing(
+            workflow: 'hot',
+            variableName: 'web-incremental-restart',
+            elapsedMilliseconds: 0,
+          ),
+        ),
+      );
     },
     overrides: <Type, Generator>{
       Analytics: () => fakeAnalytics,
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
+    },
+  );
+
+  testUsingContext(
+    'Does not fail hot restart when not attached',
+    () async {
+      final logger = BufferLogger.test();
+      final ResidentRunner residentWebRunner = setUpResidentRunner(
+        flutterDevice,
+        logger: logger,
+        systemClock: SystemClock.fixed(DateTime(2001)),
+      );
+      fakeVmServiceHost = FakeVmServiceHost(
+        requests: <VmServiceExpectation>[
+          ...kAttachExpectations,
+          const FakeVmServiceRequest(method: 'hotRestart'),
+        ],
+      );
+      flutterDevice.device = WebServerDevice(logger: logger);
+      webDevFS.report = UpdateFSReport(success: true);
+
+      final appStartedCompleter = Completer<void>();
+      unawaited(residentWebRunner.run(appStartedCompleter: appStartedCompleter));
+
+      await appStartedCompleter.future;
+
+      late final OperationResult result;
+
+      await expectReturnsNormallyLater(() async {
+        result = await residentWebRunner.restart(fullRestart: true);
+      }());
+
+      expect(result.code, 0);
+      expect(result.isOk, isTrue);
+      expect(logger.statusText, contains(kNoClientConnectedMessage));
+    },
+    overrides: <Type, Generator>{
+      Analytics: () => fakeAnalytics,
+      FileSystem: () => fileSystem,
+      ProcessManager: () => processManager,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -1162,6 +1370,39 @@ name: my_app
   );
 
   testUsingContext(
+    'ResidentWebRunner forwards platform args when starting a web app',
+    () async {
+      fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
+      setupMocks();
+      final ResidentRunner runner = ResidentWebRunner(
+        flutterDevice,
+        flutterProject: FlutterProject.fromDirectoryTest(fileSystem.currentDirectory),
+        debuggingOptions: DebuggingOptions.enabled(BuildInfo.debug),
+        platformArgs: <String, Object?>{'no-launch-chrome': true},
+        fileSystem: fileSystem,
+        logger: BufferLogger.test(),
+        terminal: Terminal.test(),
+        platform: FakePlatform(),
+        outputPreferences: OutputPreferences.test(),
+        analytics: globals.analytics,
+        systemClock: globals.systemClock,
+      );
+
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
+      unawaited(runner.run(connectionInfoCompleter: connectionInfoCompleter));
+      await connectionInfoCompleter.future;
+
+      expect(mockDevice.lastPlatformArgs, isNotNull);
+      expect(mockDevice.lastPlatformArgs!['no-launch-chrome'], true);
+      expect(mockDevice.lastPlatformArgs!['uri'], isNotNull);
+    },
+    overrides: <Type, Generator>{
+      FileSystem: () => fileSystem,
+      ProcessManager: () => processManager,
+    },
+  );
+
+  testUsingContext(
     'Exits when initial compile fails',
     () async {
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice);
@@ -1169,8 +1410,7 @@ name: my_app
       setupMocks();
       webDevFS.report = UpdateFSReport();
 
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
 
       expect(await residentWebRunner.run(), 1);
@@ -1180,15 +1420,14 @@ name: my_app
       Analytics: () => fakeAnalytics,
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Faithfully displays stdout messages with leading/trailing spaces',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice, logger: logger);
       fakeVmServiceHost = FakeVmServiceHost(
         requests: <VmServiceExpectation>[
@@ -1207,8 +1446,7 @@ name: my_app
         ],
       );
       setupMocks();
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
 
@@ -1221,8 +1459,7 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -1232,8 +1469,7 @@ name: my_app
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice);
       fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
       setupMocks();
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
       webDevFS.report = UpdateFSReport();
@@ -1248,13 +1484,13 @@ name: my_app
       Analytics: () => fakeAnalytics,
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
+  // TODO(nshahan): Delete this test case when hot reload can no longer be disabled.
   testUsingContext(
-    'Fails non-fatally on vmservice response error for hot restart',
+    'Fails non-fatally on vmservice response error for hot restart (legacy default case)',
     () async {
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice);
       fakeVmServiceHost = FakeVmServiceHost(
@@ -1267,11 +1503,12 @@ name: my_app
         ],
       );
       setupMocks();
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
 
+      // Historically the .restart() would perform a hot restart even without
+      // passing fullRestart: true.
       final OperationResult result = await residentWebRunner.restart();
 
       expect(result.code, 0);
@@ -1279,13 +1516,13 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
+  // TODO(nshahan): Delete this test case when hot reload can no longer be disabled.
   testUsingContext(
-    'Fails fatally on Vm Service error response',
+    'Fails fatally on Vm Service error response (legacy default case)',
     () async {
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice);
       fakeVmServiceHost = FakeVmServiceHost(
@@ -1299,8 +1536,7 @@ name: my_app
         ],
       );
       setupMocks();
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
       final OperationResult result = await residentWebRunner.restart();
@@ -1311,15 +1547,100 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
+  for (final webEnableHotReload in <bool>[true, false]) {
+    testUsingContext(
+      'Fails non-fatally on vmservice response error for hot restart with webEnableHotReload: $webEnableHotReload',
+      () async {
+        final ResidentRunner residentWebRunner = setUpResidentRunner(
+          flutterDevice,
+          debuggingOptions: DebuggingOptions.enabled(
+            BuildInfo(
+              BuildMode.debug,
+              null,
+              trackWidgetCreation: true,
+              treeShakeIcons: false,
+              packageConfigPath: '.dart_tool/package_config.json',
+              webEnableHotReload: webEnableHotReload,
+              extraFrontEndOptions: webEnableHotReload ? kDdcLibraryBundleFlags : <String>[],
+            ),
+          ),
+        );
+        fakeVmServiceHost = FakeVmServiceHost(
+          requests: <VmServiceExpectation>[
+            ...kAttachExpectations,
+            const FakeVmServiceRequest(
+              method: kHotRestartServiceName,
+              jsonResponse: <String, Object>{'type': 'Failed'},
+            ),
+          ],
+        );
+        setupMocks();
+        final connectionInfoCompleter = Completer<DebugConnectionInfo>();
+        unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
+        await connectionInfoCompleter.future;
+
+        final OperationResult result = await residentWebRunner.restart(fullRestart: true);
+
+        expect(result.code, 0);
+      },
+      overrides: <Type, Generator>{
+        FileSystem: () => fileSystem,
+        ProcessManager: () => processManager,
+        Pub: ThrowingPub.new,
+      },
+    );
+
+    testUsingContext(
+      'Fails fatally on Vm Service error response with webEnableHotReload: $webEnableHotReload',
+      () async {
+        final ResidentRunner residentWebRunner = setUpResidentRunner(
+          flutterDevice,
+          debuggingOptions: DebuggingOptions.enabled(
+            BuildInfo(
+              BuildMode.debug,
+              null,
+              trackWidgetCreation: true,
+              treeShakeIcons: false,
+              packageConfigPath: '.dart_tool/package_config.json',
+              webEnableHotReload: webEnableHotReload,
+              extraFrontEndOptions: webEnableHotReload ? kDdcLibraryBundleFlags : <String>[],
+            ),
+          ),
+        );
+        fakeVmServiceHost = FakeVmServiceHost(
+          requests: <VmServiceExpectation>[
+            ...kAttachExpectations,
+            FakeVmServiceRequest(
+              method: kHotRestartServiceName,
+              // Failed response,
+              error: FakeRPCError(code: vm_service.RPCErrorKind.kInternalError.code),
+            ),
+          ],
+        );
+        setupMocks();
+        final connectionInfoCompleter = Completer<DebugConnectionInfo>();
+        unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
+        await connectionInfoCompleter.future;
+        final OperationResult result = await residentWebRunner.restart(fullRestart: true);
+
+        expect(result.code, 1);
+        expect(result.message, contains(vm_service.RPCErrorKind.kInternalError.code.toString()));
+      },
+      overrides: <Type, Generator>{
+        FileSystem: () => fileSystem,
+        ProcessManager: () => processManager,
+        Pub: ThrowingPub.new,
+      },
+    );
+  }
   testUsingContext(
     'printHelp without details shows only hot restart help message',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice, logger: logger);
       fakeVmServiceHost = FakeVmServiceHost(requests: <VmServiceExpectation>[]);
       residentWebRunner.printHelp(details: false);
@@ -1337,7 +1658,7 @@ name: my_app
     'printHelp without details shows hot restart and hot reload help message '
     'if using DDC library bundle format',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(
         flutterDevice,
         logger: logger,
@@ -1348,7 +1669,8 @@ name: my_app
             trackWidgetCreation: true,
             treeShakeIcons: false,
             packageConfigPath: '.dart_tool/package_config.json',
-            // Hot reload only supported with these flags for now.
+            // TODO(nshahan): Remove when hot reload can no longer be disabled.
+            webEnableHotReload: true,
             extraFrontEndOptions: kDdcLibraryBundleFlags,
           ),
         ),
@@ -1369,13 +1691,11 @@ name: my_app
     'cleanup of resources is safe to call multiple times',
     () async {
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice);
-      mockDevice.dds = DartDevelopmentService(logger: test_fakes.FakeLogger());
       fakeVmServiceHost = FakeVmServiceHost(
         requests: <VmServiceExpectation>[...kAttachExpectations],
       );
       setupMocks();
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
 
@@ -1388,8 +1708,7 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -1401,8 +1720,7 @@ name: my_app
         requests: <VmServiceExpectation>[...kAttachExpectations],
       );
       setupMocks();
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       final Future<int?> result = residentWebRunner.run(
         connectionInfoCompleter: connectionInfoCompleter,
       );
@@ -1415,23 +1733,21 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Prints target and device name on run',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice, logger: logger);
       fakeVmServiceHost = FakeVmServiceHost(
         requests: <VmServiceExpectation>[...kAttachExpectations],
       );
       setupMocks();
       mockDevice.name = 'Chromez';
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
 
@@ -1447,23 +1763,22 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Sends launched app.webLaunchUrl event for Chrome device',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       fakeVmServiceHost = FakeVmServiceHost(
         requests: <VmServiceExpectation>[...kAttachLogExpectations, ...kAttachIsolateExpectations],
       );
       setupMocks();
-      final FakeChromeConnection chromeConnection = FakeChromeConnection();
-      final TestChromiumLauncher chromiumLauncher = TestChromiumLauncher();
-      final FakeProcess process = FakeProcess();
-      final Chromium chrome = Chromium(
+      final chromeConnection = FakeChromeConnection();
+      final chromiumLauncher = TestChromiumLauncher();
+      final process = FakeProcess();
+      final chrome = Chromium(
         1,
         chromeConnection,
         chromiumLauncher: chromiumLauncher,
@@ -1481,10 +1796,10 @@ name: my_app
       );
       webDevFS.baseUri = Uri.parse('http://localhost:8765/app/');
 
-      final FakeChromeTab chromeTab = FakeChromeTab('index.html');
+      final chromeTab = FakeChromeTab('index.html');
       chromeConnection.tabs.add(chromeTab);
 
-      final ResidentWebRunner runner = ResidentWebRunner(
+      final runner = ResidentWebRunner(
         flutterDevice,
         flutterProject: FlutterProject.fromDirectoryTest(fileSystem.currentDirectory),
         debuggingOptions: DebuggingOptions.enabled(BuildInfo.debug),
@@ -1495,11 +1810,9 @@ name: my_app
         outputPreferences: OutputPreferences.test(),
         analytics: globals.analytics,
         systemClock: globals.systemClock,
-        devtoolsHandler: createNoOpHandler,
       );
 
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(runner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
 
@@ -1518,21 +1831,20 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Sends unlaunched app.webLaunchUrl event for Web Server device',
     () async {
-      final BufferLogger logger = BufferLogger.test();
-      fakeVmServiceHost = FakeVmServiceHost(requests: <VmServiceExpectation>[]);
+      final logger = BufferLogger.test();
+      fakeVmServiceHost = FakeVmServiceHost(requests: kAttachExpectations.toList());
       setupMocks();
       flutterDevice.device = WebServerDevice(logger: logger);
       webDevFS.baseUri = Uri.parse('http://localhost:8765/app/');
 
-      final ResidentWebRunner runner = ResidentWebRunner(
+      final runner = ResidentWebRunner(
         flutterDevice,
         flutterProject: FlutterProject.fromDirectoryTest(fileSystem.currentDirectory),
         debuggingOptions: DebuggingOptions.enabled(BuildInfo.debug),
@@ -1543,11 +1855,9 @@ name: my_app
         outputPreferences: OutputPreferences.test(),
         analytics: globals.analytics,
         systemClock: globals.systemClock,
-        devtoolsHandler: createNoOpHandler,
       );
 
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(runner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
 
@@ -1566,8 +1876,7 @@ name: my_app
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -1588,7 +1897,6 @@ name: my_app
         outputPreferences: OutputPreferences.test(),
         analytics: globals.analytics,
         systemClock: globals.systemClock,
-        devtoolsHandler: createNoOpHandler,
       );
 
       // Create necessary files.
@@ -1608,12 +1916,14 @@ name: my_app
 flutter:
   generate: true
 ''');
-      writePackageConfigFile(
+      writePackageConfigFiles(
         directory: globals.fs.currentDirectory,
         mainLibName: 'my_app',
         packages: <String, String>{'path_provider_linux': '../../path_provider_linux'},
       );
-      expect(await residentWebRunner.run(), 0);
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
+      expect(await residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter), 0);
+      await connectionInfoCompleter.future;
       final File generatedLocalizationsFile = globals.fs
           .directory('lib')
           .childDirectory('l10n')
@@ -1625,8 +1935,7 @@ flutter:
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -1636,7 +1945,7 @@ flutter:
     'Does not generate dart_plugin_registrant.dart',
     () async {
       // Create necessary files for [DartPluginRegistrantTarget]
-      writePackageConfigFile(
+      writePackageConfigFiles(
         directory: globals.fs.currentDirectory,
         mainLibName: 'my_app',
         packages: <String, String>{'path_provider_linux': '../../path_provider_linux'},
@@ -1669,7 +1978,7 @@ flutter:
   testUsingContext(
     'Successfully turns WebSocketException into ToolExit',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice, logger: logger);
       fakeVmServiceHost = FakeVmServiceHost(requests: <VmServiceExpectation>[]);
       setupMocks();
@@ -1682,22 +1991,21 @@ flutter:
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Turns HttpException from ChromeTab::connect into ToolExit',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice, logger: logger);
       fakeVmServiceHost = FakeVmServiceHost(requests: <VmServiceExpectation>[]);
       setupMocks();
-      final FakeChromeConnection chromeConnection = FakeChromeConnection();
-      final TestChromiumLauncher chromiumLauncher = TestChromiumLauncher();
-      final FakeProcess process = FakeProcess();
-      final Chromium chrome = Chromium(
+      final chromeConnection = FakeChromeConnection();
+      final chromiumLauncher = TestChromiumLauncher();
+      final process = FakeProcess();
+      final chrome = Chromium(
         1,
         chromeConnection,
         chromiumLauncher: chromiumLauncher,
@@ -1715,7 +2023,7 @@ flutter:
       );
       webDevFS.baseUri = Uri.parse('http://localhost:8765/app/');
 
-      final FakeChromeTab chromeTab = FakeChromeTab(
+      final chromeTab = FakeChromeTab(
         'index.html',
         connectException: HttpException(
           'Connection closed before full header was received',
@@ -1736,8 +2044,7 @@ flutter:
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -1755,8 +2062,7 @@ flutter:
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -1775,8 +2081,7 @@ flutter:
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -1794,15 +2099,14 @@ flutter:
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'Rethrows unknown Error type from dwds tooling',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
       final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice, logger: logger);
       fakeVmServiceHost = FakeVmServiceHost(requests: <VmServiceExpectation>[]);
       setupMocks();
@@ -1814,17 +2118,48 @@ flutter:
     overrides: <Type, Generator>{
       FileSystem: () => fileSystem,
       ProcessManager: () => processManager,
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
+    },
+  );
+
+  testUsingContext(
+    'ResidentWebRunner throws ToolExit when DWDS debug connection times out',
+    () async {
+      final logger = BufferLogger.test();
+      final ResidentRunner residentWebRunner = setUpResidentRunner(flutterDevice, logger: logger);
+      fakeVmServiceHost = FakeVmServiceHost(requests: <VmServiceExpectation>[]);
+      setupMocks();
+      webDevFS.exception = TimeoutException('Connection timed out');
+
+      await expectLater(
+        residentWebRunner.run,
+        throwsToolExit(message: 'Failed to connect to the web debug service.'),
+      );
+      expect(
+        logger.errorText,
+        contains(
+          'Failed to establish connection with the web debug service: TimeoutException: Connection timed out',
+        ),
+      );
+    },
+    overrides: <Type, Generator>{
+      FileSystem: () => fileSystem,
+      ProcessManager: () => processManager,
+      Pub: ThrowingPub.new,
     },
   );
 
   testUsingContext(
     'throws when port is an integer outside the valid TCP range',
     () async {
-      final BufferLogger logger = BufferLogger.test();
+      final logger = BufferLogger.test();
+      const webDevServerConfig = WebDevServerConfig(port: 65536);
+      const webDevServerConfig2 = WebDevServerConfig(port: -1);
 
-      DebuggingOptions debuggingOptions = DebuggingOptions.enabled(BuildInfo.debug, port: '65536');
+      var debuggingOptions = DebuggingOptions.enabled(
+        BuildInfo.debug,
+        webDevServerConfig: webDevServerConfig,
+      );
       ResidentRunner residentWebRunner = setUpResidentRunner(
         flutterDevice,
         logger: logger,
@@ -1832,7 +2167,10 @@ flutter:
       );
       await expectToolExitLater(residentWebRunner.run(), matches('Invalid port: 65536.*'));
 
-      debuggingOptions = DebuggingOptions.enabled(BuildInfo.debug, port: '-1');
+      debuggingOptions = DebuggingOptions.enabled(
+        BuildInfo.debug,
+        webDevServerConfig: webDevServerConfig2,
+      );
       residentWebRunner = setUpResidentRunner(
         flutterDevice,
         logger: logger,
@@ -1845,6 +2183,117 @@ flutter:
       ProcessManager: () => processManager,
     },
   );
+
+  group('web-defines', () {
+    testUsingContext(
+      'passes web-defines to the build in profile mode',
+      () async {
+        fakeVmServiceHost = FakeVmServiceHost(requests: <VmServiceExpectation>[]);
+        setupMocks();
+        final residentWebRunner = ResidentWebRunner(
+          flutterDevice,
+          flutterProject: FlutterProject.fromDirectoryTest(fileSystem.currentDirectory),
+          debuggingOptions: DebuggingOptions.enabled(BuildInfo.profile),
+          stayResident: false,
+          fileSystem: fileSystem,
+          logger: BufferLogger.test(),
+          terminal: Terminal.test(),
+          platform: FakePlatform(),
+          outputPreferences: OutputPreferences.test(),
+          analytics: globals.analytics,
+          systemClock: globals.systemClock,
+          webDefines: const <String, String>{'VERSION': 'v1.2.3'},
+        );
+
+        expect(await residentWebRunner.run(), 0);
+      },
+      overrides: <Type, Generator>{
+        BuildSystem: () => TestBuildSystem.all(BuildResult(success: true), (
+          Target target,
+          Environment environment,
+        ) {
+          expect(environment.defines['webDefine:VERSION'], 'v1.2.3');
+        }),
+        FileSystem: () => fileSystem,
+        ProcessManager: () => processManager,
+        Pub: ThrowingPub.new,
+      },
+    );
+
+    testUsingContext(
+      'passes web-defines to the rebuild after a hot restart in release mode',
+      () async {
+        fakeVmServiceHost = FakeVmServiceHost(requests: <VmServiceExpectation>[]);
+        setupMocks();
+        final residentWebRunner = ResidentWebRunner(
+          flutterDevice,
+          flutterProject: FlutterProject.fromDirectoryTest(fileSystem.currentDirectory),
+          debuggingOptions: DebuggingOptions.enabled(BuildInfo.release),
+          fileSystem: fileSystem,
+          logger: BufferLogger.test(),
+          terminal: Terminal.test(),
+          platform: FakePlatform(),
+          outputPreferences: OutputPreferences.test(),
+          analytics: globals.analytics,
+          systemClock: globals.systemClock,
+          webDefines: const <String, String>{'VERSION': 'v1.2.3'},
+        );
+
+        final connectionInfoCompleter = Completer<DebugConnectionInfo>();
+        unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
+        await connectionInfoCompleter.future;
+
+        final OperationResult result = await residentWebRunner.restart();
+        expect(result.code, 0);
+      },
+      overrides: <Type, Generator>{
+        BuildSystem: () => TestBuildSystem.all(BuildResult(success: true), (
+          Target target,
+          Environment environment,
+        ) {
+          expect(environment.defines['webDefine:VERSION'], 'v1.2.3');
+        }),
+        FileSystem: () => fileSystem,
+        ProcessManager: () => processManager,
+        Pub: ThrowingPub.new,
+      },
+    );
+
+    testUsingContext(
+      'passes web-defines to the build in debug --wasm mode',
+      () async {
+        fakeVmServiceHost = FakeVmServiceHost(requests: <VmServiceExpectation>[]);
+        setupMocks();
+        final residentWebRunner = ResidentWebRunner(
+          flutterDevice,
+          flutterProject: FlutterProject.fromDirectoryTest(fileSystem.currentDirectory),
+          debuggingOptions: DebuggingOptions.enabled(BuildInfo.debug, webUseWasm: true),
+          stayResident: false,
+          fileSystem: fileSystem,
+          logger: BufferLogger.test(),
+          terminal: Terminal.test(),
+          platform: FakePlatform(),
+          outputPreferences: OutputPreferences.test(),
+          analytics: globals.analytics,
+          systemClock: globals.systemClock,
+          webDefines: const <String, String>{'VERSION': 'v1.2.3'},
+        );
+
+        expect(await residentWebRunner.run(), 0);
+      },
+      overrides: <Type, Generator>{
+        BuildSystem: () => TestBuildSystem.all(BuildResult(success: true), (
+          Target target,
+          Environment environment,
+        ) {
+          expect(environment.defines['webDefine:VERSION'], 'v1.2.3');
+        }),
+        FileSystem: () => fileSystem,
+        ProcessManager: () => processManager,
+        Pub: ThrowingPub.new,
+      },
+    );
+  });
 }
 
 ResidentRunner setUpResidentRunner(
@@ -1864,28 +2313,31 @@ ResidentRunner setUpResidentRunner(
     terminal: Terminal.test(),
     platform: FakePlatform(),
     outputPreferences: OutputPreferences.test(),
-    devtoolsHandler: createNoOpHandler,
   );
 }
 
 class FakeWebServerDevice extends FakeDevice implements WebServerDevice {}
 
-class FakeDevice extends Fake implements Device {
+class FakeDevice extends Fake implements WebDevice {
   @override
   String name = 'FakeDevice';
 
   @override
   String get displayName => name;
 
+  @override
+  Uri? devToolsUri;
+
   int count = 0;
 
   bool isRunning = false;
+  Map<String, dynamic>? lastPlatformArgs;
 
   @override
   Future<String> get sdkNameAndVersion async => 'SDK Name and Version';
 
   @override
-  late DartDevelopmentService dds;
+  final dds = DartDevelopmentService(logger: test_fakes.FakeLogger());
 
   @override
   bool get supportsHotRestart => true;
@@ -1902,6 +2354,7 @@ class FakeDevice extends Fake implements Device {
     String? userIdentifier,
   }) async {
     isRunning = true;
+    lastPlatformArgs = platformArgs;
     return LaunchResult.succeeded();
   }
 
@@ -1925,7 +2378,13 @@ class FakeDebugConnection extends Fake implements DebugConnection {
   @override
   late String uri;
 
-  final Completer<void> completer = Completer<void>();
+  @override
+  late String devToolsUri;
+
+  @override
+  late String dtdUri;
+
+  final completer = Completer<void>();
   bool didClose = false;
 
   @override
@@ -1946,7 +2405,10 @@ class FakeAppConnection extends Fake implements AppConnection {
   }
 }
 
-class FakeChromeDevice extends Fake implements ChromiumDevice {}
+class FakeChromeDevice extends FakeDevice implements ChromiumDevice {
+  @override
+  final ChromiumLauncher chromeLauncher = TestChromiumLauncher();
+}
 
 class FakeWipDebugger extends Fake implements WipDebugger {}
 
@@ -1985,6 +2447,8 @@ class FakeResidentCompiler extends Fake implements ResidentCompiler {
 
 class FakeWebDevFS extends Fake implements WebDevFS {
   Object? exception;
+
+  final resultCompleter = Completer<ConnectionResult?>();
   ConnectionResult? result;
   late UpdateFSReport report;
 
@@ -2001,6 +2465,18 @@ class FakeWebDevFS extends Fake implements WebDevFS {
 
   @override
   PackageConfig? lastPackageConfig = PackageConfig.empty;
+
+  @override
+  final Set<String> assetPathsToEvict = <String>{};
+
+  @override
+  final Set<String> shaderPathsToEvict = <String>{};
+
+  @override
+  bool didUpdateFontManifest = false;
+
+  @override
+  bool useDwdsWebSocketConnection = false;
 
   @override
   Future<Uri> create() async {
@@ -2040,12 +2516,16 @@ class FakeWebDevFS extends Fake implements WebDevFS {
       // ignore: only_throw_errors, exception is either Error or Exception here.
       throw exception!;
     }
-    return result;
+    // Automatically complete the future if a non-null result has been set.
+    if (result != null) {
+      resultCompleter.complete(result);
+    }
+    return resultCompleter.future;
   }
 }
 
 class FakeChromeConnection extends Fake implements ChromeConnection {
-  final List<ChromeTab> tabs = <ChromeTab>[];
+  final tabs = <ChromeTab>[];
 
   @override
   Future<ChromeTab> getTab(bool Function(ChromeTab tab) accept, {Duration? retryFor}) async {
@@ -2065,7 +2545,7 @@ class FakeChromeTab extends Fake implements ChromeTab {
   final String url;
 
   final Exception? _connectException;
-  final FakeWipConnection connection = FakeWipConnection();
+  final connection = FakeWipConnection();
 
   @override
   Future<WipConnection> connect({Function? onError}) async {
@@ -2090,7 +2570,7 @@ class FakeWipConnection extends Fake implements WipConnection {
 class TestChromiumLauncher implements ChromiumLauncher {
   TestChromiumLauncher();
 
-  bool _hasInstance = false;
+  var _hasInstance = false;
   void setInstance(Chromium chromium) {
     _hasInstance = true;
     currentCompleter.complete(chromium);
@@ -2139,6 +2619,9 @@ class FakeFlutterDevice extends Fake implements FlutterDevice {
   Exception? reportError;
 
   @override
+  TargetPlatform get targetPlatform => TargetPlatform.web_javascript;
+
+  @override
   ResidentCompiler? generator;
 
   @override
@@ -2183,7 +2666,6 @@ class FakeFlutterDevice extends Fake implements FlutterDevice {
     int? hostVmServicePort,
     bool? ipv6 = false,
     bool enableDevTools = false,
-    bool allowExistingDdsInstance = false,
   }) async {}
 
   @override
@@ -2209,6 +2691,9 @@ class FakeFlutterDevice extends Fake implements FlutterDevice {
 
   @override
   Future<void> updateReloadStatus(bool wasReloadSuccessful) async {}
+
+  @override
+  Future<void> handleHotRestart() async {}
 }
 
 class FakeShaderCompiler implements DevelopmentShaderCompiler {
@@ -2221,4 +2706,7 @@ class FakeShaderCompiler implements DevelopmentShaderCompiler {
   Future<DevFSContent> recompileShader(DevFSContent inputShader) {
     throw UnimplementedError();
   }
+
+  @override
+  bool areDependenciesModified(DevFSContent shaderContent) => false;
 }

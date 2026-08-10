@@ -4,6 +4,8 @@
 
 #include "vertices_contents.h"
 
+#include <format>
+
 #include "fml/logging.h"
 #include "impeller/base/validation.h"
 #include "impeller/core/formats.h"
@@ -144,8 +146,8 @@ bool VerticesSimpleBlendContents::Render(const ContentContext& renderer,
     using FS = PorterDuffBlendPipeline::FragmentShader;
 
 #ifdef IMPELLER_DEBUG
-    pass.SetCommandLabel(SPrintF("DrawVertices Porterduff Blend (%s)",
-                                 BlendModeToString(blend_mode)));
+    pass.SetCommandLabel(std::format("DrawVertices Porterduff Blend ({})",
+                                     BlendModeToString(blend_mode)));
 #endif  // IMPELLER_DEBUG
     pass.SetVertexBuffer(std::move(geometry_result.vertex_buffer));
 
@@ -161,17 +163,14 @@ bool VerticesSimpleBlendContents::Render(const ContentContext& renderer,
     VS::FrameInfo frame_info;
     FS::FragInfo frag_info;
 
-    frame_info.texture_sampler_y_coord_scale = texture->GetYCoordScale();
     frame_info.mvp = geometry_result.transform;
 
-    frag_info.output_alpha = alpha_;
-    frag_info.input_alpha = 1.0;
+    frag_info.input_alpha_output_alpha_tmx_tmy =
+        Vector4(1, alpha_, static_cast<int>(tile_mode_x_),
+                static_cast<int>(tile_mode_y_));
+    frag_info.use_strict_source_rect = 0.0;
 
-    // These values are ignored if the platform supports native decal mode.
-    frag_info.tmx = static_cast<int>(tile_mode_x_);
-    frag_info.tmy = static_cast<int>(tile_mode_y_);
-
-    auto& host_buffer = renderer.GetTransientsBuffer();
+    auto& host_buffer = renderer.GetTransientsDataBuffer();
     FS::BindFragInfo(pass, host_buffer.EmplaceUniform(frag_info));
     VS::BindFrameInfo(pass, host_buffer.EmplaceUniform(frame_info));
 
@@ -182,8 +181,8 @@ bool VerticesSimpleBlendContents::Render(const ContentContext& renderer,
   using FS = VerticesUber1Shader::FragmentShader;
 
 #ifdef IMPELLER_DEBUG
-  pass.SetCommandLabel(SPrintF("DrawVertices Advanced Blend (%s)",
-                               BlendModeToString(blend_mode)));
+  pass.SetCommandLabel(std::format("DrawVertices Advanced Blend ({})",
+                                   BlendModeToString(blend_mode)));
 #endif  // IMPELLER_DEBUG
   pass.SetVertexBuffer(std::move(geometry_result.vertex_buffer));
 
@@ -196,7 +195,6 @@ bool VerticesSimpleBlendContents::Render(const ContentContext& renderer,
   VS::FrameInfo frame_info;
   FS::FragInfo frag_info;
 
-  frame_info.texture_sampler_y_coord_scale = texture->GetYCoordScale();
   frame_info.mvp = geometry_result.transform;
   frag_info.alpha = alpha_;
   frag_info.blend_mode = static_cast<int>(blend_mode);
@@ -205,7 +203,7 @@ bool VerticesSimpleBlendContents::Render(const ContentContext& renderer,
   frag_info.tmx = static_cast<int>(tile_mode_x_);
   frag_info.tmy = static_cast<int>(tile_mode_y_);
 
-  auto& host_buffer = renderer.GetTransientsBuffer();
+  auto& host_buffer = renderer.GetTransientsDataBuffer();
   FS::BindFragInfo(pass, host_buffer.EmplaceUniform(frag_info));
   VS::BindFrameInfo(pass, host_buffer.EmplaceUniform(frame_info));
 

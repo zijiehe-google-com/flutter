@@ -38,11 +38,11 @@ class TestTimeRecorder {
   }
 
   @visibleForTesting
-  Stopwatch getPhaseWallClockStopwatchForTesting(final TestTimePhases phase) {
+  Stopwatch getPhaseWallClockStopwatchForTesting(TestTimePhases phase) {
     return _phaseRecords[phase.index]._wallClockRuntime;
   }
 
-  String _getPrintStringForPhase(final TestTimePhases phase) {
+  String _getPrintStringForPhase(TestTimePhases phase) {
     assert(_phaseRecords[phase.index].isDone());
     return 'Runtime for phase ${phase.name}: ${_phaseRecords[phase.index]}';
   }
@@ -55,7 +55,7 @@ class TestTimeRecord {
   final StopwatchFactory stopwatchFactory;
   Duration _combinedRuntime = Duration.zero;
   final Stopwatch _wallClockRuntime;
-  int _currentlyRunningCount = 0;
+  var _currentlyRunningCount = 0;
 
   Stopwatch start() {
     final Stopwatch stopwatch = stopwatchFactory.createStopwatch()..start();

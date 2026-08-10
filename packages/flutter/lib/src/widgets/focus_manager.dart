@@ -4,6 +4,8 @@
 
 /// @docImport 'package:flutter/material.dart';
 /// @docImport 'package:flutter/rendering.dart';
+///
+/// @docImport 'debug.dart';
 library;
 
 import 'dart:async';
@@ -26,6 +28,12 @@ import 'framework.dart';
 /// Can be used to debug focus issues: each time the focus changes, the focus
 /// tree will be printed and requests for focus and other focus operations will
 /// be logged.
+///
+/// This has no effect in release builds.
+///
+/// See also:
+///
+/// * [debugPaintFocusBoxes], which draws boxes around focus nodes.
 bool debugFocusChanges = false;
 
 // When using _focusDebug, always call it like so:
@@ -52,7 +60,7 @@ bool _focusDebug(String Function() messageFunc, [Iterable<Object> Function()? de
   debugPrint('FOCUS: ${messageFunc()}');
   final Iterable<Object> details = detailsFunc?.call() ?? const <Object>[];
   if (details.isNotEmpty) {
-    for (final Object detail in details) {
+    for (final detail in details) {
       debugPrint('    $detail');
     }
   }
@@ -88,8 +96,8 @@ enum KeyEventResult {
 /// handlers without preventing the platform to handle; otherwise the node is
 /// ignored.
 KeyEventResult combineKeyEventResults(Iterable<KeyEventResult> results) {
-  bool hasSkipRemainingHandlers = false;
-  for (final KeyEventResult result in results) {
+  var hasSkipRemainingHandlers = false;
+  for (final result in results) {
     switch (result) {
       case KeyEventResult.handled:
         return KeyEventResult.handled;
@@ -706,7 +714,7 @@ class FocusNode with DiagnosticableTreeMixin, ChangeNotifier {
   /// depth-first order.
   Iterable<FocusNode> get descendants {
     if (_descendants == null) {
-      final List<FocusNode> result = <FocusNode>[];
+      final result = <FocusNode>[];
       for (final FocusNode child in _children) {
         result.addAll(child.descendants);
         result.add(child);
@@ -732,7 +740,7 @@ class FocusNode with DiagnosticableTreeMixin, ChangeNotifier {
   /// [FocusScopeNode] ([FocusManager.rootScope]).
   Iterable<FocusNode> get ancestors {
     if (_ancestors == null) {
-      final List<FocusNode> result = <FocusNode>[];
+      final result = <FocusNode>[];
       FocusNode? parent = _parent;
       while (parent != null) {
         result.add(parent);
@@ -1214,7 +1222,7 @@ class FocusNode with DiagnosticableTreeMixin, ChangeNotifier {
   /// track of previously focused children in that scope, so that if the focused
   /// child in that scope is removed, the previous focus returns.
   void _setAsFocusedChildForScope() {
-    FocusNode scopeFocus = this;
+    var scopeFocus = this;
     for (final FocusScopeNode ancestor in ancestors.whereType<FocusScopeNode>()) {
       assert(scopeFocus != ancestor, 'Somehow made a loop by setting focusedChild to its scope.');
       assert(
@@ -1299,7 +1307,7 @@ class FocusNode with DiagnosticableTreeMixin, ChangeNotifier {
 
   @override
   List<DiagnosticsNode> debugDescribeChildren() {
-    int count = 1;
+    var count = 1;
     return _children.map<DiagnosticsNode>((FocusNode child) {
       return child.toDiagnosticsNode(name: 'Child ${count++}');
     }).toList();
@@ -1308,7 +1316,7 @@ class FocusNode with DiagnosticableTreeMixin, ChangeNotifier {
   @override
   String toStringShort() {
     final bool hasDebugLabel = debugLabel != null && debugLabel!.isNotEmpty;
-    final String extraData =
+    final extraData =
         '${hasDebugLabel ? debugLabel : ''}'
         '${hasFocus && hasDebugLabel ? ' ' : ''}'
         '${hasFocus && !hasPrimaryFocus ? '[IN FOCUS PATH]' : ''}'
@@ -1521,10 +1529,9 @@ class FocusScopeNode extends FocusNode {
     if (_focusedChildren.isEmpty) {
       return;
     }
-    final List<String> childList =
-        _focusedChildren.reversed.map<String>((FocusNode child) {
-          return child.toStringShort();
-        }).toList();
+    final List<String> childList = _focusedChildren.reversed.map<String>((FocusNode child) {
+      return child.toStringShort();
+    }).toList();
     properties.add(
       IterableProperty<String>(
         'focusedChildren',
@@ -1864,9 +1871,17 @@ class FocusManager with DiagnosticableTreeMixin, ChangeNotifier {
         assert(_focusDebug(() => 'focus changed while app was paused, ignoring $_suspendedNode'));
         _suspendedNode = null;
       } else if (_suspendedNode != null) {
-        assert(_focusDebug(() => 'requesting focus for $_suspendedNode'));
-        _suspendedNode!.requestFocus();
-        _suspendedNode = null;
+        // Only restore the focus that was suspended when the app went inactive
+        // if nothing else has requested focus in the meantime. For example,
+        // activating a different window will cause its view to request focus.
+        if (_markedForFocus == null) {
+          assert(_focusDebug(() => 'requesting focus for $_suspendedNode'));
+          _suspendedNode!.requestFocus();
+          _suspendedNode = null;
+        } else {
+          assert(_haveScheduledUpdate);
+          _suspendedNode = null;
+        }
       }
     } else if (_primaryFocus != rootScope) {
       assert(_focusDebug(() => 'suspending $_primaryFocus'));
@@ -2046,7 +2061,7 @@ class FocusManager with DiagnosticableTreeMixin, ChangeNotifier {
     properties.add(
       DiagnosticsProperty<FocusNode>('nextFocus', _markedForFocus, defaultValue: null),
     );
-    final Element? element = primaryFocus?.context as Element?;
+    final element = primaryFocus?.context as Element?;
     if (element != null) {
       properties.add(
         DiagnosticsProperty<String>('primaryFocusCreator', element.debugGetCreatorChain(20)),
@@ -2142,9 +2157,8 @@ class _HighlightModeManager {
     if (_listeners.isEmpty) {
       return;
     }
-    final List<ValueChanged<FocusHighlightMode>> localListeners =
-        List<ValueChanged<FocusHighlightMode>>.of(_listeners);
-    for (final ValueChanged<FocusHighlightMode> listener in localListeners) {
+    final localListeners = List<ValueChanged<FocusHighlightMode>>.of(_listeners);
+    for (final listener in localListeners) {
       try {
         if (_listeners.contains(listener)) {
           listener(highlightMode);
@@ -2152,14 +2166,13 @@ class _HighlightModeManager {
       } catch (exception, stack) {
         InformationCollector? collector;
         assert(() {
-          collector =
-              () => <DiagnosticsNode>[
-                DiagnosticsProperty<_HighlightModeManager>(
-                  'The $runtimeType sending notification was',
-                  this,
-                  style: DiagnosticsTreeStyle.errorProperty,
-                ),
-              ];
+          collector = () => <DiagnosticsNode>[
+            DiagnosticsProperty<_HighlightModeManager>(
+              'The $runtimeType sending notification was',
+              this,
+              style: DiagnosticsTreeStyle.errorProperty,
+            ),
+          ];
           return true;
         }());
         FlutterError.reportError(
@@ -2190,13 +2203,38 @@ class _HighlightModeManager {
     }
   }
 
+  static const int _kAndroidSoftKeyboardFlag = 0x00000002; // KeyEvent.FLAG_SOFT_KEYBOARD
+  static const int _kAndroidVirtualKeyboardDeviceId = -1; // KeyCharacterMap.VIRTUAL_KEYBOARD
+
+  bool _isKeyMessageFromAndroidIME(KeyMessage message) {
+    final RawKeyEvent? rawEvent = message.rawEvent;
+    if (rawEvent == null) {
+      return false;
+    }
+    final RawKeyEventData data = rawEvent.data;
+    if (data is! RawKeyEventDataAndroid) {
+      return false;
+    }
+    return (data.flags & _kAndroidSoftKeyboardFlag) != 0 ||
+        data.deviceId == _kAndroidVirtualKeyboardDeviceId;
+  }
+
   bool handleKeyMessage(KeyMessage message) {
+    // Update highlightMode first, since things responding to the keys might
+    // look at the highlight mode, and it should be accurate.
     // ignore: use_if_null_to_convert_nulls_to_bools
     if (_lastInteractionRequiresTraditionalHighlights != false) {
-      // Update highlightMode first, since things responding to the keys might
-      // look at the highlight mode, and it should be accurate.
-      _lastInteractionRequiresTraditionalHighlights = false;
-      updateMode();
+      // Android sends raw key events for "Backspace" key events from virtual
+      // keyboards. These shouldn't switch the highlight mode to traditional.
+      // See: https://github.com/flutter/flutter/issues/180746
+      // TODO(team-text-input): Remove this virtual keyboard check when we
+      // migrate to HardwareKeyboard:
+      // https://github.com/flutter/flutter/issues/136419
+      final bool isFromVirtualKeyboard = _isKeyMessageFromAndroidIME(message);
+      if (!isFromVirtualKeyboard) {
+        _lastInteractionRequiresTraditionalHighlights = false;
+        updateMode();
+      }
     }
 
     assert(_focusDebug(() => 'Received key event $message'));
@@ -2205,11 +2243,11 @@ class _HighlightModeManager {
       return false;
     }
 
-    bool handled = false;
+    var handled = false;
     // Check to see if any of the early handlers handle the key. If so, then
     // return early.
     if (_earlyKeyEventHandlers.isNotEmpty) {
-      final List<KeyEventResult> results = <KeyEventResult>[
+      final results = <KeyEventResult>[
         // Make a copy to prevent problems if the list is modified during iteration.
         for (final OnKeyEventCallback callback in _earlyKeyEventHandlers.toList())
           for (final KeyEvent event in message.events) callback(event),
@@ -2237,11 +2275,11 @@ class _HighlightModeManager {
     // Walk the current focus from the leaf to the root, calling each node's
     // onKeyEvent on the way up, and if one responds that they handled it or
     // want to stop propagation, stop.
-    for (final FocusNode node in <FocusNode>[
+    for (final node in <FocusNode>[
       FocusManager.instance.primaryFocus!,
       ...FocusManager.instance.primaryFocus!.ancestors,
     ]) {
-      final List<KeyEventResult> results = <KeyEventResult>[
+      final results = <KeyEventResult>[
         if (node.onKeyEvent != null)
           for (final KeyEvent event in message.events) node.onKeyEvent!(node, event),
         if (node.onKey != null && message.rawEvent != null) node.onKey!(node, message.rawEvent!),
@@ -2265,7 +2303,7 @@ class _HighlightModeManager {
 
     // Check to see if any late key event handlers want to handle the event.
     if (!handled && _lateKeyEventHandlers.isNotEmpty) {
-      final List<KeyEventResult> results = <KeyEventResult>[
+      final results = <KeyEventResult>[
         // Make a copy to prevent problems if the list is modified during iteration.
         for (final OnKeyEventCallback callback in _lateKeyEventHandlers.toList())
           for (final KeyEvent event in message.events) callback(event),

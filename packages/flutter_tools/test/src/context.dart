@@ -34,7 +34,6 @@ import 'package:flutter_tools/src/isolated/mustache_template.dart';
 import 'package:flutter_tools/src/persistent_tool_state.dart';
 import 'package:flutter_tools/src/project.dart';
 import 'package:flutter_tools/src/reporting/crash_reporting.dart';
-import 'package:flutter_tools/src/reporting/reporting.dart';
 import 'package:flutter_tools/src/version.dart';
 import 'package:meta/meta.dart';
 import 'package:test/fake.dart';
@@ -114,7 +113,6 @@ void testUsingContext(
               Logger: () => BufferLogger.test(),
               OperatingSystemUtils: () => FakeOperatingSystemUtils(),
               PersistentToolState: () => buildPersistentToolState(globals.fs),
-              Usage: () => TestUsage(),
               XcodeProjectInterpreter: () => FakeXcodeProjectInterpreter(),
               FileSystem: () => LocalFileSystemBlockingSetCurrentDirectory(),
               PlistParser: () => FakePlistParser(),
@@ -133,7 +131,7 @@ void testUsingContext(
               // the zone from outside the zone. Instead, we create a Completer outside the zone,
               // and have the test complete it when the test ends (in success or failure), and we
               // await that.
-              final Completer<void> completer = Completer<void>();
+              final completer = Completer<void>();
               runZonedGuarded<Future<dynamic>>(
                 () async {
                   try {
@@ -198,7 +196,7 @@ void testUsingContext(
 
 void _printBufferedErrors(AppContext testContext) {
   if (testContext.get<Logger>() is BufferLogger) {
-    final BufferLogger bufferLogger = testContext.get<Logger>()! as BufferLogger;
+    final bufferLogger = testContext.get<Logger>()! as BufferLogger;
     if (bufferLogger.errorText.isNotEmpty) {
       // This is where the logger outputting errors is implemented, so it has
       // to use `print`.
@@ -221,6 +219,9 @@ class FakeDeviceManager implements DeviceManager {
     }
     return _specifiedDeviceId;
   }
+
+  @override
+  void stopExtendedWirelessDeviceDiscoverers() {}
 
   @override
   set specifiedDeviceId(String? id) {
@@ -354,17 +355,17 @@ class FakeXcodeProjectInterpreter implements XcodeProjectInterpreter {
   bool get isInstalled => true;
 
   @override
-  String get versionText => 'Xcode 14';
+  String get versionText => 'Xcode 15';
 
   @override
-  Version get version => Version(14, null, null);
+  Version get version => Version(15, 0, 0);
 
   @override
-  String get build => '14A309';
+  String get build => '15A240D';
 
   @override
   Future<Map<String, String>> getBuildSettings(
-    String projectPath, {
+    XcodeBasedProject xcodeProject, {
     XcodeProjectBuildContext? buildContext,
     Duration timeout = const Duration(minutes: 1),
   }) async {
@@ -380,10 +381,20 @@ class FakeXcodeProjectInterpreter implements XcodeProjectInterpreter {
   }
 
   @override
-  Future<void> cleanWorkspace(String workspacePath, String scheme, {bool verbose = false}) async {}
+  Future<void> cleanWorkspace(
+    XcodeBasedProject xcodeProject,
+    String workspacePath,
+    String scheme, {
+    required Directory buildDirectory,
+    bool verbose = false,
+  }) async {}
 
   @override
-  Future<XcodeProjectInfo> getInfo(String projectPath, {String? projectFilename}) async {
+  Future<XcodeProjectInfo> getInfo(
+    XcodeBasedProject xcodeProject, {
+    String? projectFilename,
+    required Directory buildDirectory,
+  }) async {
     return XcodeProjectInfo(<String>['Runner'], <String>['Debug', 'Release'], <String>[
       'Runner',
     ], BufferLogger.test());
@@ -391,6 +402,26 @@ class FakeXcodeProjectInterpreter implements XcodeProjectInterpreter {
 
   @override
   List<String> xcrunCommand() => <String>['xcrun'];
+
+  @override
+  Future<void> prefetchSwiftPackagesForProject(
+    XcodeBasedProject xcodeProject, {
+    required Directory buildDirectory,
+  }) async {}
+
+  @override
+  Future<List<String>> fetchDependenciesAndGenerateXcodebuildArgs(
+    XcodeBasedProject xcodeProject,
+    Directory buildDirectory, {
+    bool skipPackageUpdatesAndValidation = true,
+  }) async {
+    return <String>['xcrun', 'xcodebuild'];
+  }
+
+  @override
+  String swiftPackageCachePath(Directory buildDirectory) {
+    return '';
+  }
 }
 
 /// Prevent test crashes from being reported to the crash backend.

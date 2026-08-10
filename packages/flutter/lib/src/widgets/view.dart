@@ -160,7 +160,7 @@ class View extends StatefulWidget {
       if (result == null) {
         final bool hiddenByBoundary =
             LookupBoundary.debugIsHidingAncestorWidgetOfExactType<_ViewScope>(context);
-        final List<DiagnosticsNode> information = <DiagnosticsNode>[
+        final information = <DiagnosticsNode>[
           if (hiddenByBoundary) ...<DiagnosticsNode>[
             ErrorSummary(
               'View.of() was called with a context that does not have access to a View widget.',
@@ -276,6 +276,13 @@ class _ViewState extends State<View> with WidgetsBindingObserver {
         view: widget.view,
         child: FocusTraversalGroup(
           policy: _policy,
+          // Attach this view's focus subtree directly to the root scope rather
+          // than nesting it under an enclosing view's scope (which happens when
+          // a view is rendered inside another via a [ViewAnchor]). Each view is
+          // an independent focus root: nesting would otherwise make an ancestor
+          // view report hasFocus when a descendant view is focused, causing it
+          // to request native focus and pull its window forward.
+          parentNode: FocusManager.instance.rootScope,
           child: FocusScope.withExternalFocusNode(
             includeSemantics: false,
             focusScopeNode: _scopeNode,
@@ -480,15 +487,14 @@ class _RawViewElement extends RenderTreeRootElement {
       final Widget child = (widget as _RawViewInternal).builder(this, _effectivePipelineOwner);
       _child = updateChild(_child, child, null);
     } catch (e, stack) {
-      final FlutterErrorDetails details = FlutterErrorDetails(
+      final details = FlutterErrorDetails(
         exception: e,
         stack: stack,
         library: 'widgets library',
         context: ErrorDescription('building $this'),
-        informationCollector:
-            !kDebugMode
-                ? null
-                : () => <DiagnosticsNode>[DiagnosticsDebugCreator(DebugCreator(this))],
+        informationCollector: !kDebugMode
+            ? null
+            : () => <DiagnosticsNode>[DiagnosticsDebugCreator(DebugCreator(this))],
       );
       FlutterError.reportError(details);
       final Widget error = ErrorWidget.builder(details);
@@ -737,7 +743,7 @@ class _MultiChildComponentElement extends Element {
   Element? _childElement;
 
   bool _debugAssertChildren() {
-    final _MultiChildComponentWidget typedWidget = widget as _MultiChildComponentWidget;
+    final typedWidget = widget as _MultiChildComponentWidget;
     // Each view widget must have a corresponding element.
     assert(_viewElements.length == typedWidget._views.length);
     // Iff there is a child widget, it must have a corresponding element.
@@ -774,8 +780,8 @@ class _MultiChildComponentElement extends Element {
     if (!kDebugMode || (widget as _MultiChildComponentWidget)._child != null) {
       return true;
     }
-    bool hasAncestorRenderObjectElement = false;
-    bool ancestorWantsRenderObject = true;
+    var hasAncestorRenderObjectElement = false;
+    var ancestorWantsRenderObject = true;
     visitAncestorElements((Element ancestor) {
       if (!ancestor.debugExpectsRenderObjectForSlot(slot)) {
         ancestorWantsRenderObject = false;
@@ -830,7 +836,7 @@ class _MultiChildComponentElement extends Element {
 
   @override
   void performRebuild() {
-    final _MultiChildComponentWidget typedWidget = widget as _MultiChildComponentWidget;
+    final typedWidget = widget as _MultiChildComponentWidget;
 
     _childElement = updateChild(_childElement, typedWidget._child, slot);
 
@@ -880,7 +886,7 @@ class _MultiChildComponentElement extends Element {
   @override
   List<DiagnosticsNode> debugDescribeChildren() {
     return <DiagnosticsNode>[
-      if (_childElement != null) _childElement!.toDiagnosticsNode(),
+      ?_childElement?.toDiagnosticsNode(),
       for (int i = 0; i < _viewElements.length; i++)
         _viewElements[i].toDiagnosticsNode(
           name: 'view ${i + 1}',

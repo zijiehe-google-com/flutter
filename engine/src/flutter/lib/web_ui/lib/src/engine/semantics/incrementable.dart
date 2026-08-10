@@ -72,6 +72,14 @@ class SemanticIncrementable extends SemanticRole {
   }
 
   @override
+  bool get acceptsPointerEvents {
+    return switch (semanticsObject.hitTestBehavior) {
+      ui.SemanticsHitTestBehavior.transparent => false,
+      _ => true,
+    };
+  }
+
+  @override
   bool focusAsRouteDefault() {
     _element.focusWithoutScroll();
     return true;
@@ -115,10 +123,16 @@ class SemanticIncrementable extends SemanticRole {
     switch (EngineSemantics.instance.gestureMode) {
       case GestureMode.browserGestures:
         _enableBrowserGestureHandling();
-        _updateInputValues();
       case GestureMode.pointerEvents:
         _disableBrowserGestureHandling();
     }
+    // Always sync the input element's value attributes, even while the input
+    // is disabled in pointer-events mode. Otherwise, when semantics is first
+    // enabled by a pointer interaction (e.g. clicking the "Enable
+    // Accessibility" placeholder), the slider's initial update arrives while
+    // the gesture mode is `pointerEvents`.
+    // See https://github.com/flutter/flutter/issues/186472.
+    _updateInputValues();
     _focusManager.changeFocus(semanticsObject.hasFocus);
   }
 
@@ -131,8 +145,6 @@ class SemanticIncrementable extends SemanticRole {
   }
 
   void _updateInputValues() {
-    assert(EngineSemantics.instance.gestureMode == GestureMode.browserGestures);
-
     final bool updateNeeded =
         _pendingResync ||
         semanticsObject.isValueDirty ||
@@ -145,20 +157,22 @@ class SemanticIncrementable extends SemanticRole {
 
     _pendingResync = false;
 
-    final String surrogateTextValue = '$_currentSurrogateValue';
+    final surrogateTextValue = '$_currentSurrogateValue';
     _element.value = surrogateTextValue;
     _element.setAttribute('aria-valuenow', surrogateTextValue);
     _element.setAttribute('aria-valuetext', semanticsObject.value!);
 
     final bool canIncrease = semanticsObject.increasedValue!.isNotEmpty;
-    final String surrogateMaxTextValue =
-        canIncrease ? '${_currentSurrogateValue + 1}' : surrogateTextValue;
+    final surrogateMaxTextValue = canIncrease
+        ? '${_currentSurrogateValue + 1}'
+        : surrogateTextValue;
     _element.max = surrogateMaxTextValue;
     _element.setAttribute('aria-valuemax', surrogateMaxTextValue);
 
     final bool canDecrease = semanticsObject.decreasedValue!.isNotEmpty;
-    final String surrogateMinTextValue =
-        canDecrease ? '${_currentSurrogateValue - 1}' : surrogateTextValue;
+    final surrogateMinTextValue = canDecrease
+        ? '${_currentSurrogateValue - 1}'
+        : surrogateTextValue;
     _element.min = surrogateMinTextValue;
     _element.setAttribute('aria-valuemin', surrogateMinTextValue);
   }

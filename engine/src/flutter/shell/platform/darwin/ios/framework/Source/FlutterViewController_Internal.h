@@ -7,7 +7,6 @@
 
 #import "flutter/shell/platform/darwin/ios/framework/Headers/FlutterViewController.h"
 
-#include "flutter/fml/time/time_point.h"
 #import "flutter/shell/platform/darwin/ios/InternalFlutterSwift/InternalFlutterSwift.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/FlutterKeySecondaryResponder.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/FlutterKeyboardManager.h"
@@ -32,22 +31,13 @@ FLUTTER_DARWIN_EXPORT
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern NSNotificationName const FlutterViewControllerShowHomeIndicator;
 
-typedef NS_ENUM(NSInteger, FlutterKeyboardMode) {
-  // NOLINTBEGIN(readability-identifier-naming)
-  FlutterKeyboardModeHidden = 0,
-  FlutterKeyboardModeDocked = 1,
-  FlutterKeyboardModeFloating = 2,
-  // NOLINTEND(readability-identifier-naming)
-};
-
-typedef void (^FlutterKeyboardAnimationCallback)(fml::TimePoint);
-
 @interface FlutterViewController () <FlutterViewResponder>
 
-@property(class, nonatomic, readonly) BOOL accessibilityIsOnOffSwitchLabelsEnabled;
 @property(nonatomic, readonly) BOOL isPresentingViewController;
 @property(nonatomic, readonly) BOOL isVoiceOverRunning;
 @property(nonatomic, strong) FlutterKeyboardManager* keyboardManager;
+@property(nonatomic, strong) id<FlutterKeyboardInsetManagerProtocol> keyboardInsetManager;
+@property(nonatomic, readwrite) NSString* applicationLocale;
 
 /**
  * @brief Whether the status bar is preferred hidden.
@@ -60,6 +50,10 @@ typedef void (^FlutterKeyboardAnimationCallback)(fml::TimePoint);
 
 @property(nonatomic, readonly) FlutterPlatformViewsController* platformViewsController;
 
+@property(nonatomic, strong) FlutterAccessibilityFeatures* accessibilityFeatures;
+
+@property(nonatomic, strong) FlutterDisplayLinkManager* displayLinkManager;
+
 - (FlutterRestorationPlugin*)restorationPlugin;
 - (FlutterTextInputPlugin*)textInputPlugin;
 
@@ -67,14 +61,26 @@ typedef void (^FlutterKeyboardAnimationCallback)(fml::TimePoint);
 // handled.
 - (void)handlePressEvent:(FlutterUIPressProxy*)press
               nextAction:(void (^)())nextAction API_AVAILABLE(ios(13.4));
-- (void)sendDeepLinkToFramework:(NSURL*)url completionHandler:(void (^)(BOOL success))completion;
 - (void)addInternalPlugins;
 - (void)deregisterNotifications;
-- (int32_t)accessibilityFlags;
 
 - (BOOL)supportsShowingSystemContextMenu;
 - (BOOL)stateIsActive;
 - (BOOL)stateIsBackground;
+
+/**
+ * Determines whether a UIScene notification should be handled by this view controller.
+ *
+ * In multi-scene environments (such as iPadOS split view, macOS Catalyst multi-window, or App
+ * Extensions), multiple UIWindowScene instances can exist in the same process space. Because the
+ * scene observers register to listen for all targets, they may receive lifecycle notifications
+ * from unrelated auxiliary or secondary scenes.
+ *
+ * @param notification The UIScene notification containing the transitioning UIScene in its object.
+ * @return YES if the notification matches this view controller's scene context.
+ *         NO if it originates from an unrelated scene and should be ignored.
+ */
+- (BOOL)shouldHandleSceneNotification:(NSNotification*)notification API_AVAILABLE(ios(13.0));
 @end
 
 #endif  // FLUTTER_SHELL_PLATFORM_DARWIN_IOS_FRAMEWORK_SOURCE_FLUTTERVIEWCONTROLLER_INTERNAL_H_

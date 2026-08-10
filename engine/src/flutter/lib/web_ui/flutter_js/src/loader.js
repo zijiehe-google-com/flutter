@@ -10,6 +10,8 @@ import { loadCanvasKit } from './canvaskit_loader.js';
 import { loadSkwasm } from './skwasm_loader.js';
 import { getCanvaskitBaseUrl } from './utils.js';
 
+const supportsDart2Wasm = browserEnvironment.supportsDart2Wasm;
+
 /**
  * The public interface of _flutter.loader. Exposes two methods:
  * * loadEntrypoint (which coordinates the default Flutter web loading procedure)
@@ -52,7 +54,7 @@ export class FlutterLoader {
    * Loads and initializes a flutter application.
    * @param {Object} options
    * @param {import("/.types".ServiceWorkerSettings?)} options.serviceWorkerSettings
-   *   Settings for the service worker to be loaded. Can pass `undefined` or
+   *   DEPRECATED: Settings for the service worker to be loaded. Can pass `undefined` or
    *   `null` to not launch a service worker at all.
    * @param {import("/.types".OnEntryPointLoadedCallback)} options.onEntrypointLoaded
    *   An optional callback to invoke
@@ -77,35 +79,77 @@ export class FlutterLoader {
     }
 
     const enableWasm = config.wasmAllowList?.[browserEnvironment.browserEngine] ?? defaultWasmSupport[browserEnvironment.browserEngine];
-    const rendererIsCompatible = (renderer) => {
-      switch (renderer) {
-        case "skwasm":
-          return browserEnvironment.supportsWasmGC && enableWasm;
-        default:
-          return true;
-      }
-    }
 
     /**
-     * @param {import("./types").ApplicationBuild} build
-     * @param {import("./types").WebRenderer} renderer
-     **/
-    const buildContainsRenderer = (build, renderer) => {
-      return build.renderer == renderer;
+     * Returns null if [renderer] is compatible, or a human-readable string
+     * explaining why it isn't.
+     */
+    const rendererIncompatibilityReason = (renderer) => {
+      switch (renderer) {
+        case "skwasm":
+          if (!supportsDart2Wasm) {
+            return "Skwasm requires WasmGC support; this browser does not implement it yet.";
+          }
+          if (!(browserEnvironment.webGLVersion > 0)) {
+            return "Skwasm requires WebGL support; this browser does not provide it.";
+          }
+          if (!enableWasm) {
+            return `Skwasm is disabled by your wasmAllowList configuration for browser engine "${browserEnvironment.browserEngine}".`;
+          }
+          return null;
+        default:
+          return null;
+      }
+    };
+
+    /**
+     * Returns null if [build] is compatible, or a human-readable string
+     * explaining why it isn't. Used both to filter candidate builds and to
+     * log a useful explanation when the loader has to fall back.
+     */
+    const buildIncompatibilityReason = (build) => {
+      if (build.compileTarget === "dart2wasm" && !supportsDart2Wasm) {
+        return "dart2wasm requires WasmGC support; this browser does not implement it yet.";
+      }
+      if (config.renderer && config.renderer != build.renderer) {
+        return `The application is configured to use the "${config.renderer}" renderer; this build targets "${build.renderer}".`;
+      }
+      return rendererIncompatibilityReason(build.renderer);
+    };
+
+    let build;
+    const skippedBuilds = [];
+    for (const candidate of buildConfig.builds) {
+      const reason = buildIncompatibilityReason(candidate);
+      if (reason === null) {
+        build = candidate;
+        break;
+      }
+      skippedBuilds.push({ candidate, reason });
     }
 
-    const buildIsCompatible = (build) => {
-      if (build.compileTarget === "dart2wasm" && !browserEnvironment.supportsWasmGC) {
-        return false;
+    // Verbose mode: print why each candidate was skipped, regardless of
+    // whether a compatible build was eventually found. Useful for debugging
+    // "why does it keep falling back to X instead of Y" without staring at
+    // a blank screen. Off by default to keep the console quiet for typical
+    // production users.
+    if (config.verboseBuildSelection) {
+      for (const skipped of skippedBuilds) {
+        console.warn(
+          `Flutter Web: build ${skipped.candidate.compileTarget}/${skipped.candidate.renderer} was skipped: ${skipped.reason}`
+        );
       }
-      if (config.renderer && !buildContainsRenderer(build, config.renderer)) {
-        return false;
-      }
-      return rendererIsCompatible(build.renderer);
-    };
-    const build = buildConfig.builds.find(buildIsCompatible);
+    }
+
     if (!build) {
-      throw "FlutterLoader could not find a build compatible with configuration and environment.";
+      // Failure case: always warn (the page would otherwise be silently blank)
+      // and hint at the verbose flag if it isn't already on.
+      console.warn(
+        "Flutter Web: no compatible build found for this browser." +
+        (config.verboseBuildSelection ? "" :
+          " Set `verboseBuildSelection: true` in your Flutter configuration to see why each candidate was rejected.")
+      );
+      throw new Error("FlutterLoader could not find a build compatible with configuration and environment.");
     }
 
     const deps = {};

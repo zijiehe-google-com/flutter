@@ -20,7 +20,7 @@ void customEntrypoint() {
   sayHiFromCustomEntrypoint();
 }
 
-@pragma('vm:external-name', 'SayHiFromCustomEntrypoint')
+@ffi.Native<ffi.Void Function()>(symbol: 'SayHiFromCustomEntrypoint')
 external void sayHiFromCustomEntrypoint();
 
 @pragma('vm:entry-point')
@@ -30,11 +30,11 @@ void customEntrypoint1() {
   sayHiFromCustomEntrypoint3();
 }
 
-@pragma('vm:external-name', 'SayHiFromCustomEntrypoint1')
+@ffi.Native<ffi.Void Function()>(symbol: 'SayHiFromCustomEntrypoint1')
 external void sayHiFromCustomEntrypoint1();
-@pragma('vm:external-name', 'SayHiFromCustomEntrypoint2')
+@ffi.Native<ffi.Void Function()>(symbol: 'SayHiFromCustomEntrypoint2')
 external void sayHiFromCustomEntrypoint2();
-@pragma('vm:external-name', 'SayHiFromCustomEntrypoint3')
+@ffi.Native<ffi.Void Function()>(symbol: 'SayHiFromCustomEntrypoint3')
 external void sayHiFromCustomEntrypoint3();
 
 @pragma('vm:entry-point')
@@ -52,9 +52,9 @@ void implicitViewNotNull() {
   notifyBoolValue(PlatformDispatcher.instance.implicitView != null);
 }
 
-@pragma('vm:external-name', 'NotifyStringValue')
+@ffi.Native<ffi.Void Function(ffi.Handle)>(symbol: 'NotifyStringValue')
 external void notifyStringValue(String value);
-@pragma('vm:external-name', 'NotifyBoolValue')
+@ffi.Native<ffi.Void Function(ffi.Bool)>(symbol: 'NotifyBoolValue')
 external void notifyBoolValue(bool value);
 
 @pragma('vm:entry-point')
@@ -91,7 +91,7 @@ void invokePlatformThreadIsolate() {
 }
 
 Float64List kTestTransform = () {
-  final Float64List values = Float64List(16);
+  final values = Float64List(16);
   values[0] = 1.0; // scaleX
   values[4] = 2.0; // skewX
   values[12] = 3.0; // transX
@@ -104,17 +104,17 @@ Float64List kTestTransform = () {
   return values;
 }();
 
-@pragma('vm:external-name', 'SignalNativeTest')
+@ffi.Native<ffi.Void Function()>(symbol: 'SignalNativeTest')
 external void signalNativeTest();
-@pragma('vm:external-name', 'SignalNativeCount')
+@ffi.Native<ffi.Void Function(ffi.Int64)>(symbol: 'SignalNativeCount')
 external void signalNativeCount(int count);
-@pragma('vm:external-name', 'SignalNativeMessage')
+@ffi.Native<ffi.Void Function(ffi.Handle)>(symbol: 'SignalNativeMessage')
 external void signalNativeMessage(String message);
-@pragma('vm:external-name', 'NotifySemanticsEnabled')
+@ffi.Native<ffi.Void Function(ffi.Bool)>(symbol: 'NotifySemanticsEnabled')
 external void notifySemanticsEnabled(bool enabled);
-@pragma('vm:external-name', 'NotifyAccessibilityFeatures')
+@ffi.Native<ffi.Void Function(ffi.Bool)>(symbol: 'NotifyAccessibilityFeatures')
 external void notifyAccessibilityFeatures(bool reduceMotion);
-@pragma('vm:external-name', 'NotifySemanticsAction')
+@ffi.Native<ffi.Void Function(ffi.Int64, ffi.Int64, ffi.Handle)>(symbol: 'NotifySemanticsAction')
 external void notifySemanticsAction(int nodeId, int action, List<int> data);
 
 @ffi.Native<ffi.Void Function()>(symbol: 'FFISignalNativeTest')
@@ -123,7 +123,7 @@ external void ffiSignalNativeTest();
 /// Returns a future that completes when
 /// `PlatformDispatcher.instance.onSemanticsEnabledChanged` fires.
 Future<void> get semanticsChanged {
-  final Completer<void> semanticsChanged = Completer<void>();
+  final semanticsChanged = Completer<void>();
   PlatformDispatcher.instance.onSemanticsEnabledChanged = semanticsChanged.complete;
   return semanticsChanged.future;
 }
@@ -131,13 +131,13 @@ Future<void> get semanticsChanged {
 /// Returns a future that completes when
 /// `PlatformDispatcher.instance.onAccessibilityFeaturesChanged` fires.
 Future<void> get accessibilityFeaturesChanged {
-  final Completer<void> featuresChanged = Completer<void>();
+  final featuresChanged = Completer<void>();
   PlatformDispatcher.instance.onAccessibilityFeaturesChanged = featuresChanged.complete;
   return featuresChanged.future;
 }
 
 Future<SemanticsActionEvent> get semanticsActionEvent {
-  final Completer<SemanticsActionEvent> actionReceived = Completer<SemanticsActionEvent>();
+  final actionReceived = Completer<SemanticsActionEvent>();
   PlatformDispatcher.instance.onSemanticsActionEvent = (SemanticsActionEvent action) {
     actionReceived.complete(action);
   };
@@ -162,165 +162,177 @@ Future<void> a11y_main() async {
   notifyAccessibilityFeatures(PlatformDispatcher.instance.accessibilityFeatures.reduceMotion);
 
   // 5: Fire semantics update.
-  final SemanticsUpdateBuilder builder =
-      SemanticsUpdateBuilder()
-        ..updateNode(
-          id: 42,
-          identifier: '',
-          label: 'A: root',
-          labelAttributes: <StringAttribute>[],
-          rect: const Rect.fromLTRB(0.0, 0.0, 10.0, 10.0),
-          transform: kTestTransform,
-          childrenInTraversalOrder: Int32List.fromList(<int>[84, 96]),
-          childrenInHitTestOrder: Int32List.fromList(<int>[96, 84]),
-          actions: 0,
-          flags: 0,
-          maxValueLength: 0,
-          currentValueLength: 0,
-          textSelectionBase: 0,
-          textSelectionExtent: 0,
-          platformViewId: 0,
-          scrollChildren: 0,
-          scrollIndex: 0,
-          scrollPosition: 0.0,
-          scrollExtentMax: 0.0,
-          scrollExtentMin: 0.0,
-          elevation: 0.0,
-          thickness: 0.0,
-          hint: '',
-          hintAttributes: <StringAttribute>[],
-          value: '',
-          valueAttributes: <StringAttribute>[],
-          increasedValue: '',
-          increasedValueAttributes: <StringAttribute>[],
-          decreasedValue: '',
-          decreasedValueAttributes: <StringAttribute>[],
-          tooltip: 'tooltip',
-          textDirection: TextDirection.ltr,
-          additionalActions: Int32List(0),
-          controlsNodes: null,
-          inputType: SemanticsInputType.none,
-        )
-        ..updateNode(
-          id: 84,
-          identifier: '',
-          label: 'B: leaf',
-          labelAttributes: <StringAttribute>[],
-          rect: const Rect.fromLTRB(40.0, 40.0, 80.0, 80.0),
-          transform: kTestTransform,
-          actions: 0,
-          flags: 0,
-          maxValueLength: 0,
-          currentValueLength: 0,
-          textSelectionBase: 0,
-          textSelectionExtent: 0,
-          platformViewId: 0,
-          scrollChildren: 0,
-          scrollIndex: 0,
-          scrollPosition: 0.0,
-          scrollExtentMax: 0.0,
-          scrollExtentMin: 0.0,
-          elevation: 0.0,
-          thickness: 0.0,
-          hint: '',
-          hintAttributes: <StringAttribute>[],
-          value: '',
-          valueAttributes: <StringAttribute>[],
-          increasedValue: '',
-          increasedValueAttributes: <StringAttribute>[],
-          decreasedValue: '',
-          decreasedValueAttributes: <StringAttribute>[],
-          tooltip: 'tooltip',
-          textDirection: TextDirection.ltr,
-          additionalActions: Int32List(0),
-          childrenInHitTestOrder: Int32List(0),
-          childrenInTraversalOrder: Int32List(0),
-          controlsNodes: null,
-          inputType: SemanticsInputType.none,
-        )
-        ..updateNode(
-          id: 96,
-          identifier: '',
-          label: 'C: branch',
-          labelAttributes: <StringAttribute>[],
-          rect: const Rect.fromLTRB(40.0, 40.0, 80.0, 80.0),
-          transform: kTestTransform,
-          childrenInTraversalOrder: Int32List.fromList(<int>[128]),
-          childrenInHitTestOrder: Int32List.fromList(<int>[128]),
-          actions: 0,
-          flags: 0,
-          maxValueLength: 0,
-          currentValueLength: 0,
-          textSelectionBase: 0,
-          textSelectionExtent: 0,
-          platformViewId: 0,
-          scrollChildren: 0,
-          scrollIndex: 0,
-          scrollPosition: 0.0,
-          scrollExtentMax: 0.0,
-          scrollExtentMin: 0.0,
-          elevation: 0.0,
-          thickness: 0.0,
-          hint: '',
-          hintAttributes: <StringAttribute>[],
-          value: '',
-          valueAttributes: <StringAttribute>[],
-          increasedValue: '',
-          increasedValueAttributes: <StringAttribute>[],
-          decreasedValue: '',
-          decreasedValueAttributes: <StringAttribute>[],
-          tooltip: 'tooltip',
-          textDirection: TextDirection.ltr,
-          additionalActions: Int32List(0),
-          controlsNodes: null,
-          inputType: SemanticsInputType.none,
-        )
-        ..updateNode(
-          id: 128,
-          identifier: '',
-          label: 'D: leaf',
-          labelAttributes: <StringAttribute>[],
-          rect: const Rect.fromLTRB(40.0, 40.0, 80.0, 80.0),
-          transform: kTestTransform,
-          additionalActions: Int32List.fromList(<int>[21]),
-          platformViewId: 0x3f3,
-          actions: 0,
-          flags: 0,
-          maxValueLength: 0,
-          currentValueLength: 0,
-          textSelectionBase: 0,
-          textSelectionExtent: 0,
-          scrollChildren: 0,
-          scrollIndex: 0,
-          scrollPosition: 0.0,
-          scrollExtentMax: 0.0,
-          scrollExtentMin: 0.0,
-          elevation: 0.0,
-          thickness: 0.0,
-          hint: '',
-          hintAttributes: <StringAttribute>[],
-          value: '',
-          valueAttributes: <StringAttribute>[],
-          increasedValue: '',
-          increasedValueAttributes: <StringAttribute>[],
-          decreasedValue: '',
-          decreasedValueAttributes: <StringAttribute>[],
-          tooltip: 'tooltip',
-          textDirection: TextDirection.ltr,
-          childrenInHitTestOrder: Int32List(0),
-          childrenInTraversalOrder: Int32List(0),
-          controlsNodes: null,
-          inputType: SemanticsInputType.none,
-        )
-        ..updateCustomAction(id: 21, label: 'Archive', hint: 'archive message');
+  final builder = SemanticsUpdateBuilder()
+    ..updateNode(
+      id: 42,
+      identifier: '',
+      label: 'A: root',
+      labelAttributes: <StringAttribute>[],
+      rect: const Rect.fromLTRB(0.0, 0.0, 10.0, 10.0),
+      transform: kTestTransform,
+      hitTestTransform: kTestTransform,
+      traversalParent: 0,
+      childrenInTraversalOrder: Int32List.fromList(<int>[84, 96]),
+      childrenInHitTestOrder: Int32List.fromList(<int>[96, 84]),
+      actions: 0,
+      flags: SemanticsFlags.none,
+      maxValueLength: 0,
+      currentValueLength: 0,
+      textSelectionBase: 0,
+      textSelectionExtent: 0,
+      platformViewId: 0,
+      scrollChildren: 0,
+      scrollIndex: 0,
+      scrollPosition: 0.0,
+      scrollExtentMax: 0.0,
+      scrollExtentMin: 0.0,
+      hint: '',
+      hintAttributes: <StringAttribute>[],
+      value: '',
+      valueAttributes: <StringAttribute>[],
+      increasedValue: '',
+      increasedValueAttributes: <StringAttribute>[],
+      decreasedValue: '',
+      decreasedValueAttributes: <StringAttribute>[],
+      tooltip: 'tooltip',
+      textDirection: TextDirection.ltr,
+      additionalActions: Int32List(0),
+      controlsNodes: null,
+      inputType: SemanticsInputType.none,
+      locale: null,
+      minValue: '0',
+      maxValue: '0',
+    )
+    ..updateNode(
+      id: 84,
+      identifier: '',
+      label: 'B: leaf',
+      labelAttributes: <StringAttribute>[],
+      rect: const Rect.fromLTRB(40.0, 40.0, 80.0, 80.0),
+      transform: kTestTransform,
+      hitTestTransform: kTestTransform,
+      traversalParent: 0,
+      actions: 0,
+      flags: SemanticsFlags.none,
+      maxValueLength: 0,
+      currentValueLength: 0,
+      textSelectionBase: 0,
+      textSelectionExtent: 0,
+      platformViewId: 0,
+      scrollChildren: 0,
+      scrollIndex: 0,
+      scrollPosition: 0.0,
+      scrollExtentMax: 0.0,
+      scrollExtentMin: 0.0,
+      hint: '',
+      hintAttributes: <StringAttribute>[],
+      value: '',
+      valueAttributes: <StringAttribute>[],
+      increasedValue: '',
+      increasedValueAttributes: <StringAttribute>[],
+      decreasedValue: '',
+      decreasedValueAttributes: <StringAttribute>[],
+      tooltip: 'tooltip',
+      textDirection: TextDirection.ltr,
+      additionalActions: Int32List(0),
+      childrenInHitTestOrder: Int32List(0),
+      childrenInTraversalOrder: Int32List(0),
+      controlsNodes: null,
+      inputType: SemanticsInputType.none,
+      locale: null,
+      minValue: '0',
+      maxValue: '0',
+    )
+    ..updateNode(
+      id: 96,
+      identifier: '',
+      label: 'C: branch',
+      labelAttributes: <StringAttribute>[],
+      rect: const Rect.fromLTRB(40.0, 40.0, 80.0, 80.0),
+      transform: kTestTransform,
+      hitTestTransform: kTestTransform,
+      traversalParent: 0,
+      childrenInTraversalOrder: Int32List.fromList(<int>[128]),
+      childrenInHitTestOrder: Int32List.fromList(<int>[128]),
+      actions: 0,
+      flags: SemanticsFlags.none,
+      maxValueLength: 0,
+      currentValueLength: 0,
+      textSelectionBase: 0,
+      textSelectionExtent: 0,
+      platformViewId: 0,
+      scrollChildren: 0,
+      scrollIndex: 0,
+      scrollPosition: 0.0,
+      scrollExtentMax: 0.0,
+      scrollExtentMin: 0.0,
+      hint: '',
+      hintAttributes: <StringAttribute>[],
+      value: '',
+      valueAttributes: <StringAttribute>[],
+      increasedValue: '',
+      increasedValueAttributes: <StringAttribute>[],
+      decreasedValue: '',
+      decreasedValueAttributes: <StringAttribute>[],
+      tooltip: 'tooltip',
+      textDirection: TextDirection.ltr,
+      additionalActions: Int32List(0),
+      controlsNodes: null,
+      inputType: SemanticsInputType.none,
+      locale: null,
+      minValue: '0',
+      maxValue: '0',
+    )
+    ..updateNode(
+      id: 128,
+      identifier: '',
+      label: 'D: leaf',
+      labelAttributes: <StringAttribute>[],
+      rect: const Rect.fromLTRB(40.0, 40.0, 80.0, 80.0),
+      transform: kTestTransform,
+      hitTestTransform: kTestTransform,
+      traversalParent: 0,
+      additionalActions: Int32List.fromList(<int>[21]),
+      platformViewId: 0x3f3,
+      actions: 0,
+      flags: SemanticsFlags.none,
+      maxValueLength: 0,
+      currentValueLength: 0,
+      textSelectionBase: 0,
+      textSelectionExtent: 0,
+      scrollChildren: 0,
+      scrollIndex: 0,
+      scrollPosition: 0.0,
+      scrollExtentMax: 0.0,
+      scrollExtentMin: 0.0,
+      hint: '',
+      hintAttributes: <StringAttribute>[],
+      value: '',
+      valueAttributes: <StringAttribute>[],
+      increasedValue: '',
+      increasedValueAttributes: <StringAttribute>[],
+      decreasedValue: '',
+      decreasedValueAttributes: <StringAttribute>[],
+      tooltip: 'tooltip',
+      textDirection: TextDirection.ltr,
+      childrenInHitTestOrder: Int32List(0),
+      childrenInTraversalOrder: Int32List(0),
+      controlsNodes: null,
+      inputType: SemanticsInputType.none,
+      locale: null,
+      minValue: '0',
+      maxValue: '0',
+    )
+    ..updateCustomAction(id: 21, label: 'Archive', hint: 'archive message');
 
+  PlatformDispatcher.instance.setSemanticsTreeEnabled(true);
   PlatformDispatcher.instance.views.first.updateSemantics(builder.build());
 
   signalNativeTest();
 
   // 6: Await semantics action from embedder.
   final SemanticsActionEvent data = await semanticsActionEvent;
-  final List<int> actionArgs = <int>[
+  final actionArgs = <int>[
     (data.arguments! as ByteData).getInt8(0),
     (data.arguments! as ByteData).getInt8(1),
   ];
@@ -340,68 +352,66 @@ Future<void> a11y_string_attributes() async {
   }
 
   // 2: Update semantics with string attributes.
-  final SemanticsUpdateBuilder builder =
-      SemanticsUpdateBuilder()..updateNode(
-        id: 42,
-        identifier: 'identifier',
-        label: 'What is the meaning of life?',
-        labelAttributes: <StringAttribute>[
-          LocaleStringAttribute(
-            range: const TextRange(start: 0, end: 'What is the meaning of life?'.length),
-            locale: const Locale('en'),
-          ),
-          SpellOutStringAttribute(range: const TextRange(start: 0, end: 1)),
-        ],
-        rect: const Rect.fromLTRB(0.0, 0.0, 10.0, 10.0),
-        transform: kTestTransform,
-        childrenInTraversalOrder: Int32List.fromList(<int>[84, 96]),
-        childrenInHitTestOrder: Int32List.fromList(<int>[96, 84]),
-        actions: 0,
-        flags: 0,
-        maxValueLength: 0,
-        currentValueLength: 0,
-        textSelectionBase: 0,
-        textSelectionExtent: 0,
-        platformViewId: 0,
-        scrollChildren: 0,
-        scrollIndex: 0,
-        scrollPosition: 0.0,
-        scrollExtentMax: 0.0,
-        scrollExtentMin: 0.0,
-        elevation: 0.0,
-        thickness: 0.0,
-        hint: "It's a number",
-        hintAttributes: <StringAttribute>[
-          LocaleStringAttribute(
-            range: const TextRange(start: 0, end: 1),
-            locale: const Locale('en'),
-          ),
-          LocaleStringAttribute(
-            range: const TextRange(start: 2, end: 3),
-            locale: const Locale('fr'),
-          ),
-        ],
-        value: '42',
-        valueAttributes: <StringAttribute>[
-          LocaleStringAttribute(
-            range: const TextRange(start: 0, end: '42'.length),
-            locale: const Locale('en', 'US'),
-          ),
-        ],
-        increasedValue: '43',
-        increasedValueAttributes: <StringAttribute>[
-          SpellOutStringAttribute(range: const TextRange(start: 0, end: 1)),
-          SpellOutStringAttribute(range: const TextRange(start: 1, end: 2)),
-        ],
-        decreasedValue: '41',
-        decreasedValueAttributes: <StringAttribute>[],
-        tooltip: 'tooltip',
-        textDirection: TextDirection.ltr,
-        additionalActions: Int32List(0),
-        controlsNodes: null,
-        inputType: SemanticsInputType.none,
-      );
+  final builder = SemanticsUpdateBuilder()
+    ..updateNode(
+      id: 42,
+      identifier: 'identifier',
+      label: 'What is the meaning of life?',
+      labelAttributes: <StringAttribute>[
+        LocaleStringAttribute(
+          range: const TextRange(start: 0, end: 'What is the meaning of life?'.length),
+          locale: const Locale('en'),
+        ),
+        SpellOutStringAttribute(range: const TextRange(start: 0, end: 1)),
+      ],
+      rect: const Rect.fromLTRB(0.0, 0.0, 10.0, 10.0),
+      transform: kTestTransform,
+      hitTestTransform: kTestTransform,
+      traversalParent: 0,
+      childrenInTraversalOrder: Int32List.fromList(<int>[84, 96]),
+      childrenInHitTestOrder: Int32List.fromList(<int>[96, 84]),
+      actions: 0,
+      flags: SemanticsFlags.none,
+      maxValueLength: 0,
+      currentValueLength: 0,
+      textSelectionBase: 0,
+      textSelectionExtent: 0,
+      platformViewId: 0,
+      scrollChildren: 0,
+      scrollIndex: 0,
+      scrollPosition: 0.0,
+      scrollExtentMax: 0.0,
+      scrollExtentMin: 0.0,
+      hint: "It's a number",
+      hintAttributes: <StringAttribute>[
+        LocaleStringAttribute(range: const TextRange(start: 0, end: 1), locale: const Locale('en')),
+        LocaleStringAttribute(range: const TextRange(start: 2, end: 3), locale: const Locale('fr')),
+      ],
+      value: '42',
+      valueAttributes: <StringAttribute>[
+        LocaleStringAttribute(
+          range: const TextRange(start: 0, end: '42'.length),
+          locale: const Locale('en', 'US'),
+        ),
+      ],
+      increasedValue: '43',
+      increasedValueAttributes: <StringAttribute>[
+        SpellOutStringAttribute(range: const TextRange(start: 0, end: 1)),
+        SpellOutStringAttribute(range: const TextRange(start: 1, end: 2)),
+      ],
+      decreasedValue: '41',
+      decreasedValueAttributes: <StringAttribute>[],
+      tooltip: 'tooltip',
+      textDirection: TextDirection.ltr,
+      additionalActions: Int32List(0),
+      controlsNodes: null,
+      inputType: SemanticsInputType.none,
+      locale: null,
+      minValue: '0',
+      maxValue: '0',
+    );
 
+  PlatformDispatcher.instance.setSemanticsTreeEnabled(true);
   PlatformDispatcher.instance.views.first.updateSemantics(builder.build());
   signalNativeTest();
 }
@@ -409,24 +419,19 @@ Future<void> a11y_string_attributes() async {
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
 void platform_messages_response() {
-  PlatformDispatcher.instance.onPlatformMessage = (
-    String name,
-    ByteData? data,
-    PlatformMessageResponseCallback? callback,
-  ) {
-    callback!(data);
-  };
+  PlatformDispatcher.instance.onPlatformMessage =
+      (String name, ByteData? data, PlatformMessageResponseCallback? callback) {
+        callback!(data);
+      };
   signalNativeTest();
 }
 
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
 void platform_messages_no_response() {
-  PlatformDispatcher.instance.onPlatformMessage = (
-    String name,
-    ByteData? data,
-    PlatformMessageResponseCallback? callback,
-  ) {
+  PlatformDispatcher
+      .instance
+      .onPlatformMessage = (String name, ByteData? data, PlatformMessageResponseCallback? callback) {
     final Uint8List list = data!.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
     signalNativeMessage(utf8.decode(list));
     // This does nothing because no one is listening on the other side. But complete the loop anyway
@@ -439,23 +444,20 @@ void platform_messages_no_response() {
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
 void null_platform_messages() {
-  PlatformDispatcher.instance.onPlatformMessage = (
-    String name,
-    ByteData? data,
-    PlatformMessageResponseCallback? callback,
-  ) {
-    // This checks if the platform_message null data is converted to Flutter null.
-    signalNativeMessage((null == data).toString());
-    callback!(data);
-  };
+  PlatformDispatcher.instance.onPlatformMessage =
+      (String name, ByteData? data, PlatformMessageResponseCallback? callback) {
+        // This checks if the platform_message null data is converted to Flutter null.
+        signalNativeMessage((null == data).toString());
+        callback!(data);
+      };
   signalNativeTest();
 }
 
 Picture createSimplePicture() {
-  final Paint blackPaint = Paint();
-  final Paint whitePaint = Paint()..color = const Color.fromARGB(255, 255, 255, 255);
-  final PictureRecorder baseRecorder = PictureRecorder();
-  final Canvas canvas = Canvas(baseRecorder);
+  final blackPaint = Paint();
+  final whitePaint = Paint()..color = const Color.fromARGB(255, 255, 255, 255);
+  final baseRecorder = PictureRecorder();
+  final canvas = Canvas(baseRecorder);
   canvas.drawRect(const Rect.fromLTRB(0.0, 0.0, 1000.0, 1000.0), blackPaint);
   canvas.drawRect(const Rect.fromLTRB(10.0, 10.0, 990.0, 990.0), whitePaint);
   return baseRecorder.endRecording();
@@ -465,7 +467,7 @@ Picture createSimplePicture() {
 // ignore: non_constant_identifier_names
 void can_composite_platform_views() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.addPicture(const Offset(1.0, 1.0), createSimplePicture());
     builder.pushOffset(1.0, 2.0);
     builder.addPlatformView(42, width: 123.0, height: 456.0);
@@ -482,7 +484,7 @@ void can_composite_platform_views() {
 // ignore: non_constant_identifier_names
 void can_composite_platform_views_with_opacity() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
 
     // Root node
     builder.pushOffset(1.0, 2.0);
@@ -513,7 +515,7 @@ void can_composite_platform_views_with_opacity() {
 // ignore: non_constant_identifier_names
 void can_composite_with_opacity() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOpacity(127);
     builder.addPicture(const Offset(1.0, 1.0), createSimplePicture());
     builder.pop(); // offset
@@ -525,10 +527,10 @@ void can_composite_with_opacity() {
 }
 
 Picture createColoredBox(Color color, Size size) {
-  final Paint paint = Paint();
+  final paint = Paint();
   paint.color = color;
-  final PictureRecorder baseRecorder = PictureRecorder();
-  final Canvas canvas = Canvas(baseRecorder);
+  final baseRecorder = PictureRecorder();
+  final canvas = Canvas(baseRecorder);
   canvas.drawRect(Rect.fromLTRB(0.0, 0.0, size.width, size.height), paint);
   return baseRecorder.endRecording();
 }
@@ -537,13 +539,13 @@ Picture createColoredBox(Color color, Size size) {
 // ignore: non_constant_identifier_names
 void can_composite_platform_views_with_known_scene() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Color red = Color.fromARGB(127, 255, 0, 0);
-    const Color blue = Color.fromARGB(127, 0, 0, 255);
-    const Color gray = Color.fromARGB(127, 127, 127, 127);
+    const red = Color.fromARGB(127, 255, 0, 0);
+    const blue = Color.fromARGB(127, 0, 0, 255);
+    const gray = Color.fromARGB(127, 127, 127, 127);
 
-    const Size size = Size(50.0, 150.0);
+    const size = Size(50.0, 150.0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
 
     // 10 (Index 0)
@@ -579,12 +581,12 @@ void can_composite_platform_views_with_known_scene() {
 // ignore: non_constant_identifier_names
 void can_composite_platform_views_transparent_overlay() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Color red = Color.fromARGB(127, 255, 0, 0);
-    const Color transparent = Color(0x00ffffff);
+    const red = Color.fromARGB(127, 255, 0, 0);
+    const transparent = Color(0x00ffffff);
 
-    const Size size = Size(50.0, 150.0);
+    const size = Size(50.0, 150.0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
 
     // 10 (Index 0)
@@ -615,10 +617,10 @@ void can_composite_platform_views_transparent_overlay() {
 // ignore: non_constant_identifier_names
 void can_composite_platform_views_no_overlay() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Color red = Color.fromARGB(127, 255, 0, 0);
-    const Size size = Size(50.0, 150.0);
+    const red = Color.fromARGB(127, 255, 0, 0);
+    const size = Size(50.0, 150.0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
 
     // 10 (Index 0)
@@ -642,10 +644,10 @@ void can_composite_platform_views_no_overlay() {
 // ignore: non_constant_identifier_names
 void can_composite_platform_views_with_root_layer_only() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Color red = Color.fromARGB(127, 255, 0, 0);
-    const Size size = Size(50.0, 150.0);
+    const red = Color.fromARGB(127, 255, 0, 0);
+    const size = Size(50.0, 150.0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
 
     // 10 (Index 0)
@@ -664,10 +666,10 @@ void can_composite_platform_views_with_root_layer_only() {
 // ignore: non_constant_identifier_names
 void can_composite_platform_views_with_platform_layer_on_bottom() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Color red = Color.fromARGB(127, 255, 0, 0);
-    const Size size = Size(50.0, 150.0);
+    const red = Color.fromARGB(127, 255, 0, 0);
+    const size = Size(50.0, 150.0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
 
     // 10 (Index 0)
@@ -687,7 +689,7 @@ void can_composite_platform_views_with_platform_layer_on_bottom() {
   PlatformDispatcher.instance.scheduleFrame();
 }
 
-@pragma('vm:external-name', 'SignalBeginFrame')
+@ffi.Native<ffi.Void Function()>(symbol: 'SignalBeginFrame')
 // ignore: unreachable_from_main
 external void signalBeginFrame();
 
@@ -696,9 +698,9 @@ Future<void>
 // ignore: non_constant_identifier_names
 texture_destruction_callback_called_without_custom_compositor() async {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Color red = Color.fromARGB(127, 255, 0, 0);
-    const Size size = Size(50.0, 150.0);
-    final SceneBuilder builder = SceneBuilder();
+    const red = Color.fromARGB(127, 255, 0, 0);
+    const size = Size(50.0, 150.0);
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
     builder.addPicture(const Offset(10.0, 10.0), createColoredBox(red, size)); // red - flutter
     builder.pop();
@@ -711,15 +713,15 @@ texture_destruction_callback_called_without_custom_compositor() async {
 // ignore: non_constant_identifier_names
 void can_render_scene_without_custom_compositor() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Color red = Color.fromARGB(127, 255, 0, 0);
-    const Color green = Color.fromARGB(127, 0, 255, 0);
-    const Color blue = Color.fromARGB(127, 0, 0, 255);
-    const Color magenta = Color.fromARGB(127, 255, 0, 255);
-    const Color gray = Color.fromARGB(127, 127, 127, 127);
+    const red = Color.fromARGB(127, 255, 0, 0);
+    const green = Color.fromARGB(127, 0, 255, 0);
+    const blue = Color.fromARGB(127, 0, 0, 255);
+    const magenta = Color.fromARGB(127, 255, 0, 255);
+    const gray = Color.fromARGB(127, 127, 127, 127);
 
-    const Size size = Size(50.0, 150.0);
+    const size = Size(50.0, 150.0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
 
     builder.pushOffset(0.0, 0.0);
 
@@ -744,8 +746,8 @@ void can_render_scene_without_custom_compositor() {
 }
 
 Picture createGradientBox(Size size) {
-  final Paint paint = Paint();
-  final List<Color> rainbow = <Color>[
+  final paint = Paint();
+  final rainbow = <Color>[
     const Color.fromARGB(255, 255, 0, 0), // red
     const Color.fromARGB(255, 255, 165, 0), // orange
     const Color.fromARGB(255, 255, 255, 0), // yellow
@@ -754,7 +756,7 @@ Picture createGradientBox(Size size) {
     const Color.fromARGB(255, 75, 0, 130), // indigo
     const Color.fromARGB(255, 238, 130, 238), // violet
   ];
-  final List<double> stops = <double>[
+  final stops = <double>[
     (1.0 / 7.0),
     (2.0 / 7.0),
     (3.0 / 7.0),
@@ -764,13 +766,23 @@ Picture createGradientBox(Size size) {
     (7.0 / 7.0),
   ];
   paint.shader = Gradient.linear(Offset.zero, Offset(size.width, size.height), rainbow, stops);
-  final PictureRecorder baseRecorder = PictureRecorder();
-  final Canvas canvas = Canvas(baseRecorder);
+  final baseRecorder = PictureRecorder();
+  final canvas = Canvas(baseRecorder);
   canvas.drawRect(Rect.fromLTRB(0.0, 0.0, size.width, size.height), paint);
   return baseRecorder.endRecording();
 }
 
-@pragma('vm:external-name', 'EchoKeyEvent')
+@ffi.Native<
+  ffi.Void Function(
+    ffi.Uint64,
+    ffi.Uint64,
+    ffi.Uint64,
+    ffi.Uint64,
+    ffi.Uint64,
+    ffi.Bool,
+    ffi.Uint64,
+  )
+>(symbol: 'EchoKeyEvent')
 external void _echoKeyEvent(
   int change,
   int timestamp,
@@ -864,10 +876,10 @@ Future<void> key_data_late_echo() async {
 // ignore: non_constant_identifier_names
 void render_implicit_view() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Size size = Size(800.0, 600.0);
-    const Color red = Color.fromARGB(127, 255, 0, 0);
+    const size = Size(800.0, 600.0);
+    const red = Color.fromARGB(127, 255, 0, 0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
 
     builder.pushOffset(0.0, 0.0);
 
@@ -885,10 +897,10 @@ void render_implicit_view() {
 void render_all_views() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
     for (final FlutterView view in PlatformDispatcher.instance.views) {
-      const Size size = Size(800.0, 600.0);
-      const Color red = Color.fromARGB(127, 255, 0, 0);
+      const size = Size(800.0, 600.0);
+      const red = Color.fromARGB(127, 255, 0, 0);
 
-      final SceneBuilder builder = SceneBuilder();
+      final builder = SceneBuilder();
 
       builder.pushOffset(0.0, 0.0);
 
@@ -906,9 +918,9 @@ void render_all_views() {
 // ignore: non_constant_identifier_names
 void render_gradient() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Size size = Size(800.0, 600.0);
+    const size = Size(800.0, 600.0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
 
     builder.pushOffset(0.0, 0.0);
 
@@ -925,9 +937,9 @@ void render_gradient() {
 // ignore: non_constant_identifier_names
 void render_texture() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Size size = Size(800.0, 600.0);
+    const size = Size(800.0, 600.0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
 
     builder.pushOffset(0.0, 0.0);
 
@@ -944,10 +956,10 @@ void render_texture() {
 // ignore: non_constant_identifier_names
 void render_gradient_on_non_root_backing_store() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Size size = Size(800.0, 600.0);
-    const Color red = Color.fromARGB(127, 255, 0, 0);
+    const size = Size(800.0, 600.0);
+    const red = Color.fromARGB(127, 255, 0, 0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
 
     builder.pushOffset(0.0, 0.0);
 
@@ -971,11 +983,11 @@ void verify_b141980393() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
     // The platform view in the test case is screen sized but with margins of 31
     // and 37 points from the top and bottom.
-    const double topMargin = 31.0;
-    const double bottomMargin = 37.0;
-    const Size platformViewSize = Size(800.0, 600.0 - topMargin - bottomMargin);
+    const topMargin = 31.0;
+    const bottomMargin = 37.0;
+    const platformViewSize = Size(800.0, 600.0 - topMargin - bottomMargin);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
 
     builder.pushOffset(
       0.0, // x
@@ -996,7 +1008,7 @@ void verify_b141980393() {
 // ignore: non_constant_identifier_names
 void can_display_platform_view_with_pixel_ratio() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushTransform(
       Float64List.fromList(<double>[
         2.0,
@@ -1045,7 +1057,7 @@ void can_receive_locale_updates() {
 // ignore: non_constant_identifier_names
 void verify_b143464703() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0); // base
 
     // Background
@@ -1086,7 +1098,7 @@ void verify_b143464703() {
 // ignore: non_constant_identifier_names
 void push_frames_over_and_over() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
     builder.addPicture(
       Offset.zero,
@@ -1107,7 +1119,7 @@ void push_frames_over_and_over() {
 // ignore: non_constant_identifier_names
 void platform_view_mutators() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0); // base
     builder.addPicture(Offset.zero, createGradientBox(const Size(800.0, 600.0)));
 
@@ -1131,7 +1143,7 @@ void platform_view_mutators() {
 // ignore: non_constant_identifier_names
 void platform_view_mutators_with_pixel_ratio() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0); // base
     builder.addPicture(Offset.zero, createGradientBox(const Size(400.0, 300.0)));
 
@@ -1165,7 +1177,7 @@ void empty_scene() {
 // ignore: non_constant_identifier_names
 void scene_with_no_container() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.addPicture(Offset.zero, createGradientBox(const Size(400.0, 300.0)));
     PlatformDispatcher.instance.views.first.render(builder.build());
     signalNativeTest();
@@ -1174,15 +1186,14 @@ void scene_with_no_container() {
 }
 
 Picture createArcEndCapsPicture() {
-  final PictureRecorder baseRecorder = PictureRecorder();
-  final Canvas canvas = Canvas(baseRecorder);
+  final baseRecorder = PictureRecorder();
+  final canvas = Canvas(baseRecorder);
 
-  final style =
-      Paint()
-        ..strokeWidth = 12.0
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.miter;
+  final style = Paint()
+    ..strokeWidth = 12.0
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.miter;
 
   style.color = const Color.fromARGB(255, 255, 0, 0);
   canvas.drawArc(const Rect.fromLTRB(0.0, 0.0, 500.0, 500.0), 1.57, 1.0, false, style);
@@ -1194,7 +1205,7 @@ Picture createArcEndCapsPicture() {
 // ignore: non_constant_identifier_names
 void arc_end_caps_correct() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.addPicture(Offset.zero, createArcEndCapsPicture());
     PlatformDispatcher.instance.views.first.render(builder.build());
   };
@@ -1205,7 +1216,7 @@ void arc_end_caps_correct() {
 // ignore: non_constant_identifier_names
 void scene_builder_with_clips() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushClipRect(const Rect.fromLTRB(10.0, 10.0, 390.0, 290.0));
     builder.addPlatformView(42, width: 400.0, height: 300.0);
     builder.addPicture(Offset.zero, createGradientBox(const Size(400.0, 300.0)));
@@ -1218,7 +1229,7 @@ void scene_builder_with_clips() {
 // ignore: non_constant_identifier_names
 void scene_builder_with_complex_clips() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
 
     builder.pushClipRect(const Rect.fromLTRB(0.0, 0.0, 1024.0, 600.0));
     builder.pushOffset(512.0, 0.0);
@@ -1233,13 +1244,13 @@ void scene_builder_with_complex_clips() {
   PlatformDispatcher.instance.scheduleFrame();
 }
 
-@pragma('vm:external-name', 'SendObjectToNativeCode')
+@ffi.Native<ffi.Void Function(ffi.Handle)>(symbol: 'SendObjectToNativeCode')
 external void sendObjectToNativeCode(dynamic object);
 
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
 void objects_can_be_posted() {
-  final ReceivePort port = ReceivePort();
+  final port = ReceivePort();
   port.listen((dynamic message) {
     sendObjectToNativeCode(message);
   });
@@ -1250,7 +1261,7 @@ void objects_can_be_posted() {
 // ignore: non_constant_identifier_names
 void empty_scene_posts_zero_layers_to_compositor() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     // Should not render anything.
     builder.pushClipRect(const Rect.fromLTRB(0.0, 0.0, 300.0, 200.0));
     PlatformDispatcher.instance.views.first.render(builder.build());
@@ -1262,7 +1273,7 @@ void empty_scene_posts_zero_layers_to_compositor() {
 // ignore: non_constant_identifier_names
 void compositor_can_post_only_platform_views() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.addPlatformView(42, width: 300.0, height: 200.0);
     builder.addPlatformView(24, width: 300.0, height: 200.0);
     PlatformDispatcher.instance.views.first.render(builder.build());
@@ -1273,10 +1284,10 @@ void compositor_can_post_only_platform_views() {
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
 void render_targets_are_recycled() {
-  int frameCount = 0;
+  var frameCount = 0;
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
-    for (int i = 0; i < 10; i++) {
+    final builder = SceneBuilder();
+    for (var i = 0; i < 10; i++) {
       builder.addPicture(Offset.zero, createGradientBox(const Size(30.0, 20.0)));
       builder.addPlatformView(42 + i, width: 30.0, height: 20.0);
     }
@@ -1294,10 +1305,10 @@ void render_targets_are_recycled() {
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
 void render_targets_are_in_stable_order() {
-  int frameCount = 0;
+  var frameCount = 0;
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
-    for (int i = 0; i < 10; i++) {
+    final builder = SceneBuilder();
+    for (var i = 0; i < 10; i++) {
       builder.addPicture(Offset.zero, createGradientBox(const Size(30.0, 20.0)));
       builder.addPlatformView(42 + i, width: 30.0, height: 20.0);
     }
@@ -1311,7 +1322,7 @@ void render_targets_are_in_stable_order() {
   PlatformDispatcher.instance.scheduleFrame();
 }
 
-@pragma('vm:external-name', 'NativeArgumentsCallback')
+@ffi.Native<ffi.Void Function(ffi.Handle)>(symbol: 'NativeArgumentsCallback')
 external void nativeArgumentsCallback(List<String> args);
 
 @pragma('vm:entry-point')
@@ -1326,19 +1337,19 @@ void dart_entrypoint_args(List<String> args) {
   nativeArgumentsCallback(args);
 }
 
-@pragma('vm:external-name', 'SnapshotsCallback')
+@ffi.Native<ffi.Void Function(ffi.Handle, ffi.Handle)>(symbol: 'SnapshotsCallback')
 external void snapshotsCallback(Image bigImage, Image smallImage);
 
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
 Future<void> snapshot_large_scene(int maxSize) async {
   // Set width to double the max size, which will result in height being half the max size after scaling.
-  final width = maxSize * 2.0, height = maxSize.toDouble();
+  final double width = maxSize * 2.0, height = maxSize.toDouble();
 
-  PictureRecorder recorder = PictureRecorder();
+  var recorder = PictureRecorder();
   {
-    final Canvas canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
-    final Paint paint = Paint();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
+    final paint = Paint();
     // Bottom left
     paint.color = const Color.fromARGB(255, 100, 255, 100);
     canvas.drawRect(Rect.fromLTWH(0, height / 2, width / 2, height / 2), paint);
@@ -1355,7 +1366,7 @@ Future<void> snapshot_large_scene(int maxSize) async {
   const smallHeight = 64.0;
   recorder = PictureRecorder();
   {
-    final Canvas canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, smallWidth, smallHeight));
+    final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, smallWidth, smallHeight));
     canvas.scale(smallWidth / bigImage.width);
     canvas.drawImage(bigImage, Offset.zero, Paint());
   }
@@ -1369,9 +1380,9 @@ Future<void> snapshot_large_scene(int maxSize) async {
 // ignore: non_constant_identifier_names
 void invalid_backingstore() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Color red = Color.fromARGB(127, 255, 0, 0);
-    const Size size = Size(50.0, 150.0);
-    final SceneBuilder builder = SceneBuilder();
+    const red = Color.fromARGB(127, 255, 0, 0);
+    const size = Size(50.0, 150.0);
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
     builder.addPicture(const Offset(10.0, 10.0), createColoredBox(red, size)); // red - flutter
     builder.pop();
@@ -1407,7 +1418,7 @@ void add_view_schedules_frame() {
 
 void drawSolidColor(Color c) {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
     builder.addPicture(
       Offset.zero,
@@ -1453,6 +1464,20 @@ void pointer_data_packet() {
 
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
+void pointer_data_packet_stylus_buttons() {
+  PlatformDispatcher.instance.onPointerDataPacket = (PointerDataPacket packet) {
+    signalNativeCount(packet.data.length);
+
+    for (final PointerData pointerData in packet.data) {
+      signalNativeMessage('buttons: ${pointerData.buttons}');
+    }
+  };
+
+  signalNativeTest();
+}
+
+@pragma('vm:entry-point')
+// ignore: non_constant_identifier_names
 void pointer_data_packet_view_id() {
   PlatformDispatcher.instance.onPointerDataPacket = (PointerDataPacket packet) {
     assert(packet.data.length == 1);
@@ -1466,7 +1491,7 @@ void pointer_data_packet_view_id() {
 }
 
 Map<int, Size> _getAllViewSizes() {
-  final Map<int, Size> result = <int, Size>{};
+  final result = <int, Size>{};
   for (final FlutterView view in PlatformDispatcher.instance.views) {
     result[view.viewId] = view.physicalSize;
   }
@@ -1474,7 +1499,7 @@ Map<int, Size> _getAllViewSizes() {
 }
 
 List<int> _findDifferences(Map<int, Size> a, Map<int, Size> b) {
-  final Set<int> result = <int>{};
+  final result = <int>{};
   a.forEach((int viewId, Size sizeA) {
     if (!b.containsKey(viewId) || b[viewId] != sizeA) {
       result.add(viewId);
@@ -1539,9 +1564,9 @@ Future<void> channel_listener_response() async {
 void render_gradient_retained() {
   OffsetEngineLayer? offsetLayer; // Retain the offset layer.
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    const Size size = Size(800.0, 600.0);
+    const size = Size(800.0, 600.0);
 
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
 
     offsetLayer = builder.pushOffset(0.0, 0.0, oldLayer: offsetLayer);
 
@@ -1560,12 +1585,12 @@ void render_gradient_retained() {
 // ignore: non_constant_identifier_names
 void render_impeller_test() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
-    final Paint paint = Paint();
+    final paint = Paint();
     paint.color = const Color.fromARGB(255, 0, 0, 255);
-    final PictureRecorder baseRecorder = PictureRecorder();
-    final Canvas canvas = Canvas(baseRecorder);
+    final baseRecorder = PictureRecorder();
+    final canvas = Canvas(baseRecorder);
     canvas.drawPaint(Paint()..color = const Color.fromARGB(255, 255, 0, 0));
     canvas.drawRect(const Rect.fromLTRB(20.0, 20.0, 200.0, 150.0), paint);
     builder.addPicture(Offset.zero, baseRecorder.endRecording());
@@ -1577,21 +1602,49 @@ void render_impeller_test() {
 
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
+void render_texture_impeller_test() {
+  PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
+    const size = Size(800.0, 600.0);
+
+    final builder = SceneBuilder();
+
+    builder.pushOffset(0.0, 0.0);
+
+    builder.addTexture(/*textureId*/ 1, width: size.width, height: size.height);
+
+    builder.pop();
+
+    PlatformDispatcher.instance.views.first.render(builder.build());
+  };
+  PlatformDispatcher.instance.scheduleFrame();
+}
+
+@pragma('vm:entry-point')
+// ignore: non_constant_identifier_names
 void render_impeller_text_test() {
   PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
-    final SceneBuilder builder = SceneBuilder();
+    final builder = SceneBuilder();
     builder.pushOffset(0.0, 0.0);
-    final Paint paint = Paint();
-    paint.color = const Color.fromARGB(255, 0, 0, 255);
-    final PictureRecorder baseRecorder = PictureRecorder();
-    final Canvas canvas = Canvas(baseRecorder);
+    const darkColor = Color.fromARGB(255, 25, 25, 25);
+    const lightColor = Color.fromARGB(255, 230, 230, 230);
+    final baseRecorder = PictureRecorder();
+    final canvas = Canvas(baseRecorder);
 
-    final ParagraphBuilder paragraphBuilder = ParagraphBuilder(
-      ParagraphStyle(fontFamily: 'sans-serif'),
-    )..addText('Flutter is the best!');
-    final Paragraph paragraph =
-        paragraphBuilder.build()..layout(const ParagraphConstraints(width: 400));
-    canvas.drawParagraph(paragraph, const Offset(20, 20));
+    final paragraphBuilder1 = ParagraphBuilder(ParagraphStyle(fontFamily: 'sans-serif'))
+      ..pushStyle(TextStyle(color: darkColor, background: Paint()..color = lightColor))
+      ..addText('Flutter is the best!');
+    final Paragraph paragraph1 = paragraphBuilder1.build()
+      ..layout(const ParagraphConstraints(width: 400));
+    canvas.drawParagraph(paragraph1, const Offset(20, 20));
+
+    canvas.translate(0, 40);
+
+    final paragraphBuilder2 = ParagraphBuilder(ParagraphStyle(fontFamily: 'sans-serif'))
+      ..pushStyle(TextStyle(color: lightColor, background: Paint()..color = darkColor))
+      ..addText('Flutter is the best!');
+    final Paragraph paragraph2 = paragraphBuilder2.build()
+      ..layout(const ParagraphConstraints(width: 400));
+    canvas.drawParagraph(paragraph2, const Offset(20, 20));
 
     builder.addPicture(Offset.zero, baseRecorder.endRecording());
     builder.pop();
@@ -1603,9 +1656,9 @@ void render_impeller_text_test() {
 @pragma('vm:entry-point')
 // ignore: non_constant_identifier_names
 Future<void> render_impeller_image_snapshot_test() async {
-  final PictureRecorder recorder = PictureRecorder();
-  final Canvas canvas = Canvas(recorder);
-  const Color color = Color.fromARGB(255, 0, 0, 123);
+  final recorder = PictureRecorder();
+  final canvas = Canvas(recorder);
+  const color = Color.fromARGB(255, 0, 0, 123);
   canvas.drawPaint(Paint()..color = color);
   final Picture picture = recorder.endRecording();
 
@@ -1615,6 +1668,41 @@ Future<void> render_impeller_image_snapshot_test() async {
 
   final bool result = (pixel & 0xFF) == color.alpha && ((pixel >> 8) & 0xFF) == color.blue;
   notifyBoolValue(result);
+}
+
+@pragma('vm:entry-point')
+// ignore: non_constant_identifier_names
+void render_impeller_platform_view() {
+  PlatformDispatcher.instance.onBeginFrame = (Duration duration) {
+    final builder = SceneBuilder();
+
+    // Background
+    builder.addPicture(
+      Offset.zero,
+      createColoredBox(const Color.fromARGB(255, 128, 128, 128), const Size(800.0, 600.0)),
+    );
+
+    // The top bar and the platform view are pushed to the side.
+    builder.pushOffset(100.0, 0.0);
+
+    // Platform view offset from the top
+    builder.pushOffset(0.0, 150.0);
+    builder.addPlatformView(1, width: 700.0, height: 450.0);
+    builder.pop();
+
+    // Top bar
+    builder.addPicture(
+      Offset.zero,
+      createColoredBox(const Color.fromARGB(255, 255, 0, 0), const Size(800.0, 150.0)),
+    );
+
+    builder.pop();
+
+    signalNativeTest(); // Signal 2
+    PlatformDispatcher.instance.views.first.render(builder.build());
+  };
+  signalNativeTest(); // Signal 1
+  PlatformDispatcher.instance.scheduleFrame();
 }
 
 @pragma('vm:entry-point')
@@ -1669,10 +1757,12 @@ Future<void> a11y_main_multi_view() async {
       labelAttributes: <StringAttribute>[],
       rect: const Rect.fromLTRB(0.0, 0.0, 10.0, 10.0),
       transform: kTestTransform,
+      hitTestTransform: kTestTransform,
+      traversalParent: 0,
       childrenInTraversalOrder: Int32List.fromList(<int>[84, 96]),
       childrenInHitTestOrder: Int32List.fromList(<int>[96, 84]),
       actions: 0,
-      flags: 0,
+      flags: SemanticsFlags.none,
       maxValueLength: 0,
       currentValueLength: 0,
       textSelectionBase: 0,
@@ -1683,8 +1773,6 @@ Future<void> a11y_main_multi_view() async {
       scrollPosition: 0.0,
       scrollExtentMax: 0.0,
       scrollExtentMin: 0.0,
-      elevation: 0.0,
-      thickness: 0.0,
       hint: '',
       hintAttributes: <StringAttribute>[],
       value: '',
@@ -1698,10 +1786,14 @@ Future<void> a11y_main_multi_view() async {
       additionalActions: Int32List(0),
       controlsNodes: null,
       inputType: SemanticsInputType.none,
+      locale: null,
+      minValue: '0',
+      maxValue: '0',
     );
   }
 
-  for (final view in PlatformDispatcher.instance.views) {
+  PlatformDispatcher.instance.setSemanticsTreeEnabled(true);
+  for (final FlutterView view in PlatformDispatcher.instance.views) {
     view.updateSemantics(createForView(view).build());
   }
 

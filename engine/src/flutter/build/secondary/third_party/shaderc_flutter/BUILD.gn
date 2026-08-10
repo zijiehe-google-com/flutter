@@ -11,15 +11,19 @@ config("shaderc_util_config") {
 source_set("shaderc_util_flutter") {
   public_configs = [ ":shaderc_util_config" ]
 
-  configs +=
-      [ "//flutter/third_party/vulkan-deps/spirv-tools/src:spvtools_public_config" ]
+  configs += [
+    "//flutter/third_party/vulkan-deps/spirv-tools/src:spvtools_public_config",
+  ]
 
   public_deps = [
     "//flutter/third_party/vulkan-deps/glslang/src:glslang_sources",
     "//flutter/third_party/vulkan-deps/spirv-tools/src:spvtools",
   ]
 
-  defines = [ "ENABLE_HLSL=1" ]
+  defines = [
+    "ENABLE_HLSL=1",
+    "SHADERC_ENABLE_HLSL=1",
+  ]
 
   if (is_clang) {
     cflags_cc = [
@@ -61,8 +65,9 @@ source_set("shaderc_flutter") {
 
   public_configs = [ ":shaderc_config" ]
 
-  configs +=
-      [ "//flutter/third_party/vulkan-deps/spirv-tools/src:spvtools_public_config" ]
+  configs += [
+    "//flutter/third_party/vulkan-deps/spirv-tools/src:spvtools_public_config",
+  ]
 
   deps = [ ":shaderc_util_flutter" ]
 

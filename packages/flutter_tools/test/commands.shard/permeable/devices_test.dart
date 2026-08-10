@@ -33,7 +33,7 @@ void main() {
   testUsingContext(
     'devices can display no connected devices with the --machine flag',
     () async {
-      final DevicesCommand command = DevicesCommand();
+      final command = DevicesCommand();
       final CommandRunner<void> runner = createTestCommandRunner(command);
       await runner.run(<String>['devices', '--machine']);
 
@@ -46,7 +46,7 @@ void main() {
     'devices can display via the --machine flag',
     () async {
       deviceManager.devices = <Device>[WebServerDevice(logger: logger)];
-      final DevicesCommand command = DevicesCommand();
+      final command = DevicesCommand();
       final CommandRunner<void> runner = createTestCommandRunner(command);
       await runner.run(<String>['devices', '--machine']);
 
@@ -58,13 +58,13 @@ void main() {
             'id': 'web-server',
             'isSupported': true,
             'targetPlatform': 'web-javascript',
+            'cpuArch': 'unknown',
             'emulator': false,
             'sdk': 'Flutter Tools',
             'capabilities': <String, Object>{
               'hotReload': true,
               'hotRestart': true,
               'screenshot': false,
-              'fastStart': false,
               'flutterExit': false,
               'hardwareRendering': false,
               'startPaused': true,

@@ -63,12 +63,19 @@ export class FlutterEntrypointLoader {
     onEntrypointLoaded ??= (engineInitializer) => {
       engineInitializer.initializeEngine(config).then((appRunner) => appRunner.runApp())
     };
+    let { entrypointBaseUrl } = config;
     const { entryPointBaseUrl } = config;
+    if (!entrypointBaseUrl && entryPointBaseUrl) {
+      console.warn(
+        '[deprecated] `entryPointBaseUrl` is deprecated and will be removed in a future release. Use `entrypointBaseUrl` instead.'
+      );
+      entrypointBaseUrl = entryPointBaseUrl;
+    }
     if (build.compileTarget === "dart2wasm") {
-      return this._loadWasmEntrypoint(build, deps, entryPointBaseUrl, onEntrypointLoaded);
+      return this._loadWasmEntrypoint(build, deps, entrypointBaseUrl, onEntrypointLoaded, config?.wasmDeferredModulesLoader);
     } else {
       const mainPath = build.mainJsPath ?? "main.dart.js";
-      const entrypointUrl = resolveUrlWithSegments(entryPointBaseUrl, mainPath);
+      const entrypointUrl = resolveUrlWithSegments(entrypointBaseUrl, mainPath);
       return this._loadJSEntrypoint(entrypointUrl, onEntrypointLoaded, nonce);
     }
   }
@@ -139,10 +146,11 @@ export class FlutterEntrypointLoader {
    *
    * @param {import("./types").WasmApplicationBuild} build
    * @param {*} deps
-   * @param {string} entryPointBaseUrl
+   * @param {string} entrypointBaseUrl
    * @param {import("./types").OnEntrypointLoadedCallback} onEntrypointLoaded
+   * @param {import("./types").DeferredWasmModulesLoader} wasmDeferredModulesLoader
    */
-  async _loadWasmEntrypoint(build, deps, entrypointBaseUrl, onEntrypointLoaded) {
+  async _loadWasmEntrypoint(build, deps, entrypointBaseUrl, onEntrypointLoaded, wasmDeferredModulesLoader) {
     if (!this._scriptLoaded) {
       this._scriptLoaded = true;
 
@@ -174,7 +182,16 @@ export class FlutterEntrypointLoader {
         importsPromise = Promise.resolve({});
       }
       const compiledDartApp = await compiledDartAppPromise;
-      const dartApp = await compiledDartApp.instantiate(await importsPromise);
+      const defaultLoadDeferredModules = (moduleNames, handleModule) =>
+        Promise.all(
+          moduleNames.map((moduleName) =>
+            fetch(resolveUrlWithSegments(entrypointBaseUrl, moduleName)).then((response) => handleModule(moduleName, response))
+          )
+        );
+      const dartApp = await compiledDartApp.instantiate(await importsPromise, {
+        loadDeferredModules:
+          wasmDeferredModulesLoader || defaultLoadDeferredModules,
+      });
       await dartApp.invokeMain();
     }
   }

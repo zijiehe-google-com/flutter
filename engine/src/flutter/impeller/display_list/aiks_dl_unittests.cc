@@ -10,7 +10,7 @@
 #include "display_list/effects/dl_color_source.h"
 #include "display_list/effects/dl_image_filter.h"
 #include "display_list/geometry/dl_geometry_types.h"
-#include "display_list/geometry/dl_path.h"
+#include "display_list/geometry/dl_path_builder.h"
 #include "display_list/image/dl_image.h"
 #include "flutter/impeller/display_list/aiks_unittests.h"
 
@@ -542,7 +542,7 @@ TEST_P(AiksTest, StrokedPathWithMoveToThenCloseDrawnCorrectly) {
       // add another nearly-empty contour.
       .MoveTo(DlPoint(0, 400))
       .Close();
-  DlPath path(path_builder);
+  DlPath path = path_builder.TakePath();
 
   DisplayListBuilder builder;
   builder.Translate(50, 50);
@@ -592,6 +592,10 @@ TEST_P(AiksTest, SetContentsWithRegion) {
 
 // Regression test for https://github.com/flutter/flutter/issues/134678.
 TEST_P(AiksTest, ReleasesTextureOnTeardown) {
+  // Must be called before any methods that use the context to ensure that
+  // this test is always run with its own unique context.
+  EnsureContextIsUnique();
+
   auto context = MakeContext();
   std::weak_ptr<Texture> weak_texture;
 
@@ -629,8 +633,8 @@ TEST_P(AiksTest, ReleasesTextureOnTeardown) {
 TEST_P(AiksTest, MatrixImageFilterMagnify) {
   Scalar scale = 2.0;
   auto callback = [&]() -> sk_sp<DisplayList> {
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Scale", &scale, 1, 2);
       ImGui::End();
     }

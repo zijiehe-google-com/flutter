@@ -131,7 +131,7 @@ struct Settings {
   // Path to a library containing the application's compiled Dart code.
   // This is a vector so that the embedder can provide fallback paths in
   // case the primary path to the library can not be loaded.
-  std::vector<std::string> application_library_path;
+  std::vector<std::string> application_library_paths;
 
   // Path to a library containing compiled Dart code usable for launching
   // the VM service isolate.
@@ -158,8 +158,9 @@ struct Settings {
   bool purge_persistent_cache = false;
   bool endless_trace_buffer = false;
   bool enable_dart_profiling = false;
+  bool profile_startup = false;
   bool disable_dart_asserts = false;
-  bool enable_serial_gc = false;
+  bool profile_microtasks = false;
 
   // Whether embedder only allows secure connections.
   bool may_insecurely_connect_to_all_domains = true;
@@ -199,6 +200,9 @@ struct Settings {
   // the VM service.
   bool disable_service_auth_codes = true;
 
+  // Determines whether WebSocket origin checks are disabled for the VM service.
+  bool disable_service_origin_check = false;
+
   // Determine whether the vmservice should fallback to automatic port selection
   // after failing to bind to a specified port.
   bool enable_service_port_fallback = false;
@@ -236,8 +240,8 @@ struct Settings {
   // Whether to lazily initialize impeller PSO state.
   bool impeller_enable_lazy_shader_mode = false;
 
-  // An experimental mode that antialiases lines.
-  bool impeller_antialiased_lines = false;
+  // Whether to use SDFs for rendering in Impeller.
+  bool impeller_use_sdfs = false;
 
   // Log a warning during shell initialization if Impeller is not enabled.
   bool warn_on_impeller_opt_out = false;

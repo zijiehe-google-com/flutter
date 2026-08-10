@@ -4,9 +4,9 @@
 
 #include "impeller/core/formats.h"
 
+#include <format>
 #include <sstream>
 
-#include "impeller/base/strings.h"
 #include "impeller/base/validation.h"
 #include "impeller/core/texture.h"
 
@@ -26,6 +26,20 @@ constexpr bool StoreActionNeedsResolveTexture(StoreAction action) {
 bool Attachment::IsValid() const {
   if (!texture || !texture->IsValid()) {
     VALIDATION_LOG << "Attachment has no texture.";
+    return false;
+  }
+
+  const TextureDescriptor& desc = texture->GetTextureDescriptor();
+  if (mip_level >= desc.mip_count) {
+    VALIDATION_LOG << "Attachment mip_level " << mip_level
+                   << " is out of range; the texture has " << desc.mip_count
+                   << " mip levels.";
+    return false;
+  }
+  const uint32_t slice_count = desc.type == TextureType::kTextureCube ? 6u : 1u;
+  if (slice >= slice_count) {
+    VALIDATION_LOG << "Attachment slice " << slice
+                   << " is out of range for the texture type.";
     return false;
   }
 
@@ -123,21 +137,21 @@ std::string AttachmentToString(const Attachment& attachment) {
 std::string ColorAttachmentToString(const ColorAttachment& color) {
   std::stringstream stream;
   stream << AttachmentToString(color) << ",";
-  stream << "ClearColor=(" << ColorToString(color.clear_color) << ")";
+  stream << "ClearColor=" << color.clear_color;
   return stream.str();
 }
 
 std::string DepthAttachmentToString(const DepthAttachment& depth) {
   std::stringstream stream;
   stream << AttachmentToString(depth) << ",";
-  stream << "ClearDepth=" << SPrintF("%.2f", depth.clear_depth);
+  stream << std::format("ClearDepth={:.2f}", depth.clear_depth);
   return stream.str();
 }
 
 std::string StencilAttachmentToString(const StencilAttachment& stencil) {
   std::stringstream stream;
   stream << AttachmentToString(stencil) << ",";
-  stream << "ClearStencil=" << stencil.clear_stencil;
+  stream << std::format("ClearStencil={}", stencil.clear_stencil);
   return stream.str();
 }
 

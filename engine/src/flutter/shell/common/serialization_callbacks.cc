@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "flutter/shell/common/serialization_callbacks.h"
 #include "flutter/fml/logging.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkImage.h"
@@ -11,17 +12,16 @@
 
 namespace flutter {
 
-sk_sp<SkData> SerializeTypefaceWithoutData(SkTypeface* typeface, void* ctx) {
+SkSerialReturnType SerializeTypefaceWithoutData(SkTypeface* typeface,
+                                                void* ctx) {
   return SkData::MakeEmpty();
 }
 
-sk_sp<SkData> SerializeTypefaceWithData(SkTypeface* typeface, void* ctx) {
+SkSerialReturnType SerializeTypefaceWithData(SkTypeface* typeface, void* ctx) {
   return typeface->serialize(SkTypeface::SerializeBehavior::kDoIncludeData);
 }
 
-sk_sp<SkTypeface> DeserializeTypefaceWithoutData(const void* data,
-                                                 size_t length,
-                                                 void* ctx) {
+sk_sp<SkTypeface> DeserializeTypefaceWithoutData(SkStream&, void* ctx) {
   return nullptr;
 }
 
@@ -33,7 +33,7 @@ struct ImageMetaData {
   bool has_color_space;
 } __attribute__((packed));
 
-sk_sp<SkData> SerializeImageWithoutData(SkImage* image, void* ctx) {
+SkSerialReturnType SerializeImageWithoutData(SkImage* image, void* ctx) {
   const auto& info = image->imageInfo();
   SkDynamicMemoryWStream stream;
 
@@ -53,16 +53,18 @@ sk_sp<SkData> SerializeImageWithoutData(SkImage* image, void* ctx) {
   return stream.detachAsData();
 };
 
-sk_sp<SkImage> DeserializeImageWithoutData(const void* data,
-                                           size_t length,
-                                           void* ctx) {
-  FML_CHECK(length >= sizeof(ImageMetaData));
-  auto metadata = static_cast<const ImageMetaData*>(data);
+// This must match the declaration of SkDeserialImageFromDataProc.
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+sk_sp<SkImage> DeserializeImageWithoutData(sk_sp<SkData> data,
+                                           std::optional<SkAlphaType>,
+                                           void*) {
+  FML_CHECK(data->size() >= sizeof(ImageMetaData));
+  auto metadata = static_cast<const ImageMetaData*>(data->data());
   sk_sp<SkColorSpace> color_space = nullptr;
   if (metadata->has_color_space) {
-    color_space = SkColorSpace::Deserialize(
-        static_cast<const uint8_t*>(data) + sizeof(ImageMetaData),
-        length - sizeof(ImageMetaData));
+    color_space =
+        SkColorSpace::Deserialize(data->bytes() + sizeof(ImageMetaData),
+                                  data->size() - sizeof(ImageMetaData));
   }
 
   auto image_size = SkISize::Make(metadata->width, metadata->height);

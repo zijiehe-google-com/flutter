@@ -19,7 +19,7 @@ declare_args() {
   # If use_rbe is false, this property is ignored.
   create_xcode_symlinks = false
 
-  rbe_exec_root = rebase_path("//")
+  rbe_exec_root = rebase_path("//", root_build_dir)
 
   rbe_server_address = ""
 
@@ -33,10 +33,13 @@ declare_args() {
 
   rbe_platform = ""
 
-  rbe_dir = rebase_path("$buildtools_path/linux-x64/reclient")
+  rbe_dir = "$buildtools_path/linux-x64/reclient"
 
-  rbe_cfg = rebase_path("//flutter/build/rbe/rewrapper-linux.cfg")
+  rbe_cfg = "//flutter/build/rbe/rewrapper-linux.cfg"
 }
+
+rbe_dir = rebase_path(rbe_dir, root_build_dir)
+rbe_cfg = rebase_path(rbe_cfg, root_build_dir)
 
 rewrapper_command = [
   "$rbe_dir/rewrapper",
@@ -44,32 +47,20 @@ rewrapper_command = [
   "--exec_root=$rbe_exec_root",
 ]
 if (rbe_server_address != "") {
-  rewrapper_command += [
-    "--server_address=$rbe_server_address",
-  ]
+  rewrapper_command += [ "--server_address=$rbe_server_address" ]
 }
 if (rbe_exec_strategy != "") {
-  rewrapper_command += [
-    "--exec_strategy=$rbe_exec_strategy",
-  ]
+  rewrapper_command += [ "--exec_strategy=$rbe_exec_strategy" ]
 }
 if (rbe_dial_timeout != "") {
-  rewrapper_command += [
-    "--dial_timeout=$rbe_dial_timeout",
-  ]
+  rewrapper_command += [ "--dial_timeout=$rbe_dial_timeout" ]
 }
 if (rbe_exec_timeout != "") {
-  rewrapper_command += [
-    "--exec_timeout=$rbe_exec_timeout",
-  ]
+  rewrapper_command += [ "--exec_timeout=$rbe_exec_timeout" ]
 }
 if (rbe_reclient_timeout != "") {
-  rewrapper_command += [
-    "--reclient_timeout=$rbe_reclient_timeout",
-  ]
+  rewrapper_command += [ "--reclient_timeout=$rbe_reclient_timeout" ]
 }
 if (rbe_platform != "") {
-  rewrapper_command += [
-    "--platform=$rbe_platform",
-  ]
+  rewrapper_command += [ "--platform=$rbe_platform" ]
 }

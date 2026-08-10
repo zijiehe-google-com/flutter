@@ -10,7 +10,7 @@ import androidx.annotation.VisibleForTesting;
 public class Build {
   /** For use in place of the Android Build.VERSION_CODES class. */
   public static class API_LEVELS {
-    @VisibleForTesting public static final int FLUTTER_MIN = 21;
+    @VisibleForTesting public static final int FLUTTER_MIN = 24;
     /** Android 5.0 (Lollipop) */
     public static final int API_21 = 21;
     /** Android 5.1 (Lollipop MR1) */
@@ -41,7 +41,9 @@ public class Build {
     public static final int API_34 = 34;
     /** Android 15 (Vanilla Ice Cream) */
     public static final int API_35 = 35;
-    /** Android 16 */
+    /** Android 16 (Baklava) */
     public static final int API_36 = 36;
+    /** Android 17 (Cinnamon Bun) */
+    public static final int API_37 = 37;
   }
 }

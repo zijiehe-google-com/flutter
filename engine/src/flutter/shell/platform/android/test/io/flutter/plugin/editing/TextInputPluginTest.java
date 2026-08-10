@@ -189,7 +189,7 @@ public class TextInputPluginTest {
 
     textInputPlugin.setTextInputEditingState(
         testView, new TextInputChannel.TextEditState("initial input from framework", 0, 0, -1, -1));
-    assertTrue(textInputPlugin.getEditable().toString().equals("initial input from framework"));
+    assertEquals("initial input from framework", textInputPlugin.getEditable().toString());
 
     verify(textInputChannel, times(0))
         .updateEditingState(anyInt(), any(), anyInt(), anyInt(), anyInt(), anyInt());
@@ -198,7 +198,7 @@ public class TextInputPluginTest {
         testView,
         new TextInputChannel.TextEditState("more update from the framework", 1, 2, -1, -1));
 
-    assertTrue(textInputPlugin.getEditable().toString().equals("more update from the framework"));
+    assertEquals("more update from the framework", textInputPlugin.getEditable().toString());
     verify(textInputChannel, times(0))
         .updateEditingState(anyInt(), any(), anyInt(), anyInt(), anyInt(), anyInt());
   }
@@ -223,7 +223,7 @@ public class TextInputPluginTest {
     // Here's no textInputPlugin.setTextInputClient()
     textInputPlugin.setTextInputEditingState(
         testView, new TextInputChannel.TextEditState("initial input from framework", 0, 0, -1, -1));
-    assertTrue(textInputPlugin.getEditable().toString().equals("initial input from framework"));
+    assertEquals("initial input from framework", textInputPlugin.getEditable().toString());
   }
 
   @Test
@@ -262,8 +262,8 @@ public class TextInputPluginTest {
     textInputPlugin.setTextInputEditingState(
         testView,
         new TextInputChannel.TextEditState("receiving initial input from framework", 0, 0, -1, -1));
-    assertTrue(
-        textInputPlugin.getEditable().toString().equals("receiving initial input from framework"));
+    assertEquals(
+        "receiving initial input from framework", textInputPlugin.getEditable().toString());
 
     verify(textInputChannel, times(0)).updateEditingStateWithDeltas(anyInt(), any());
 
@@ -272,11 +272,8 @@ public class TextInputPluginTest {
         new TextInputChannel.TextEditState(
             "receiving more updates from the framework", 1, 2, -1, -1));
 
-    assertTrue(
-        textInputPlugin
-            .getEditable()
-            .toString()
-            .equals("receiving more updates from the framework"));
+    assertEquals(
+        "receiving more updates from the framework", textInputPlugin.getEditable().toString());
     verify(textInputChannel, times(0)).updateEditingStateWithDeltas(anyInt(), any());
   }
 
@@ -382,8 +379,8 @@ public class TextInputPluginTest {
     // updateEditingStateWithDeltas after the batch edit has completed and notified all listeners
     // of the editing state.
     inputConnection.setSelection(3, 4);
-    assertEquals(Selection.getSelectionStart(textInputPlugin.getEditable()), 3);
-    assertEquals(Selection.getSelectionEnd(textInputPlugin.getEditable()), 4);
+    assertEquals(3, Selection.getSelectionStart(textInputPlugin.getEditable()));
+    assertEquals(4, Selection.getSelectionEnd(textInputPlugin.getEditable()));
 
     verify(textInputChannel, times(0)).updateEditingStateWithDeltas(anyInt(), any());
     verify(textInputChannel, times(1))
@@ -518,8 +515,8 @@ public class TextInputPluginTest {
     // updateEditingStateWithDeltas after the batch edit has completed and notified all listeners
     // of the editing state.
     inputConnection.setSelection(3, 4);
-    assertEquals(Selection.getSelectionStart(textInputPlugin.getEditable()), 3);
-    assertEquals(Selection.getSelectionEnd(textInputPlugin.getEditable()), 4);
+    assertEquals(3, Selection.getSelectionStart(textInputPlugin.getEditable()));
+    assertEquals(4, Selection.getSelectionEnd(textInputPlugin.getEditable()));
 
     verify(textInputChannel, times(1)).updateEditingStateWithDeltas(anyInt(), any());
     verify(textInputChannel, times(0))
@@ -640,8 +637,8 @@ public class TextInputPluginTest {
     // updateEditingStateWithDeltas after the batch edit has completed and notified all listeners
     // of the editing state.
     inputConnection.setSelection(3, 4);
-    assertEquals(Selection.getSelectionStart(textInputPlugin.getEditable()), 3);
-    assertEquals(Selection.getSelectionEnd(textInputPlugin.getEditable()), 4);
+    assertEquals(3, Selection.getSelectionStart(textInputPlugin.getEditable()));
+    assertEquals(4, Selection.getSelectionEnd(textInputPlugin.getEditable()));
 
     verify(textInputChannel, times(1)).updateEditingStateWithDeltas(anyInt(), any());
 
@@ -757,8 +754,8 @@ public class TextInputPluginTest {
     // updateEditingStateWithDeltas after the batch edit has completed and notified all listeners
     // of the editing state.
     inputConnection.setSelection(3, 4);
-    assertEquals(Selection.getSelectionStart(textInputPlugin.getEditable()), 3);
-    assertEquals(Selection.getSelectionEnd(textInputPlugin.getEditable()), 4);
+    assertEquals(3, Selection.getSelectionStart(textInputPlugin.getEditable()));
+    assertEquals(4, Selection.getSelectionEnd(textInputPlugin.getEditable()));
 
     verify(textInputChannel, times(1)).updateEditingStateWithDeltas(anyInt(), any());
 
@@ -872,8 +869,8 @@ public class TextInputPluginTest {
     // updateEditingStateWithDeltas after the batch edit has completed and notified all listeners
     // of the editing state.
     inputConnection.setSelection(3, 4);
-    assertEquals(Selection.getSelectionStart(textInputPlugin.getEditable()), 3);
-    assertEquals(Selection.getSelectionEnd(textInputPlugin.getEditable()), 4);
+    assertEquals(3, Selection.getSelectionStart(textInputPlugin.getEditable()));
+    assertEquals(4, Selection.getSelectionEnd(textInputPlugin.getEditable()));
 
     verify(textInputChannel, times(1)).updateEditingStateWithDeltas(anyInt(), any());
 
@@ -963,8 +960,8 @@ public class TextInputPluginTest {
         .updateEditingState(anyInt(), any(), anyInt(), anyInt(), anyInt(), anyInt());
 
     inputConnectionAdaptor.setSelection(3, 4);
-    assertEquals(Selection.getSelectionStart(textInputPlugin.getEditable()), 3);
-    assertEquals(Selection.getSelectionEnd(textInputPlugin.getEditable()), 4);
+    assertEquals(3, Selection.getSelectionStart(textInputPlugin.getEditable()));
+    assertEquals(4, Selection.getSelectionEnd(textInputPlugin.getEditable()));
 
     verify(textInputChannel, times(1))
         .updateEditingState(anyInt(), any(), anyInt(), anyInt(), anyInt(), anyInt());
@@ -1067,18 +1064,18 @@ public class TextInputPluginTest {
     textInputPlugin.setTextInputEditingState(
         testView, new TextInputChannel.TextEditState("hello", 0, 0, -1, -1));
     assertEquals(1, testImm.getRestartCount(testView));
-    assertTrue(textInputPlugin.getEditable().toString().equals("hello"));
+    assertEquals("hello", textInputPlugin.getEditable().toString());
 
     // No pending restart, set Editable contents anyways.
     textInputPlugin.setTextInputEditingState(
         testView, new TextInputChannel.TextEditState("Shibuyawoo", 0, 0, -1, -1));
     assertEquals(1, testImm.getRestartCount(testView));
-    assertTrue(textInputPlugin.getEditable().toString().equals("Shibuyawoo"));
+    assertEquals("Shibuyawoo", textInputPlugin.getEditable().toString());
   }
 
   // See https://github.com/flutter/flutter/issues/29341 and
   // https://github.com/flutter/flutter/issues/31512
-  // All modern Samsung keybords are affected including non-korean languages and thus
+  // All modern Samsung keyboards are affected including non-korean languages and thus
   // need the restart.
   // Update: many other keyboards need this too:
   // https://github.com/flutter/flutter/issues/78827
@@ -1228,6 +1225,121 @@ public class TextInputPluginTest {
     textInputPlugin.setTextInputEditingState(
         testView, new TextInputChannel.TextEditState("", 0, 0, -1, -1));
     assertEquals(1, testImm.getRestartCount(testView));
+  }
+
+  @Test
+  public void imeVisibilityListener_restartsImmWhenIMEHidden() {
+    // Initialize a general TextInputPlugin.
+    InputMethodSubtype inputMethodSubtype = mock(InputMethodSubtype.class);
+    TestImm testImm = Shadow.extract(ctx.getSystemService(Context.INPUT_METHOD_SERVICE));
+    testImm.setCurrentInputMethodSubtype(inputMethodSubtype);
+    View testView = new View(ctx);
+    TextInputChannel textInputChannel = new TextInputChannel(mock(DartExecutor.class));
+    ScribeChannel scribeChannel = new ScribeChannel(mock(DartExecutor.class));
+    TextInputPlugin textInputPlugin =
+        new TextInputPlugin(
+            testView,
+            textInputChannel,
+            scribeChannel,
+            mock(PlatformViewsController.class),
+            mock(PlatformViewsController2.class));
+    textInputPlugin.setTextInputClient(
+        0,
+        new TextInputChannel.Configuration(
+            false,
+            false,
+            true,
+            true,
+            false,
+            TextInputChannel.TextCapitalization.NONE,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+    // There's a pending restart since we initialized the text input client. Flush that now.
+    textInputPlugin.setTextInputEditingState(
+        testView, new TextInputChannel.TextEditState("", 0, 0, -1, -1));
+    assertEquals(1, testImm.getRestartCount(testView));
+
+    // Imm restarts when IME is hidden.
+    ImeSyncDeferringInsetsCallback imeSyncCallback = textInputPlugin.getImeSyncCallback();
+    imeSyncCallback.getImeVisibilityListener().onImeVisibilityChanged(false);
+    assertEquals(2, testImm.getRestartCount(testView));
+  }
+
+  @Test
+  public void clearTextInputClient_restartsImmWhenIMEHidden() {
+    try (ActivityScenario<Activity> scenario = ActivityScenario.launch(Activity.class)) {
+      scenario.onActivity(
+          activity -> {
+            FlutterView testView = spy(new FlutterView(activity));
+
+            InputMethodSubtype inputMethodSubtype = mock(InputMethodSubtype.class);
+            TestImm testImm = Shadow.extract(ctx.getSystemService(Context.INPUT_METHOD_SERVICE));
+            testImm.setCurrentInputMethodSubtype(inputMethodSubtype);
+            TextInputChannel textInputChannel = new TextInputChannel(mock(DartExecutor.class));
+            ScribeChannel scribeChannel = new ScribeChannel(mock(DartExecutor.class));
+            TextInputPlugin textInputPlugin =
+                new TextInputPlugin(
+                    testView,
+                    textInputChannel,
+                    scribeChannel,
+                    mock(PlatformViewsController.class),
+                    mock(PlatformViewsController2.class));
+            textInputPlugin.setTextInputClient(
+                0,
+                new TextInputChannel.Configuration(
+                    false,
+                    false,
+                    true,
+                    true,
+                    false,
+                    TextInputChannel.TextCapitalization.NONE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null));
+            ImeSyncDeferringInsetsCallback imeSyncCallback = textInputPlugin.getImeSyncCallback();
+            FlutterEngine flutterEngine =
+                spy(new FlutterEngine(ctx, mockFlutterLoader, mockFlutterJni));
+            FlutterRenderer flutterRenderer = spy(new FlutterRenderer(mockFlutterJni));
+            when(flutterEngine.getRenderer()).thenReturn(flutterRenderer);
+            assertEquals(0, testImm.getRestartCount(testView));
+            // FlutterView restarts the input method to inform the Android framework that an engine
+            // has
+            // been attached.
+            testView.attachToFlutterEngine(flutterEngine);
+            assertEquals(1, testImm.getRestartCount(testView));
+
+            ArgumentCaptor<FlutterRenderer.ViewportMetrics> viewportMetricsCaptor =
+                ArgumentCaptor.forClass(FlutterRenderer.ViewportMetrics.class);
+
+            WindowInsets.Builder builder = new WindowInsets.Builder();
+
+            // There's a pending restart since we initialized the text input client. Flush that now.
+            textInputPlugin.setTextInputEditingState(
+                testView, new TextInputChannel.TextEditState("", 0, 0, -1, -1));
+            assertEquals(2, testImm.getRestartCount(testView));
+
+            // Set the initial insets and verify that they were set and the bottom view inset is
+            // correct.
+            builder.setInsets(WindowInsets.Type.ime(), Insets.of(0, 0, 0, 0));
+            when(testView.getRootWindowInsets()).thenReturn(builder.build());
+            imeSyncCallback.getInsetsListener().onApplyWindowInsets(testView, builder.build());
+            verify(flutterRenderer, atLeast(1)).setViewportMetrics(viewportMetricsCaptor.capture());
+            assertEquals(0, viewportMetricsCaptor.getValue().viewInsetBottom);
+
+            // Imm restarts when clearTextInputClient is called while the IME is hidden.
+            textInputPlugin.clearTextInputClient();
+            assertEquals(3, testImm.getRestartCount(testView));
+          });
+    }
   }
 
   @Test
@@ -1446,7 +1558,7 @@ public class TextInputPluginTest {
             null));
 
     textInputPlugin.showTextInput(testView);
-    assertEquals(testImm.isSoftInputVisible(), false);
+    assertFalse(testImm.isSoftInputVisible());
   }
 
   @Test
@@ -1485,7 +1597,7 @@ public class TextInputPluginTest {
         textInputPlugin.createInputConnection(testView, mock(KeyboardManager.class), editorInfo);
 
     assertEquals(
-        editorInfo.inputType, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI, editorInfo.inputType);
   }
 
   @Test
@@ -1524,8 +1636,8 @@ public class TextInputPluginTest {
         textInputPlugin.createInputConnection(testView, mock(KeyboardManager.class), editorInfo);
 
     assertEquals(
-        editorInfo.inputType,
-        InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+        editorInfo.inputType);
   }
 
   @Test
@@ -1564,11 +1676,11 @@ public class TextInputPluginTest {
         textInputPlugin.createInputConnection(testView, mock(KeyboardManager.class), editorInfo);
 
     assertEquals(
-        editorInfo.inputType,
         InputType.TYPE_CLASS_TEXT
             | InputType.TYPE_TEXT_FLAG_MULTI_LINE
             | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+            | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+        editorInfo.inputType);
   }
 
   @Config(minSdk = API_LEVELS.API_34)
@@ -1613,7 +1725,7 @@ public class TextInputPluginTest {
   @Config(sdk = API_LEVELS.API_32)
   @TargetApi(API_LEVELS.API_32)
   @Test
-  public void inputConnection_doesNotcallSetsStylusHandwritingAvailableWhenAPILevelUnsupported() {
+  public void inputConnection_doesNotCallSetsStylusHandwritingAvailableWhenAPILevelUnsupported() {
     View testView = new View(ctx);
     DartExecutor dartExecutor = mock(DartExecutor.class);
     TextInputChannel textInputChannel = new TextInputChannel(dartExecutor);
@@ -2228,7 +2340,7 @@ public class TextInputPluginTest {
             textInputPlugin.autofill(autofillValues);
 
             // Verify the Editable has been updated.
-            assertTrue(textInputPlugin.getEditable().toString().equals("focused field"));
+            assertEquals("focused field", textInputPlugin.getEditable().toString());
 
             // The autofill value of the focused field is sent via updateEditingState.
             verify(textInputChannel, times(1))
@@ -2240,7 +2352,7 @@ public class TextInputPluginTest {
                 .updateEditingStateWithTag(anyInt(), mapCaptor.capture());
             final TextInputChannel.TextEditState editState =
                 (TextInputChannel.TextEditState) mapCaptor.getValue().get("2");
-            assertEquals(editState.text, "unfocused field");
+            assertEquals("unfocused field", editState.text);
           });
     }
   }
@@ -2303,7 +2415,7 @@ public class TextInputPluginTest {
 
   @Config(minSdk = API_LEVELS.API_26)
   @Test
-  public void autofill_testSetTextIpnutClientUpdatesSideFields() {
+  public void autofill_testSetTextInputClientUpdatesSideFields() {
     if (Build.VERSION.SDK_INT < API_LEVELS.API_26) {
       return;
     }
@@ -2596,6 +2708,101 @@ public class TextInputPluginTest {
   }
 
   @Test
+  @TargetApi(API_LEVELS.API_35)
+  @Config(minSdk = API_LEVELS.API_35)
+  @SuppressWarnings("deprecation")
+  // getWindowSystemUiVisibility, SYSTEM_UI_FLAG_LAYOUT_STABLE.
+  // flutter#133074 tracks migration work.
+  public void ime_windowInsetsSync_notLaidOutBehindNavigation_post15_includesNavigationBars() {
+    try (ActivityScenario<Activity> scenario = ActivityScenario.launch(Activity.class)) {
+      scenario.onActivity(
+          activity -> {
+            FlutterView testView = spy(new FlutterView(activity));
+            when(testView.getWindowSystemUiVisibility())
+                .thenReturn(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+
+            TextInputChannel textInputChannel = new TextInputChannel(mock(DartExecutor.class));
+            ScribeChannel scribeChannel = new ScribeChannel(mock(DartExecutor.class));
+            TextInputPlugin textInputPlugin =
+                new TextInputPlugin(
+                    testView,
+                    textInputChannel,
+                    scribeChannel,
+                    mock(PlatformViewsController.class),
+                    mock(PlatformViewsController2.class));
+            ImeSyncDeferringInsetsCallback imeSyncCallback = textInputPlugin.getImeSyncCallback();
+            FlutterEngine flutterEngine =
+                spy(new FlutterEngine(ctx, mockFlutterLoader, mockFlutterJni));
+            FlutterRenderer flutterRenderer = spy(new FlutterRenderer(mockFlutterJni));
+            when(flutterEngine.getRenderer()).thenReturn(flutterRenderer);
+            testView.attachToFlutterEngine(flutterEngine);
+
+            WindowInsetsAnimation animation = mock(WindowInsetsAnimation.class);
+            when(animation.getTypeMask()).thenReturn(WindowInsets.Type.ime());
+
+            List<WindowInsetsAnimation> animationList = new ArrayList();
+            animationList.add(animation);
+
+            ArgumentCaptor<FlutterRenderer.ViewportMetrics> viewportMetricsCaptor =
+                ArgumentCaptor.forClass(FlutterRenderer.ViewportMetrics.class);
+
+            WindowInsets.Builder builder = new WindowInsets.Builder();
+
+            // Set the initial insets and verify that they were set and the bottom view inset is
+            // correct
+            imeSyncCallback.getInsetsListener().onApplyWindowInsets(testView, builder.build());
+
+            verify(flutterRenderer, atLeast(1)).setViewportMetrics(viewportMetricsCaptor.capture());
+            assertEquals(0, viewportMetricsCaptor.getValue().viewInsetBottom);
+
+            // Call onPrepare and set the lastWindowInsets - these should be stored for the end of
+            // the
+            // animation instead of being applied immediately
+            imeSyncCallback.getAnimationCallback().onPrepare(animation);
+            builder.setInsets(WindowInsets.Type.ime(), Insets.of(0, 0, 0, 100));
+            builder.setInsets(WindowInsets.Type.navigationBars(), Insets.of(0, 0, 0, 0));
+            imeSyncCallback.getInsetsListener().onApplyWindowInsets(testView, builder.build());
+
+            verify(flutterRenderer, atLeast(1)).setViewportMetrics(viewportMetricsCaptor.capture());
+            assertEquals(0, viewportMetricsCaptor.getValue().viewInsetBottom);
+
+            // Call onStart and apply new insets - these should be ignored completely
+            imeSyncCallback.getAnimationCallback().onStart(animation, null);
+            builder.setInsets(WindowInsets.Type.ime(), Insets.of(0, 0, 0, 50));
+            builder.setInsets(WindowInsets.Type.navigationBars(), Insets.of(0, 0, 0, 40));
+            imeSyncCallback.getInsetsListener().onApplyWindowInsets(testView, builder.build());
+
+            verify(flutterRenderer, atLeast(1)).setViewportMetrics(viewportMetricsCaptor.capture());
+            assertEquals(0, viewportMetricsCaptor.getValue().viewInsetBottom);
+
+            // Progress the animation and ensure that the navigation bar insets have not been
+            // subtracted from the IME insets
+            builder.setInsets(WindowInsets.Type.ime(), Insets.of(0, 0, 0, 25));
+            builder.setInsets(WindowInsets.Type.navigationBars(), Insets.of(0, 0, 0, 40));
+            imeSyncCallback.getAnimationCallback().onProgress(builder.build(), animationList);
+
+            verify(flutterRenderer, atLeast(1)).setViewportMetrics(viewportMetricsCaptor.capture());
+            assertEquals(25, viewportMetricsCaptor.getValue().viewInsetBottom);
+
+            builder.setInsets(WindowInsets.Type.ime(), Insets.of(0, 0, 0, 50));
+            builder.setInsets(WindowInsets.Type.navigationBars(), Insets.of(0, 0, 0, 40));
+            imeSyncCallback.getAnimationCallback().onProgress(builder.build(), animationList);
+
+            verify(flutterRenderer, atLeast(1)).setViewportMetrics(viewportMetricsCaptor.capture());
+            assertEquals(50, viewportMetricsCaptor.getValue().viewInsetBottom);
+
+            // End the animation and ensure that the bottom insets match the lastWindowInsets that
+            // we set
+            // during onPrepare
+            imeSyncCallback.getAnimationCallback().onEnd(animation);
+
+            verify(flutterRenderer, atLeast(1)).setViewportMetrics(viewportMetricsCaptor.capture());
+            assertEquals(100, viewportMetricsCaptor.getValue().viewInsetBottom);
+          });
+    }
+  }
+
+  @Test
   @TargetApi(API_LEVELS.API_30)
   @Config(sdk = API_LEVELS.API_30)
   @SuppressWarnings("deprecation")
@@ -2808,7 +3015,7 @@ public class TextInputPluginTest {
             scribeChannel,
             mock(PlatformViewsController.class),
             mock(PlatformViewsController2.class));
-    final Locale[] hintLocales = {new Locale("en")};
+    final Locale[] hintLocales = {new Locale.Builder().setLanguage("en").build()};
     textInputPlugin.setTextInputClient(
         0,
         new TextInputChannel.Configuration(
@@ -2831,6 +3038,152 @@ public class TextInputPluginTest {
         textInputPlugin.createInputConnection(testView, mock(KeyboardManager.class), editorInfo);
 
     assertEquals(editorInfo.hintLocales, new LocaleList(hintLocales));
+  }
+
+  /**
+   * Helper that constructs a minimal {@link TextInputChannel.Configuration} with the given number
+   * variation flags and captures the resulting {@link EditorInfo} from {@link
+   * TextInputPlugin#createInputConnection}.
+   */
+  private EditorInfo editorInfoForNumberConfig(
+      boolean isSigned,
+      boolean isDecimal,
+      boolean isPassword,
+      boolean obscureText,
+      boolean enableIMEPersonalizedLearning,
+      TextInputChannel.Configuration.Autofill autofill) {
+    View testView = new View(ctx);
+    DartExecutor dartExecutor = mock(DartExecutor.class);
+    TextInputChannel textInputChannel = new TextInputChannel(dartExecutor);
+    ScribeChannel scribeChannel = new ScribeChannel(mock(DartExecutor.class));
+    TextInputPlugin textInputPlugin =
+        new TextInputPlugin(
+            testView,
+            textInputChannel,
+            scribeChannel,
+            mock(PlatformViewsController.class),
+            mock(PlatformViewsController2.class));
+    textInputPlugin.setTextInputClient(
+        0,
+        new TextInputChannel.Configuration(
+            obscureText,
+            false,
+            true,
+            enableIMEPersonalizedLearning,
+            false,
+            TextInputChannel.TextCapitalization.NONE,
+            new TextInputChannel.InputType(
+                TextInputChannel.TextInputType.NUMBER, isSigned, isDecimal, isPassword),
+            null,
+            null,
+            autofill,
+            null,
+            null,
+            null));
+
+    EditorInfo editorInfo = new EditorInfo();
+    textInputPlugin.createInputConnection(testView, mock(KeyboardManager.class), editorInfo);
+    return editorInfo;
+  }
+
+  @Test
+  public void inputType_number() {
+    EditorInfo editorInfo = editorInfoForNumberConfig(false, false, false, false, true, null);
+    assertEquals(InputType.TYPE_CLASS_NUMBER, editorInfo.inputType);
+  }
+
+  @Test
+  public void inputType_numberWithPassword() {
+    EditorInfo editorInfo = editorInfoForNumberConfig(false, false, true, false, true, null);
+    assertEquals(
+        InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD,
+        editorInfo.inputType);
+  }
+
+  @Test
+  public void inputType_numberWithSigned() {
+    EditorInfo editorInfo = editorInfoForNumberConfig(true, false, false, false, true, null);
+    assertEquals(
+        InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_SIGNED, editorInfo.inputType);
+  }
+
+  @Test
+  public void inputType_numberWithDecimal() {
+    EditorInfo editorInfo = editorInfoForNumberConfig(false, true, false, false, true, null);
+    assertEquals(
+        InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL, editorInfo.inputType);
+  }
+
+  @Test
+  public void inputType_numberWithSignedAndPassword() {
+    EditorInfo editorInfo = editorInfoForNumberConfig(true, false, true, false, true, null);
+    assertEquals(
+        InputType.TYPE_CLASS_NUMBER
+            | InputType.TYPE_NUMBER_FLAG_SIGNED
+            | InputType.TYPE_NUMBER_VARIATION_PASSWORD,
+        editorInfo.inputType);
+  }
+
+  @Test
+  public void inputType_numberWithDecimalAndPassword() {
+    EditorInfo editorInfo = editorInfoForNumberConfig(false, true, true, false, true, null);
+    assertEquals(
+        InputType.TYPE_CLASS_NUMBER
+            | InputType.TYPE_NUMBER_FLAG_DECIMAL
+            | InputType.TYPE_NUMBER_VARIATION_PASSWORD,
+        editorInfo.inputType);
+  }
+
+  @Test
+  public void inputType_numberObscureTextDoesNotSetPasswordVariation() {
+    // obscureText is orthogonal to the numeric password variation; it must not implicitly set
+    // TYPE_NUMBER_VARIATION_PASSWORD on a NUMBER field. This test is load-bearing because the
+    // obscureText branch lives in the same inputTypeFromTextInputType() function as the NUMBER
+    // branch — the two are the most plausible place for accidental coupling.
+    EditorInfo editorInfo = editorInfoForNumberConfig(false, false, false, true, true, null);
+    assertEquals(InputType.TYPE_CLASS_NUMBER, editorInfo.inputType);
+    assertEquals(0, editorInfo.inputType & InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+  }
+
+  @Test
+  public void inputType_numberWithPasswordJsonRoundTrip()
+      throws JSONException, NoSuchFieldException {
+    // End-to-end coverage from JSON through Configuration.fromJson -> InputType.fromJson ->
+    // setTextInputClient -> createInputConnection. Catches typos in the "password" JSON key,
+    // gaps in Configuration.fromJson's recursive inputType handling, and any break in the
+    // JSON -> field -> plugin chain that the matrix tests bypass by calling new InputType(...)
+    // directly.
+    final JSONObject inputType = new JSONObject();
+    inputType.put("name", "TextInputType.number");
+    inputType.put("password", true);
+
+    final JSONObject arguments = new JSONObject();
+    arguments.put("inputAction", "TextInputAction.done");
+    arguments.put("textCapitalization", "TextCapitalization.none");
+    arguments.put("inputType", inputType);
+
+    final TextInputChannel.Configuration configuration =
+        TextInputChannel.Configuration.fromJson(arguments);
+
+    View testView = new View(ctx);
+    DartExecutor dartExecutor = mock(DartExecutor.class);
+    TextInputChannel textInputChannel = new TextInputChannel(dartExecutor);
+    ScribeChannel scribeChannel = new ScribeChannel(mock(DartExecutor.class));
+    TextInputPlugin textInputPlugin =
+        new TextInputPlugin(
+            testView,
+            textInputChannel,
+            scribeChannel,
+            mock(PlatformViewsController.class),
+            mock(PlatformViewsController2.class));
+    textInputPlugin.setTextInputClient(0, configuration);
+
+    EditorInfo editorInfo = new EditorInfo();
+    textInputPlugin.createInputConnection(testView, mock(KeyboardManager.class), editorInfo);
+
+    assertEquals(
+        InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD,
+        editorInfo.inputType);
   }
 
   interface EventHandler {

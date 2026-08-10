@@ -175,6 +175,130 @@ TEST(RectTest, RectFromIRect) {
   // IRect irect2 = IRect::Make(irect);
 }
 
+TEST(RectTest, RectMakeCircleBounds) {
+  Rect rect = Rect::MakeCircleBounds(Point(100.0f, 200.0f), 20.0f);
+
+  EXPECT_FALSE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 80.0f);
+  EXPECT_EQ(rect.GetRight(), 120.0f);
+  EXPECT_EQ(rect.GetTop(), 180.0f);
+  EXPECT_EQ(rect.GetBottom(), 220.0f);
+}
+
+TEST(RectTest, RectMakeCircleBoundsNegativeRadius) {
+  Rect rect = Rect::MakeCircleBounds(Point(100.0f, 200.0f), -20.0f);
+
+  EXPECT_TRUE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 120.0f);
+  EXPECT_EQ(rect.GetRight(), 80.0f);
+  EXPECT_EQ(rect.GetTop(), 220.0f);
+  EXPECT_EQ(rect.GetBottom(), 180.0f);
+}
+
+TEST(RectTest, IRectMakeCircleBounds) {
+  IRect rect = IRect::MakeCircleBounds(IPoint(100, 200), 20);
+
+  EXPECT_FALSE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 80);
+  EXPECT_EQ(rect.GetRight(), 120);
+  EXPECT_EQ(rect.GetTop(), 180);
+  EXPECT_EQ(rect.GetBottom(), 220);
+}
+
+TEST(RectTest, IRectMakeCircleBoundsNegativeRadius) {
+  IRect rect = IRect::MakeCircleBounds(IPoint(100, 200), -20);
+
+  EXPECT_TRUE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 120);
+  EXPECT_EQ(rect.GetRight(), 80);
+  EXPECT_EQ(rect.GetTop(), 220);
+  EXPECT_EQ(rect.GetBottom(), 180);
+}
+
+TEST(RectTest, RectMakeEllipseBoundsSize) {
+  Rect rect =
+      Rect::MakeEllipseBounds(Point(100.0f, 200.0f), Size(20.0f, 30.0f));
+
+  EXPECT_FALSE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 80.0f);
+  EXPECT_EQ(rect.GetRight(), 120.0f);
+  EXPECT_EQ(rect.GetTop(), 170.0f);
+  EXPECT_EQ(rect.GetBottom(), 230.0f);
+}
+
+TEST(RectTest, RectMakeEllipseBoundsNegativeSize) {
+  Rect rect =
+      Rect::MakeEllipseBounds(Point(100.0f, 200.0f), Size(-20.0f, -30.0f));
+
+  EXPECT_TRUE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 120.0f);
+  EXPECT_EQ(rect.GetRight(), 80.0f);
+  EXPECT_EQ(rect.GetTop(), 230.0f);
+  EXPECT_EQ(rect.GetBottom(), 170.0f);
+}
+
+TEST(RectTest, RectMakeEllipseBoundsPoint) {
+  Rect rect =
+      Rect::MakeEllipseBounds(Point(100.0f, 200.0f), Point(20.0f, 30.0f));
+
+  EXPECT_FALSE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 80.0f);
+  EXPECT_EQ(rect.GetRight(), 120.0f);
+  EXPECT_EQ(rect.GetTop(), 170.0f);
+  EXPECT_EQ(rect.GetBottom(), 230.0f);
+}
+
+TEST(RectTest, RectMakeEllipseBoundsNegativePoint) {
+  Rect rect =
+      Rect::MakeEllipseBounds(Point(100.0f, 200.0f), Point(-20.0f, -30.0f));
+
+  EXPECT_TRUE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 120.0f);
+  EXPECT_EQ(rect.GetRight(), 80.0f);
+  EXPECT_EQ(rect.GetTop(), 230.0f);
+  EXPECT_EQ(rect.GetBottom(), 170.0f);
+}
+
+TEST(RectTest, IRectMakeEllipseBoundsSize) {
+  IRect rect = IRect::MakeEllipseBounds(IPoint(100, 200), ISize(20, 30));
+
+  EXPECT_FALSE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 80);
+  EXPECT_EQ(rect.GetRight(), 120);
+  EXPECT_EQ(rect.GetTop(), 170);
+  EXPECT_EQ(rect.GetBottom(), 230);
+}
+
+TEST(RectTest, IRectMakeEllipseBoundsNegativeSize) {
+  IRect rect = IRect::MakeEllipseBounds(IPoint(100, 200), ISize(-20, -30));
+
+  EXPECT_TRUE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 120);
+  EXPECT_EQ(rect.GetRight(), 80);
+  EXPECT_EQ(rect.GetTop(), 230);
+  EXPECT_EQ(rect.GetBottom(), 170);
+}
+
+TEST(RectTest, IRectMakeEllipseBoundsPoint) {
+  IRect rect = IRect::MakeEllipseBounds(IPoint(100, 200), IPoint(20, 30));
+
+  EXPECT_FALSE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 80);
+  EXPECT_EQ(rect.GetRight(), 120);
+  EXPECT_EQ(rect.GetTop(), 170);
+  EXPECT_EQ(rect.GetBottom(), 230);
+}
+
+TEST(RectTest, IRectMakeEllipseBoundsNegativePoint) {
+  IRect rect = IRect::MakeEllipseBounds(IPoint(100, 200), IPoint(-20, -30));
+
+  EXPECT_TRUE(rect.IsEmpty());
+  EXPECT_EQ(rect.GetLeft(), 120);
+  EXPECT_EQ(rect.GetRight(), 80);
+  EXPECT_EQ(rect.GetTop(), 230);
+  EXPECT_EQ(rect.GetBottom(), 170);
+}
+
 TEST(RectTest, RectOverflowXYWH) {
   auto min = std::numeric_limits<Scalar>::lowest();
   auto max = std::numeric_limits<Scalar>::max();
@@ -1313,11 +1437,136 @@ TEST(RectTest, IRectExpand) {
   EXPECT_EQ(rect.Expand(ISize{-10, -10}), IRect::MakeLTRB(110, 110, 190, 190));
 }
 
+TEST(RectTest, RectExpandToMinTransformedSizeNullForScaledToZero) {
+  auto rect = Rect();
+  auto transform = Matrix::MakeScale(Vector3(0.0f, 1.0f));
+  EXPECT_EQ(rect.ExpandToMinTransformedSize({1.0f, 1.0f}, transform),
+            std::nullopt);
+}
+
+TEST(RectTest, RectExpandToMinTransformedSizeReturnsUnmodifiedWhenLargeEnough) {
+  Rect rect = Rect::MakeXYWH(0, 0, 10, 20);
+  auto transform = Matrix::MakeScale(Vector3(0.5f, 0.5f));
+  EXPECT_EQ(rect.ExpandToMinTransformedSize({1.0f, 1.0f}, transform), rect);
+}
+
+TEST(
+    RectTest,
+    RectExpandToMinTransformedSizeReturnsUnmodifiedWhenLargeEnoughWithFractionalSize) {
+  // Regression test for https://github.com/flutter/flutter/issues/189807.
+  Rect rect = Rect::MakeXYWH(100.0f, 50.0f, 64.2f, 40.0f);
+  auto transform = Matrix();
+  EXPECT_EQ(rect.ExpandToMinTransformedSize({1.0f, 1.0f}, transform), rect);
+}
+
+TEST(RectTest, RectExpandToMinTransformedSizeRectWithIdentityTransform) {
+  Size size = Size(2.0f, 2.0f);
+  Rect rect = Rect::MakeEllipseBounds(Point(), size * 0.5f);
+
+  auto transform = Matrix();
+
+  // Expand to a width and height less than the original size.
+  {
+    auto expanded = rect.ExpandToMinTransformedSize({0.5f, 0.75f}, transform);
+    ASSERT_TRUE(expanded.has_value());
+    if (expanded.has_value()) {
+      EXPECT_EQ(expanded.value().GetSize(), size);
+    }
+  }
+
+  // Expand to a minimum width. Minimum height is less than the original size.
+  {
+    auto expanded = rect.ExpandToMinTransformedSize({4.0f, 1.5f}, transform);
+    ASSERT_TRUE(expanded.has_value());
+    if (expanded.has_value()) {
+      EXPECT_EQ(expanded.value().GetSize(), Size(4.0f, 2.0f));
+    }
+  }
+
+  // Expand to a minimum height. Minimum width is less than the original size.
+  {
+    auto expanded = rect.ExpandToMinTransformedSize({1.5f, 4.0f}, transform);
+    ASSERT_TRUE(expanded.has_value());
+    if (expanded.has_value()) {
+      EXPECT_EQ(expanded.value().GetSize(), Size(2.0f, 4.0f));
+    }
+  }
+
+  // Expand to a minimum width and height.
+  {
+    auto expanded = rect.ExpandToMinTransformedSize({3.0f, 4.0f}, transform);
+    ASSERT_TRUE(expanded.has_value());
+    if (expanded.has_value()) {
+      EXPECT_EQ(expanded.value().GetSize(), Size(3.0f, 4.0f));
+    }
+  }
+}
+
+TEST(RectTest, RectExpandToMinTransformedSizeRectWithScalingTransform) {
+  Size size = Size(2.0f, 2.0f);
+  Rect rect = Rect::MakeEllipseBounds(Point(), size * 0.5f);
+
+  // Scale by 2x in the X direction and 3x in the Y direction.
+  // Transformed rect size is (4.0, 6.0).
+  auto transform = Matrix::MakeScale(Vector3(2.0f, 3.0f));
+
+  // Expand to a transformed width and height less than the transformed size of
+  // the original rectangle.
+  {
+    auto expanded = rect.ExpandToMinTransformedSize({3.0f, 4.0f}, transform);
+    ASSERT_TRUE(expanded.has_value());
+    if (expanded.has_value()) {
+      EXPECT_EQ(expanded.value().GetSize(), size);
+    }
+  }
+
+  // Expand to 5.0 transformed width.
+  // This is equal to 5.0 / 2.0 = 2.5 local width.
+  {
+    auto expanded = rect.ExpandToMinTransformedSize({5.0f, 4.0f}, transform);
+    ASSERT_TRUE(expanded.has_value());
+    if (expanded.has_value()) {
+      EXPECT_EQ(expanded.value().GetSize(), Size(2.5f, 2.0f));
+    }
+  }
+
+  // Expand to 9.0 transformed height.
+  // This is equal to 9.0 / 3.0 = 3.0 local height.
+  {
+    auto expanded = rect.ExpandToMinTransformedSize({3.0f, 9.0f}, transform);
+    ASSERT_TRUE(expanded.has_value());
+    if (expanded.has_value()) {
+      EXPECT_EQ(expanded.value().GetSize(), Size(2.0f, 3.0));
+    }
+  }
+
+  // Expand both width and height.
+  {
+    auto expanded = rect.ExpandToMinTransformedSize({5.0f, 9.0f}, transform);
+    ASSERT_TRUE(expanded.has_value());
+    if (expanded.has_value()) {
+      EXPECT_EQ(expanded.value().GetSize(), Size(2.5f, 3.0f));
+    }
+  }
+}
+
 TEST(RectTest, ContainsFloatingPoint) {
   auto rect1 =
       Rect::MakeXYWH(472.599945f, 440.999969f, 1102.80005f, 654.000061f);
   auto rect2 = Rect::MakeXYWH(724.f, 618.f, 600.f, 300.f);
   EXPECT_TRUE(rect1.Contains(rect2));
+}
+
+TEST(RectTest, FloatContainsInteger) {
+  auto rect1 =
+      Rect::MakeLTRB(472.599945f, 440.999969f, 1574.80005f, 1094.000000f);
+  EXPECT_TRUE(rect1.Contains(IRect::MakeLTRB(473, 441, 1574, 1094)));
+
+  // Now test failure to contain same rect expanded by 1 on each side
+  EXPECT_FALSE(rect1.Contains(IRect::MakeLTRB(472, 441, 1574, 1094)));
+  EXPECT_FALSE(rect1.Contains(IRect::MakeLTRB(473, 440, 1574, 1094)));
+  EXPECT_FALSE(rect1.Contains(IRect::MakeLTRB(473, 441, 1575, 1094)));
+  EXPECT_FALSE(rect1.Contains(IRect::MakeLTRB(473, 441, 1574, 1095)));
 }
 
 template <typename R>
@@ -3113,134 +3362,239 @@ TEST(RectTest, IRectRound) {
   }
 }
 
-TEST(RectTest, TransformAndClipBounds) {
-  {
-    // This matrix should clip no corners.
-    auto matrix = impeller::Matrix::MakeColumn(
-        // clang-format off
-        2.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 4.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 8.0f
-        // clang-format on
-    );
-    Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
-    // None of these should have a W<0
-    EXPECT_EQ(matrix.TransformHomogenous(src.GetLeftTop()),
-              Vector3(200.0f, 400.0f, 8.0f));
-    EXPECT_EQ(matrix.TransformHomogenous(src.GetRightTop()),
-              Vector3(400.0f, 400.0f, 8.0f));
-    EXPECT_EQ(matrix.TransformHomogenous(src.GetLeftBottom()),
-              Vector3(200.0f, 800.0f, 8.0f));
-    EXPECT_EQ(matrix.TransformHomogenous(src.GetRightBottom()),
-              Vector3(400.0f, 800.0f, 8.0f));
+TEST(RectTest, TransformAndClipBoundsNoCornersClipped) {
+  // This matrix should clip no corners.
+  auto matrix = impeller::Matrix::MakeColumn(
+      // clang-format off
+      2.0f, 0.0f, 0.0f, 0.0f,
+      0.0f, 4.0f, 0.0f, 0.0f,
+      0.0f, 0.0f, 1.0f, 0.0f,
+      0.0f, 0.0f, 0.0f, 8.0f
+      // clang-format on
+  );
+  Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
 
-    Rect expect = Rect::MakeLTRB(25.0f, 50.0f, 50.0f, 100.0f);
-    EXPECT_FALSE(src.TransformAndClipBounds(matrix).IsEmpty());
-    EXPECT_EQ(src.TransformAndClipBounds(matrix), expect);
-  }
+  // None of these should have a W<0
 
-  {
-    // This matrix should clip one corner.
-    auto matrix = impeller::Matrix::MakeColumn(
-        // clang-format off
-        2.0f, 0.0f, 0.0f, -0.01f,
-        0.0f, 2.0f, 0.0f, -0.006f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 3.0f
-        // clang-format on
-    );
-    Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
-    // Exactly one of these should have a W<0
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftTop()),
-                        Vector3(200.0f, 200.0f, 1.4f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightTop()),
-                        Vector3(400.0f, 200.0f, 0.4f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftBottom()),
-                        Vector3(200.0f, 400.0f, 0.8f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightBottom()),
-                        Vector3(400.0f, 400.0f, -0.2f));
+  EXPECT_EQ(matrix.TransformHomogenous(src.GetLeftTop()),
+            Vector3(200.0f, 400.0f, 8.0f));
+  EXPECT_EQ(matrix.TransformHomogenous(src.GetRightTop()),
+            Vector3(400.0f, 400.0f, 8.0f));
+  EXPECT_EQ(matrix.TransformHomogenous(src.GetLeftBottom()),
+            Vector3(200.0f, 800.0f, 8.0f));
+  EXPECT_EQ(matrix.TransformHomogenous(src.GetRightBottom()),
+            Vector3(400.0f, 800.0f, 8.0f));
 
-    Rect expect = Rect::MakeLTRB(142.85715f, 142.85715f, 6553600.f, 6553600.f);
-    EXPECT_FALSE(src.TransformAndClipBounds(matrix).IsEmpty());
-    EXPECT_RECT_NEAR(src.TransformAndClipBounds(matrix), expect);
-  }
+  Rect expect = Rect::MakeLTRB(25.0f, 50.0f, 50.0f, 100.0f);
+  EXPECT_FALSE(src.TransformAndClipBounds(matrix).IsEmpty());
+  EXPECT_EQ(src.TransformAndClipBounds(matrix), expect);
+}
 
-  {
-    // This matrix should clip two corners.
-    auto matrix = impeller::Matrix::MakeColumn(
-        // clang-format off
-        2.0f, 0.0f, 0.0f, -.015f,
-        0.0f, 2.0f, 0.0f, -.006f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 3.0f
-        // clang-format on
-    );
-    Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
-    // Exactly two of these should have a W<0
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftTop()),
-                        Vector3(200.0f, 200.0f, 0.9f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightTop()),
-                        Vector3(400.0f, 200.0f, -0.6f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftBottom()),
-                        Vector3(200.0f, 400.0f, 0.3f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightBottom()),
-                        Vector3(400.0f, 400.0f, -1.2f));
+TEST(RectTest, TransformAndClipBoundsOneCornerClipped) {
+  // This matrix should clip one corner.
+  auto matrix = impeller::Matrix::MakeColumn(
+      // clang-format off
+      2.0f, 0.0f, 0.0f, -0.01f,
+      0.0f, 2.0f, 0.0f, -0.006f,
+      0.0f, 0.0f, 1.0f, 0.0f,
+      0.0f, 0.0f, 0.0f, 3.0f
+      // clang-format on
+  );
+  Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
 
-    Rect expect = Rect::MakeLTRB(222.2222f, 222.2222f, 5898373.f, 6553600.f);
-    EXPECT_FALSE(src.TransformAndClipBounds(matrix).IsEmpty());
-    EXPECT_RECT_NEAR(src.TransformAndClipBounds(matrix), expect);
-  }
+  // Exactly one of these should have a W<0
+  //
+  // When W<0 we interpolate the point back towards the adjacent points
+  // that have W>0 to a location just greater than the W=0 half-plane.
+  // We interpolate them to W=epsilon where epsilon == 2^-14.
 
-  {
-    // This matrix should clip three corners.
-    auto matrix = impeller::Matrix::MakeColumn(
-        // clang-format off
-        2.0f, 0.0f, 0.0f, -.02f,
-        0.0f, 2.0f, 0.0f, -.006f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 3.0f
-        // clang-format on
-    );
-    Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
-    // Exactly three of these should have a W<0
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftTop()),
-                        Vector3(200.0f, 200.0f, 0.4f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightTop()),
-                        Vector3(400.0f, 200.0f, -1.6f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftBottom()),
-                        Vector3(200.0f, 400.0f, -0.2f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightBottom()),
-                        Vector3(400.0f, 400.0f, -2.2f));
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftTop()),
+                      Vector3(200.0f, 200.0f, 1.4f));
+  // Contributes (200, 200) / 1.4 == (142.85714, 142.85714)
 
-    Rect expect = Rect::MakeLTRB(499.99988f, 499.99988f, 5898340.f, 4369400.f);
-    EXPECT_FALSE(src.TransformAndClipBounds(matrix).IsEmpty());
-    EXPECT_RECT_NEAR(src.TransformAndClipBounds(matrix), expect);
-  }
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightTop()),
+                      Vector3(400.0f, 200.0f, 0.4f));
+  // Contributes (400, 200) / 0.4 == (1000, 500)
 
-  {
-    // This matrix should clip all four corners.
-    auto matrix = impeller::Matrix::MakeColumn(
-        // clang-format off
-        2.0f, 0.0f, 0.0f, -.025f,
-        0.0f, 2.0f, 0.0f, -.006f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 3.0f
-        // clang-format on
-    );
-    Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
-    // All of these should have a W<0
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftTop()),
-                        Vector3(200.0f, 200.0f, -0.1f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightTop()),
-                        Vector3(400.0f, 200.0f, -2.6f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftBottom()),
-                        Vector3(200.0f, 400.0f, -0.7f));
-    EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightBottom()),
-                        Vector3(400.0f, 400.0f, -3.2f));
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftBottom()),
+                      Vector3(200.0f, 400.0f, 0.8f));
+  // Contributes (200, 400) / 0.8 == (250, 500)
 
-    EXPECT_TRUE(src.TransformAndClipBounds(matrix).IsEmpty());
-  }
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightBottom()),
+                      Vector3(400.0f, 400.0f, -0.2f));
+  // Interpolates at epsilon against RightTop to produce:
+  // t = (epsilon - -.2) / (.4 - -.2)
+  //   = (epsilon + .2) / .6
+  //   = 0.333435
+  // Lerp(RightBottom, RightTop, 0.333435) = (400, 333.313, epsilon)
+  //                                       = (6553600, 5461000)
+  //
+  // It also interpolates at epsilon against LeftBottom to produce:
+  // t = (epsilon - -.2) / (.8 - -.2)
+  //   = (epsilon + .2) / 1
+  //   = 0.200061
+  // Lerp(RightBottom, LeftBottom, 0.200061) = (359.988, 400, epsilon)
+  //                                         = (5898040, 6553600)
+
+  // Min/Max X and Y of all the points generated above are:
+  // Min X == 142.85714
+  // Min Y == 142.85714
+  // Max X == 6553600
+  // Max Y == 6553600
+
+  Rect expect = Rect::MakeLTRB(142.85714f, 142.85714f, 6553600.f, 6553600.f);
+  EXPECT_FALSE(src.TransformAndClipBounds(matrix).IsEmpty());
+  EXPECT_RECT_NEAR(src.TransformAndClipBounds(matrix), expect);
+}
+
+TEST(RectTest, TransformAndClipBoundsTwoCornersClipped) {
+  // This matrix should clip two corners.
+  auto matrix = impeller::Matrix::MakeColumn(
+      // clang-format off
+      2.0f, 0.0f, 0.0f, -.015f,
+      0.0f, 2.0f, 0.0f, -.006f,
+      0.0f, 0.0f, 1.0f, 0.0f,
+      0.0f, 0.0f, 0.0f, 3.0f
+      // clang-format on
+  );
+  Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
+
+  // Exactly two of these homogenous results should have a W<0
+  //
+  // When W<0 we interpolate the point back towards the adjacent points
+  // that have W>0 to a location just greater than the W=0 half-plane.
+  // We interpolate them to W=epsilon where epsilon == 2^-14.
+
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftTop()),
+                      Vector3(200.0f, 200.0f, 0.9f));
+  // Contributes (200, 200) / 0.9 == (222.2222, 222.2222) to bounds
+
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightTop()),
+                      Vector3(400.0f, 200.0f, -0.6f));
+  // Interpolates at epsilon against LeftTop to produce:
+  // t = (epsilon - -.6) / (.9 - -.6)
+  //   = (epsilon + .6) / 1.5
+  //   = 0.4000407
+  // Lerp(RightTop, LeftTop, 0.4000407) = (319.9919, 200, epsilon)
+  //                                    = (5242747, 3276800)
+  // Cannot interpolate against RightBottom because it also has W<0
+
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftBottom()),
+                      Vector3(200.0f, 400.0f, 0.3f));
+  // Contributes (200, 400) / 0.3 == (666.6667, 1333.3333) to bounds
+
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightBottom()),
+                      Vector3(400.0f, 400.0f, -1.2f));
+  // Interpolates at epsilon against LeftBottom to produce:
+  // t = (epsilon - -1.2) / (.3 - -1.2)
+  //   = (epsilon + 1.2) / 1.5
+  //   = 0.8000407
+  // Lerp(RightBottom, LeftBottom, 0.8000407) = (239.9919, 400, epsilon)
+  //                                          = (3932026.667, 6553600)
+  // Cannot interpolate against RightTop because it also has W<0
+
+  // Min/Max X and Y of all the points generated above are:
+  // Min X == 222.2222
+  // Min Y == 222.2222
+  // Max X == 5242747
+  // Max Y == 6553600
+
+  Rect expect = Rect::MakeLTRB(222.2222f, 222.2222f, 5242747.f, 6553600.f);
+
+  EXPECT_FALSE(src.TransformAndClipBounds(matrix).IsEmpty());
+  EXPECT_RECT_NEAR(src.TransformAndClipBounds(matrix), expect);
+}
+
+TEST(RectTest, TransformAndClipBoundsThreeCornersClipped) {
+  // This matrix should clip three corners.
+  auto matrix = impeller::Matrix::MakeColumn(
+      // clang-format off
+      2.0f, 0.0f, 0.0f, -.02f,
+      0.0f, 2.0f, 0.0f, -.006f,
+      0.0f, 0.0f, 1.0f, 0.0f,
+      0.0f, 0.0f, 0.0f, 3.0f
+      // clang-format on
+  );
+  Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
+
+  // Exactly three of these homogenous results should have a W<0
+  //
+  // When W<0 we interpolate the point back towards the adjacent points
+  // that have W>0 to a location just greater than the W=0 half-plane.
+  // We interpolate them to W=epsilon where epsilon == 2^-14.
+
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftTop()),
+                      Vector3(200.0f, 200.0f, 0.4f));
+  // Contributes (200, 200) / 0.4 == (500, 500) to bounds
+
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightTop()),
+                      Vector3(400.0f, 200.0f, -1.6f));
+  // Interpolates at epsilon against LeftTop to produce:
+  // t = (epsilon - -1.6) / (.4 - -1.6)
+  //   = (epsilon + 1.6) / 2
+  //   = 0.8000305
+  // Lerp(RightTop, LeftTop, 0.8000305) = (239.9939, 200, epsilon)
+  //                                    = (3932060, 3276800)
+  // Cannot interpolate against RightBottom because it also has W<0
+
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftBottom()),
+                      Vector3(200.0f, 400.0f, -0.2f));
+  // Interpolates against LeftTop to produce:
+  // t = (epsilon - -.2) / (.4 - -.2)
+  //   = (epsilon + .2) / .6
+  //   = 0.333435
+  // Lerp(LeftBottom, LeftTop, .333435) = (200, 333.31299, epsilon)
+  //                                    = (3276800, 5461000)
+  // Cannot interpolate against RightBottom because it also has W<0
+
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightBottom()),
+                      Vector3(400.0f, 400.0f, -2.2f));
+  // Cannot interpolate against either RightTop or LeftBottom because
+  // both of those adjacent points transformed to a W<0 homogenous point.
+
+  // Min/Max X and Y of all the points generated above are:
+  // Min X == 500
+  // Min Y == 500
+  // Max X == 3932060
+  // Max Y == 5461000
+
+  Rect expect = Rect::MakeLTRB(500.0f, 500.0f, 3932060.f, 5461000.f);
+
+  EXPECT_FALSE(src.TransformAndClipBounds(matrix).IsEmpty());
+  EXPECT_RECT_NEAR(src.TransformAndClipBounds(matrix), expect);
+}
+
+TEST(RectTest, TransformAndClipBoundsAllFourCornersClipped) {
+  // This matrix should clip all four corners.
+  auto matrix = impeller::Matrix::MakeColumn(
+      // clang-format off
+      2.0f, 0.0f, 0.0f, -.025f,
+      0.0f, 2.0f, 0.0f, -.006f,
+      0.0f, 0.0f, 1.0f, 0.0f,
+      0.0f, 0.0f, 0.0f, 3.0f
+      // clang-format on
+  );
+  Rect src = Rect::MakeLTRB(100.0f, 100.0f, 200.0f, 200.0f);
+
+  // All of these should have a W<0
+  //
+  // When W<0 we interpolate the point back towards the adjacent points
+  // that have W>0 to a location just greater than the W=0 half-plane.
+  // We interpolate them to W=epsilon where epsilon == 2^-14.
+
+  // In this case, none of the homogenous results are in bounds (W > 0)
+  // so we can perform no interpolation - the operation is not visible.
+
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftTop()),
+                      Vector3(200.0f, 200.0f, -0.1f));
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightTop()),
+                      Vector3(400.0f, 200.0f, -2.6f));
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetLeftBottom()),
+                      Vector3(200.0f, 400.0f, -0.7f));
+  EXPECT_VECTOR3_NEAR(matrix.TransformHomogenous(src.GetRightBottom()),
+                      Vector3(400.0f, 400.0f, -3.2f));
+
+  EXPECT_TRUE(src.TransformAndClipBounds(matrix).IsEmpty());
 }
 
 }  // namespace testing

@@ -5,13 +5,13 @@
 #ifndef FLUTTER_IMPELLER_RENDERER_BACKEND_VULKAN_CONTEXT_VK_H_
 #define FLUTTER_IMPELLER_RENDERER_BACKEND_VULKAN_CONTEXT_VK_H_
 
+#include <format>
 #include <memory>
 
 #include "flutter/fml/concurrent_message_loop.h"
 #include "flutter/fml/mapping.h"
 #include "flutter/fml/unique_fd.h"
 #include "impeller/base/backend_cast.h"
-#include "impeller/base/strings.h"
 #include "impeller/core/formats.h"
 #include "impeller/core/runtime_types.h"
 #include "impeller/renderer/backend/vulkan/command_pool_vk.h"
@@ -65,6 +65,10 @@ class ContextVK final : public Context,
                         public BackendCast<ContextVK, Context>,
                         public std::enable_shared_from_this<ContextVK> {
  public:
+  // Mutable tracker for command buffer submission bookkeeping.
+  const std::shared_ptr<GpuSubmissionTracker>& GetMutableSubmissionTracker()
+      const;
+
   /// Embedder Stuff
   struct EmbedderData {
     VkInstance instance;
@@ -119,6 +123,10 @@ class ContextVK final : public Context,
   std::shared_ptr<Allocator> GetResourceAllocator() const override;
 
   // |Context|
+  std::shared_ptr<const GpuSubmissionTracker> GetSubmissionTracker()
+      const override;
+
+  // |Context|
   std::shared_ptr<ShaderLibrary> GetShaderLibrary() const override;
 
   // |Context|
@@ -160,7 +168,7 @@ class ContextVK final : public Context,
       // No-op if validation layers are not enabled.
       return true;
     }
-    std::string combined = SPrintF("%s %s", label.data(), trailing.data());
+    std::string combined = std::format("{} {}", label, trailing);
     return SetDebugName(GetDevice(), handle, combined);
   }
 
@@ -238,6 +246,9 @@ class ContextVK final : public Context,
   // | Context |
   bool FlushCommandBuffers() override;
 
+  // | Context |
+  [[nodiscard]] bool FinishQueue() override;
+
   RuntimeStageBackend GetRuntimeStageBackend() const override;
 
   std::shared_ptr<const IdleWaiter> GetIdleWaiter() const override {
@@ -277,6 +288,8 @@ class ContextVK final : public Context,
   QueuesVK queues_;
   std::shared_ptr<const Capabilities> device_capabilities_;
   std::shared_ptr<FenceWaiterVK> fence_waiter_;
+  std::shared_ptr<GpuSubmissionTracker> submission_tracker_ =
+      std::make_shared<GpuSubmissionTracker>();
   std::shared_ptr<ResourceManagerVK> resource_manager_;
   std::shared_ptr<DescriptorPoolRecyclerVK> descriptor_pool_recycler_;
   std::shared_ptr<CommandPoolRecyclerVK> command_pool_recycler_;

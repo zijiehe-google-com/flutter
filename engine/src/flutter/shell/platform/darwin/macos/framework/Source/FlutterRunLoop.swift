@@ -1,3 +1,7 @@
+// Copyright 2013 The Flutter Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 import Foundation
 
 /// Interface for scheduling tasks on the run loop.
@@ -7,8 +11,9 @@ import Foundation
 /// schedules the task in both common run loop mode and a private run loop mode,
 /// which allows it to run in a mode where it only processes Flutter messages
 /// (`pollFlutterMessagesOnce()`).
-@objc public final class FlutterRunLoop: NSObject {
+@objc final class FlutterRunLoop: NSObject {
   private static let flutterRunLoopMode = CFRunLoopMode("FlutterRunLoopMode" as CFString)
+
   private static var _mainRunLoop: FlutterRunLoop?
 
   private let runLoop: CFRunLoop = CFRunLoopGetCurrent()
@@ -86,7 +91,7 @@ import Foundation
 
   // Ensures that the `FlutterRunLoop` for main thread is initialized. Only
   // needs to be called once and must be called on the main thread.
-  @objc public static func ensureMainLoopInitialized() {
+  @objc static func ensureMainLoopInitialized() {
     assert(Thread.isMainThread, "Must be called on the main thread.")
     if _mainRunLoop == nil {
       _mainRunLoop = FlutterRunLoop()
@@ -94,7 +99,7 @@ import Foundation
   }
 
   // The `FlutterRunLoop` for the main thread.
-  @objc public static var mainRunLoop: FlutterRunLoop {
+  @objc static var mainRunLoop: FlutterRunLoop {
     assert(
       _mainRunLoop != nil,
       "Main run loop has not been initialized. Call ensureMainLoopInitialized() first."
@@ -103,8 +108,7 @@ import Foundation
   }
 
   // Schedules a block to be executed on the main thread.
-  @objc(performBlock:afterDelay:)
-  public func perform(block: @escaping () -> Void, afterDelay delay: TimeInterval) {
+  @objc func perform(afterDelay delay: TimeInterval, block: @escaping () -> Void) {
     tasksLock.lock()
     defer { tasksLock.unlock() }
 
@@ -119,8 +123,8 @@ import Foundation
 
   // Schedules a block to be executed on the main thread after a delay.
   @objc(performBlock:)
-  public func perform(block: @escaping () -> Void) {
-    perform(block: block, afterDelay: 0)
+  func perform(_ block: @escaping () -> Void) {
+    perform(afterDelay: 0, block: block)
   }
 
   private func performExpiredTasks() {
@@ -154,7 +158,7 @@ import Foundation
 
   /// Executes single iteration of the run loop in the mode where only Flutter
   /// messages are processed.
-  @objc public func pollFlutterMessagesOnce() {
+  @objc func pollFlutterMessagesOnce() {
     CFRunLoopRunInMode(Self.flutterRunLoopMode, 0.1, true)
   }
 }

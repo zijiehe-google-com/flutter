@@ -40,10 +40,32 @@ static bool DeviceSupportsComputeSubgroups(id<MTLDevice> device) {
          [device supportsFamily:MTLGPUFamilyMac2];
 }
 
-// See "Extended Range and wide color pixel formats" in the metal feature set
-// tables.
+// See "Extended Range and wide color pixel formats" in the Metal Feature Set
+// Tables: https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
+// Wide gamut requires Apple3+ GPU family (supports 10-bit and F16 formats).
+// This includes all iOS devices with A9+ chip and Apple Silicon Macs (M1+).
+// Intel Macs (Mac2 family) do not support wide gamut.
 static bool DeviceSupportsExtendedRangeFormats(id<MTLDevice> device) {
   return [device supportsFamily:MTLGPUFamilyApple3];
+}
+
+// See "Pixel Format Capabilities" in the Metal Feature Set Tables:
+// https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
+// BC formats are available on the Mac family and on Apple7+ (A14/M1 and newer).
+static bool DeviceSupportsTextureCompressionBC(id<MTLDevice> device) {
+  return [device supportsFamily:MTLGPUFamilyMac2] ||
+         [device supportsFamily:MTLGPUFamilyApple7];
+}
+
+// ETC2 and ASTC LDR are available on all Apple GPU families but not on the Mac
+// (Intel/AMD) family.
+static bool DeviceSupportsTextureCompressionMobile(id<MTLDevice> device) {
+  return [device supportsFamily:MTLGPUFamilyApple2];
+}
+
+// ASTC HDR requires Apple GPU family 6 (A13) or later.
+static bool DeviceSupportsTextureCompressionAstcHdr(id<MTLDevice> device) {
+  return [device supportsFamily:MTLGPUFamilyApple6];
 }
 
 static std::unique_ptr<Capabilities> InferMetalCapabilities(
@@ -65,8 +87,22 @@ static std::unique_ptr<Capabilities> InferMetalCapabilities(
       .SetDefaultGlyphAtlasFormat(PixelFormat::kA8UNormInt)
       .SetSupportsTriangleFan(false)
       .SetMaximumRenderPassAttachmentSize(DeviceMaxTextureSizeSupported(device))
+      // Anisotropic filtering with a clamp in the range [1, 16] is supported
+      // on all Metal devices.
+      .SetMaxSamplerAnisotropy(16)
       .SetSupportsExtendedRangeFormats(
           DeviceSupportsExtendedRangeFormats(device))
+      .SetSupportsTextureCompression(CompressedTextureFamily::kBC,
+                                     DeviceSupportsTextureCompressionBC(device))
+      .SetSupportsTextureCompression(
+          CompressedTextureFamily::kETC2,
+          DeviceSupportsTextureCompressionMobile(device))
+      .SetSupportsTextureCompression(
+          CompressedTextureFamily::kASTC,
+          DeviceSupportsTextureCompressionMobile(device))
+      .SetSupportsTextureCompression(
+          CompressedTextureFamily::kASTCHDR,
+          DeviceSupportsTextureCompressionAstcHdr(device))
 #if FML_OS_IOS && !TARGET_OS_SIMULATOR
       .SetMinimumUniformAlignment(16)
 #else
@@ -358,6 +394,16 @@ std::shared_ptr<Allocator> ContextMTL::GetResourceAllocator() const {
   return resource_allocator_;
 }
 
+std::shared_ptr<const GpuSubmissionTracker> ContextMTL::GetSubmissionTracker()
+    const {
+  return submission_tracker_;
+}
+
+const std::shared_ptr<GpuSubmissionTracker>&
+ContextMTL::GetMutableSubmissionTracker() const {
+  return submission_tracker_;
+}
+
 id<MTLDevice> ContextMTL::GetMTLDevice() const {
   return device_;
 }
@@ -418,9 +464,41 @@ void ContextMTL::FlushTasksAwaitingGPU() {
     Lock lock(tasks_awaiting_gpu_mutex_);
     std::swap(tasks_awaiting_gpu, tasks_awaiting_gpu_);
   }
+  std::vector<PendingTasks> tasks_to_queue;
   for (const auto& task : tasks_awaiting_gpu) {
-    task.task();
+    is_gpu_disabled_sync_switch_->Execute(fml::SyncSwitch::Handlers()
+                                              .SetIfFalse([&] { task.task(); })
+                                              .SetIfTrue([&] {
+                                                // Lost access to the GPU
+                                                // immediately after it was
+                                                // activated. This may happen if
+                                                // the app was quickly
+                                                // foregrounded/backgrounded
+                                                // from a push notification.
+                                                // Store the tasks on the
+                                                // context again.
+                                                tasks_to_queue.push_back(task);
+                                              }));
   }
+  if (!tasks_to_queue.empty()) {
+    Lock lock(tasks_awaiting_gpu_mutex_);
+    tasks_awaiting_gpu_.insert(tasks_awaiting_gpu_.end(),
+                               tasks_to_queue.begin(), tasks_to_queue.end());
+  }
+}
+
+bool ContextMTL::FinishQueue() {
+  id<MTLCommandBuffer> command_buffer =
+      ContextMTL::Cast(this)->CreateMTLCommandBuffer("Finish Queue Waiter");
+  [command_buffer commit];
+  // clang-format off
+  // This isn't documented in the method, but there are places where they
+  // imply that they will wait even for an empty buffer...
+  //
+  // See https://developer.apple.com/documentation/metalperformanceshaders/tuning-hints
+  // clang-format on
+  [command_buffer waitUntilCompleted];
+  return true;
 }
 
 ContextMTL::SyncSwitchObserver::SyncSwitchObserver(ContextMTL& parent)
@@ -453,6 +531,8 @@ ImpellerMetalCaptureManager::ImpellerMetalCaptureManager(id<MTLDevice> device) {
   current_capture_scope_ = [[MTLCaptureManager sharedCaptureManager]
       newCaptureScopeWithDevice:device];
   [current_capture_scope_ setLabel:@"Impeller Frame"];
+  [[MTLCaptureManager sharedCaptureManager]
+      setDefaultCaptureScope:current_capture_scope_];
 }
 
 bool ImpellerMetalCaptureManager::CaptureScopeActive() const {

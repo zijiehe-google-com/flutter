@@ -209,17 +209,29 @@ Future<void> main() async {
   });
 
   test('update image colorBlendMode', () {
-    final RenderImage image = RenderImage();
+    final image = RenderImage();
     expect(image.colorBlendMode, isNull);
     image.colorBlendMode = BlendMode.color;
     expect(image.colorBlendMode, BlendMode.color);
+  });
+
+  test('RenderImage blendMode defaults to BlendMode.srcOver', () {
+    final image = RenderImage();
+    expect(image.blendMode, BlendMode.srcOver);
+  });
+
+  test('RenderImage blendMode can be set via constructor and setter', () {
+    final image = RenderImage(blendMode: BlendMode.plus);
+    expect(image.blendMode, BlendMode.plus);
+    image.blendMode = BlendMode.multiply;
+    expect(image.blendMode, BlendMode.multiply);
   });
 
   test('RenderImage disposes its image', () async {
     final ui.Image image = await createTestImage(width: 10, height: 10, cache: false);
     expect(image.debugGetOpenHandleStackTraces()!.length, 1);
 
-    final RenderImage renderImage = RenderImage(image: image.clone());
+    final renderImage = RenderImage(image: image.clone());
     expect(image.debugGetOpenHandleStackTraces()!.length, 2);
 
     renderImage.image = image.clone();
@@ -236,7 +248,7 @@ Future<void> main() async {
     final ui.Image image = await createTestImage(width: 10, height: 10, cache: false);
     expect(image.debugGetOpenHandleStackTraces()!.length, 1);
 
-    final RenderImage renderImage = RenderImage(image: image.clone());
+    final renderImage = RenderImage(image: image.clone());
     expect(image.debugGetOpenHandleStackTraces()!.length, 2);
 
     // Testing short-circuit logic of setter.
@@ -254,7 +266,7 @@ Future<void> main() async {
     final ui.Image image = await createTestImage(width: 10, height: 10, cache: false);
     expect(image.debugGetOpenHandleStackTraces()!.length, 1);
 
-    final RenderImage renderImage = RenderImage(image: image.clone());
+    final renderImage = RenderImage(image: image.clone());
     expect(image.debugGetOpenHandleStackTraces()!.length, 2);
 
     renderImage.dispose();

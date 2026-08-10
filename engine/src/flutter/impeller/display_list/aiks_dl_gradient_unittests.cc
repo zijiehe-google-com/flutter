@@ -8,6 +8,7 @@
 #include "display_list/effects/dl_color_filter.h"
 #include "display_list/effects/dl_color_source.h"
 #include "display_list/effects/dl_mask_filter.h"
+#include "display_list/geometry/dl_path_builder.h"
 #include "flutter/impeller/display_list/aiks_unittests.h"
 
 #include "flutter/display_list/dl_builder.h"
@@ -83,6 +84,26 @@ TEST_P(AiksTest, CanRenderLinearGradientDecalWithColorFilter) {
   // decal gradient.
   paint.setColorFilter(DlColorFilter::MakeBlend(DlColor::kGreen().withAlpha(64),
                                                 DlBlendMode::kSrcOver));
+  paint.setColor(DlColor::kWhite());
+  builder.DrawRect(DlRect::MakeXYWH(0, 0, 600, 600), paint);
+  ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
+}
+
+TEST_P(AiksTest, CanRenderLinearGradientWithImageFilter) {
+  DisplayListBuilder builder;
+  Point scale = GetContentScale();
+  builder.Scale(scale.x, scale.y);
+  DlPaint paint;
+  builder.Translate(100.0f, 0);
+
+  std::vector<DlColor> colors = {
+      DlColor(Color{0.9568, 0.2627, 0.2118, 1.0}.ToARGB()),
+      DlColor(Color{0.1294, 0.5882, 0.9529, 0.0}.ToARGB())};
+  std::vector<Scalar> stops = {0.0, 1.0};
+
+  paint.setColorSource(DlColorSource::MakeLinear(
+      {0, 0}, {200, 200}, 2, colors.data(), stops.data(), DlTileMode::kClamp));
+  paint.setImageFilter(DlImageFilter::MakeBlur(20.0, 20.0, DlTileMode::kDecal));
   paint.setColor(DlColor::kWhite());
   builder.DrawRect(DlRect::MakeXYWH(0, 0, 600, 600), paint);
   ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
@@ -409,8 +430,8 @@ TEST_P(AiksTest, CanRenderLinearGradientManyColorsUnevenStops) {
 
     static int selected_tile_mode = 0;
     static Matrix matrix;
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::Combo("Tile mode", &selected_tile_mode, tile_mode_names,
                    sizeof(tile_mode_names) / sizeof(char*));
       std::string label = "##1";
@@ -480,8 +501,8 @@ TEST_P(AiksTest, CanRenderRadialGradient) {
 
     static int selected_tile_mode = 0;
     static Matrix matrix;
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::Combo("Tile mode", &selected_tile_mode, tile_mode_names,
                    sizeof(tile_mode_names) / sizeof(char*));
       std::string label = "##1";
@@ -525,8 +546,8 @@ TEST_P(AiksTest, CanRenderRadialGradientManyColors) {
         0, 0, 1, 0,  //
         0, 0, 0, 1   //
     };
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::Combo("Tile mode", &selected_tile_mode, tile_mode_names,
                    sizeof(tile_mode_names) / sizeof(char*));
       std::string label = "##1";
@@ -741,8 +762,8 @@ TEST_P(AiksTest, GradientStrokesRenderCorrectly) {
     static int selected_tile_mode = 0;
     static float alpha = 1;
 
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Scale", &scale, 0, 6);
       ImGui::Checkbox("Circle clip", &add_circle_clip);
       ImGui::SliderFloat("Alpha", &alpha, 0, 1);
@@ -777,7 +798,7 @@ TEST_P(AiksTest, GradientStrokesRenderCorrectly) {
     path_builder.Close();
     path_builder.MoveTo(DlPoint(60, 20));
     path_builder.QuadraticCurveTo(DlPoint(60, 60), DlPoint(20, 60));
-    DlPath path(path_builder);
+    DlPath path = path_builder.TakePath();
 
     builder.Scale(scale, scale);
 

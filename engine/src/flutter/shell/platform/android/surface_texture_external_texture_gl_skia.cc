@@ -8,6 +8,7 @@
 #define GL_GLEXT_PROTOTYPES
 #include <GLES2/gl2ext.h>
 
+#include "flutter/display_list/image/dl_image_skia.h"
 #include "flutter/third_party/skia/include/core/SkColorSpace.h"
 #include "flutter/third_party/skia/include/gpu/ganesh/GrBackendSurface.h"
 #include "flutter/third_party/skia/include/gpu/ganesh/GrDirectContext.h"
@@ -45,17 +46,16 @@ void SurfaceTextureExternalTextureGLSkia::ProcessFrame(PaintContext& context,
                                  GL_RGBA8_OES};
   auto backendTexture =
       GrBackendTextures::MakeGL(1, 1, skgpu::Mipmapped::kNo, textureInfo);
-  dl_image_ = DlImage::Make(SkImages::BorrowTextureFrom(
+  dl_image_ = DlImageSkia::Make(SkImages::BorrowTextureFrom(
       context.gr_context, backendTexture, kTopLeft_GrSurfaceOrigin,
       kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr));
 }
 
 void SurfaceTextureExternalTextureGLSkia::Detach() {
   SurfaceTextureExternalTexture::Detach();
-  if (texture_name_ != 0) {
-    glDeleteTextures(1, &texture_name_);
-    texture_name_ = 0;
-  }
+  // Detach will collect the texture handle.
+  // See also: https://github.com/flutter/flutter/issues/152459
+  texture_name_ = 0;
 }
 
 }  // namespace flutter

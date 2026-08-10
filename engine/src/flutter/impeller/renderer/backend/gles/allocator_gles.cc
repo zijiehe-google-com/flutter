@@ -27,7 +27,7 @@ bool AllocatorGLES::IsValid() const {
 // |Allocator|
 std::shared_ptr<DeviceBuffer> AllocatorGLES::OnCreateBuffer(
     const DeviceBufferDescriptor& desc) {
-  auto backing_store = std::make_shared<Allocation>();
+  auto backing_store = std::make_unique<Allocation>();
   if (!backing_store->Truncate(Bytes{desc.size})) {
     return nullptr;
   }
@@ -39,8 +39,9 @@ std::shared_ptr<DeviceBuffer> AllocatorGLES::OnCreateBuffer(
 
 // |Allocator|
 std::shared_ptr<Texture> AllocatorGLES::OnCreateTexture(
-    const TextureDescriptor& desc) {
-  return std::make_shared<TextureGLES>(reactor_, desc);
+    const TextureDescriptor& desc,
+    bool threadsafe) {
+  return std::make_shared<TextureGLES>(reactor_, desc, threadsafe);
 }
 
 // |Allocator|

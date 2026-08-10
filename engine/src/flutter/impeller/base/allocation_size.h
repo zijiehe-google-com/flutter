@@ -6,6 +6,7 @@
 #define FLUTTER_IMPELLER_BASE_ALLOCATION_SIZE_H_
 
 #include <cmath>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -91,32 +92,9 @@ class AllocationSize {
     return AllocationSize{GetByteSize(), FromBytesTag::kFromBytes};
   }
 
-  // The following relational operators can be replaced with a defaulted
-  // spaceship operator post C++20.
+  // Comparison operators.
 
-  constexpr bool operator<(const AllocationSize& other) const {
-    return bytes_ < other.bytes_;
-  }
-
-  constexpr bool operator>(const AllocationSize& other) const {
-    return bytes_ > other.bytes_;
-  }
-
-  constexpr bool operator>=(const AllocationSize& other) const {
-    return bytes_ >= other.bytes_;
-  }
-
-  constexpr bool operator<=(const AllocationSize& other) const {
-    return bytes_ <= other.bytes_;
-  }
-
-  constexpr bool operator==(const AllocationSize& other) const {
-    return bytes_ == other.bytes_;
-  }
-
-  constexpr bool operator!=(const AllocationSize& other) const {
-    return bytes_ != other.bytes_;
-  }
+  constexpr auto operator<=>(const AllocationSize& other) const = default;
 
   // Explicit casts.
 
@@ -148,7 +126,19 @@ class AllocationSize {
   uint64_t bytes_ = {};
 };
 
-using Bytes = AllocationSize<1u>;
+class Bytes : public AllocationSize<1u> {
+ public:
+  constexpr Bytes() = default;
+
+  // Do not do arithmetic when constructing Bytes in order to avoid overflow
+  // or precision loss.
+  explicit constexpr Bytes(uint64_t size)
+      : AllocationSize(size, FromBytesTag::kFromBytes) {}
+
+  // Allow implicit conversion from the base class to support arithmetic
+  // operations.
+  explicit constexpr Bytes(AllocationSize<1u> size) : AllocationSize(size) {}
+};
 
 using KiloBytes = AllocationSize<1'000u>;
 using MegaBytes = AllocationSize<1'000u * 1'000u>;
@@ -161,37 +151,37 @@ using GibiBytes = AllocationSize<1'024u * 1'024u * 1'024u>;
 inline namespace allocation_size_literals {
 
 // NOLINTNEXTLINE
-constexpr Bytes operator"" _bytes(unsigned long long int size) {
+constexpr Bytes operator""_bytes(unsigned long long int size) {
   return Bytes{size};
 }
 
 // NOLINTNEXTLINE
-constexpr KiloBytes operator"" _kb(unsigned long long int size) {
+constexpr KiloBytes operator""_kb(unsigned long long int size) {
   return KiloBytes{size};
 }
 
 // NOLINTNEXTLINE
-constexpr MegaBytes operator"" _mb(unsigned long long int size) {
+constexpr MegaBytes operator""_mb(unsigned long long int size) {
   return MegaBytes{size};
 }
 
 // NOLINTNEXTLINE
-constexpr GigaBytes operator"" _gb(unsigned long long int size) {
+constexpr GigaBytes operator""_gb(unsigned long long int size) {
   return GigaBytes{size};
 }
 
 // NOLINTNEXTLINE
-constexpr KibiBytes operator"" _kib(unsigned long long int size) {
+constexpr KibiBytes operator""_kib(unsigned long long int size) {
   return KibiBytes{size};
 }
 
 // NOLINTNEXTLINE
-constexpr MebiBytes operator"" _mib(unsigned long long int size) {
+constexpr MebiBytes operator""_mib(unsigned long long int size) {
   return MebiBytes{size};
 }
 
 // NOLINTNEXTLINE
-constexpr GibiBytes operator"" _gib(unsigned long long int size) {
+constexpr GibiBytes operator""_gib(unsigned long long int size) {
   return GibiBytes{size};
 }
 

@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:typed_data';
+import 'package:crypto/crypto.dart';
 import 'package:file/memory.dart';
 import 'package:flutter_tools/src/android/android_sdk.dart';
 import 'package:flutter_tools/src/android/gradle.dart';
 import 'package:flutter_tools/src/android/gradle_utils.dart' as gradle_utils;
 import 'package:flutter_tools/src/artifacts.dart';
-import 'package:flutter_tools/src/base/common.dart';
 import 'package:flutter_tools/src/base/file_system.dart';
 import 'package:flutter_tools/src/base/logger.dart';
 import 'package:flutter_tools/src/base/platform.dart';
@@ -19,7 +20,7 @@ import 'package:flutter_tools/src/project.dart';
 import '../../src/common.dart';
 import '../../src/context.dart';
 
-const String kModulePubspec = '''
+const kModulePubspec = '''
 name: test
 flutter:
   module:
@@ -346,7 +347,7 @@ void main() {
     }
 
     testUsingAndroidContext('extract build name and number from pubspec.yaml', () async {
-      const String manifest = '''
+      const manifest = '''
 name: test
 version: 1.0.0+1
 dependencies:
@@ -355,7 +356,7 @@ dependencies:
 flutter:
 ''';
 
-      const BuildInfo buildInfo = BuildInfo(
+      const buildInfo = BuildInfo(
         BuildMode.release,
         null,
         treeShakeIcons: false,
@@ -370,7 +371,7 @@ flutter:
     });
 
     testUsingAndroidContext('extract build name from pubspec.yaml', () async {
-      const String manifest = '''
+      const manifest = '''
 name: test
 version: 1.0.0
 dependencies:
@@ -378,7 +379,7 @@ dependencies:
     sdk: flutter
 flutter:
 ''';
-      const BuildInfo buildInfo = BuildInfo(
+      const buildInfo = BuildInfo(
         BuildMode.release,
         null,
         treeShakeIcons: false,
@@ -388,7 +389,7 @@ flutter:
     });
 
     testUsingAndroidContext('allow build info to override build name', () async {
-      const String manifest = '''
+      const manifest = '''
 name: test
 version: 1.0.0+1
 dependencies:
@@ -396,7 +397,7 @@ dependencies:
     sdk: flutter
 flutter:
 ''';
-      const BuildInfo buildInfo = BuildInfo(
+      const buildInfo = BuildInfo(
         BuildMode.release,
         null,
         buildName: '1.0.2',
@@ -412,7 +413,7 @@ flutter:
     });
 
     testUsingAndroidContext('allow build info to override build number', () async {
-      const String manifest = '''
+      const manifest = '''
 name: test
 version: 1.0.0+1
 dependencies:
@@ -420,7 +421,7 @@ dependencies:
     sdk: flutter
 flutter:
 ''';
-      const BuildInfo buildInfo = BuildInfo(
+      const buildInfo = BuildInfo(
         BuildMode.release,
         null,
         buildNumber: '3',
@@ -436,7 +437,7 @@ flutter:
     });
 
     testUsingAndroidContext('allow build info to override build name and number', () async {
-      const String manifest = '''
+      const manifest = '''
 name: test
 version: 1.0.0+1
 dependencies:
@@ -444,7 +445,7 @@ dependencies:
     sdk: flutter
 flutter:
 ''';
-      const BuildInfo buildInfo = BuildInfo(
+      const buildInfo = BuildInfo(
         BuildMode.release,
         null,
         buildName: '1.0.2',
@@ -461,7 +462,7 @@ flutter:
     });
 
     testUsingAndroidContext('allow build info to override build name and set number', () async {
-      const String manifest = '''
+      const manifest = '''
 name: test
 version: 1.0.0
 dependencies:
@@ -469,7 +470,7 @@ dependencies:
     sdk: flutter
 flutter:
 ''';
-      const BuildInfo buildInfo = BuildInfo(
+      const buildInfo = BuildInfo(
         BuildMode.release,
         null,
         buildName: '1.0.2',
@@ -486,14 +487,14 @@ flutter:
     });
 
     testUsingAndroidContext('allow build info to set build name and number', () async {
-      const String manifest = '''
+      const manifest = '''
 name: test
 dependencies:
   flutter:
     sdk: flutter
 flutter:
 ''';
-      const BuildInfo buildInfo = BuildInfo(
+      const buildInfo = BuildInfo(
         BuildMode.release,
         null,
         buildName: '1.0.2',
@@ -510,7 +511,7 @@ flutter:
     });
 
     testUsingAndroidContext('allow build info to unset build name and number', () async {
-      const String manifest = '''
+      const manifest = '''
 name: test
 dependencies:
   flutter:
@@ -571,70 +572,6 @@ flutter:
     });
   });
 
-  group('gradle version', () {
-    testWithoutContext('should be compatible with the Android plugin version', () {
-      // Granular versions.
-      expect(gradle_utils.getGradleVersionFor('1.0.0'), '2.3');
-      expect(gradle_utils.getGradleVersionFor('1.0.1'), '2.3');
-      expect(gradle_utils.getGradleVersionFor('1.0.2'), '2.3');
-      expect(gradle_utils.getGradleVersionFor('1.0.4'), '2.3');
-      expect(gradle_utils.getGradleVersionFor('1.0.8'), '2.3');
-      expect(gradle_utils.getGradleVersionFor('1.1.0'), '2.3');
-      expect(gradle_utils.getGradleVersionFor('1.1.2'), '2.3');
-      expect(gradle_utils.getGradleVersionFor('1.1.2'), '2.3');
-      expect(gradle_utils.getGradleVersionFor('1.1.3'), '2.3');
-      // Version Ranges.
-      expect(gradle_utils.getGradleVersionFor('1.2.0'), '2.9');
-      expect(gradle_utils.getGradleVersionFor('1.3.1'), '2.9');
-
-      expect(gradle_utils.getGradleVersionFor('1.5.0'), '2.2.1');
-
-      expect(gradle_utils.getGradleVersionFor('2.0.0'), '2.13');
-      expect(gradle_utils.getGradleVersionFor('2.1.2'), '2.13');
-
-      expect(gradle_utils.getGradleVersionFor('2.1.3'), '2.14.1');
-      expect(gradle_utils.getGradleVersionFor('2.2.3'), '2.14.1');
-
-      expect(gradle_utils.getGradleVersionFor('2.3.0'), '3.3');
-
-      expect(gradle_utils.getGradleVersionFor('3.0.0'), '4.1');
-
-      expect(gradle_utils.getGradleVersionFor('3.1.0'), '4.4');
-
-      expect(gradle_utils.getGradleVersionFor('3.2.0'), '4.6');
-      expect(gradle_utils.getGradleVersionFor('3.2.1'), '4.6');
-
-      expect(gradle_utils.getGradleVersionFor('3.3.0'), '4.10.2');
-      expect(gradle_utils.getGradleVersionFor('3.3.2'), '4.10.2');
-
-      expect(gradle_utils.getGradleVersionFor('3.4.0'), '5.6.2');
-      expect(gradle_utils.getGradleVersionFor('3.5.0'), '5.6.2');
-
-      expect(gradle_utils.getGradleVersionFor('4.0.0'), '6.7');
-      expect(gradle_utils.getGradleVersionFor('4.1.0'), '6.7');
-
-      expect(gradle_utils.getGradleVersionFor('7.0'), '7.5');
-      expect(gradle_utils.getGradleVersionFor('7.1.2'), '7.5');
-      expect(gradle_utils.getGradleVersionFor('7.2'), '7.5');
-      expect(gradle_utils.getGradleVersionFor('8.0'), '8.0');
-      expect(gradle_utils.getGradleVersionFor('8.1'), '8.0');
-      expect(gradle_utils.getGradleVersionFor('8.2'), '8.2');
-      expect(gradle_utils.getGradleVersionFor('8.3'), '8.4');
-      expect(gradle_utils.getGradleVersionFor('8.4'), '8.6');
-      expect(gradle_utils.getGradleVersionFor('8.5'), '8.7');
-      expect(gradle_utils.getGradleVersionFor('8.7'), '8.9');
-      expect(gradle_utils.getGradleVersionFor('8.8'), '8.10.2');
-      expect(gradle_utils.getGradleVersionFor(gradle_utils.maxKnownAgpVersion), '8.11.1');
-    });
-
-    testWithoutContext('throws on unsupported versions', () {
-      expect(
-        () => gradle_utils.getGradleVersionFor('3.6.0'),
-        throwsA(predicate<Exception>((Exception e) => e is ToolExit)),
-      );
-    });
-  });
-
   group('isAppUsingAndroidX', () {
     late FileSystem fs;
 
@@ -688,6 +625,44 @@ flutter:
         );
 
         expect(isAppUsingAndroidX(androidDirectory), isFalse);
+      },
+      overrides: <Type, Generator>{
+        FileSystem: () => fs,
+        ProcessManager: () => FakeProcessManager.any(),
+      },
+    );
+
+    testUsingContext(
+      'returns false for commented-out AndroidX properties',
+      () async {
+        final Directory androidDirectory = globals.fs.systemTempDirectory.createTempSync(
+          'flutter_android.',
+        );
+
+        androidDirectory
+            .childFile('gradle.properties')
+            .writeAsStringSync('#android.useAndroidX=true');
+
+        expect(isAppUsingAndroidX(androidDirectory), isFalse);
+      },
+      overrides: <Type, Generator>{
+        FileSystem: () => fs,
+        ProcessManager: () => FakeProcessManager.any(),
+      },
+    );
+
+    testUsingContext(
+      'returns true when AndroidX property has spaces around the separator',
+      () async {
+        final Directory androidDirectory = globals.fs.systemTempDirectory.createTempSync(
+          'flutter_android.',
+        );
+
+        androidDirectory
+            .childFile('gradle.properties')
+            .writeAsStringSync('android.useAndroidX = true');
+
+        expect(isAppUsingAndroidX(androidDirectory), isTrue);
       },
       overrides: <Type, Generator>{
         FileSystem: () => fs,
@@ -881,6 +856,36 @@ flutter:
           'To learn more, visit https://flutter.dev/to/integrate-android-archive\n',
         ),
       );
+    });
+  });
+
+  group('calculateSha', () {
+    late FileSystem fileSystem;
+
+    setUp(() {
+      fileSystem = MemoryFileSystem.test();
+    });
+
+    testWithoutContext('correctly calculates the SHA-1 hash of a file', () {
+      final File file = fileSystem.file('test_file')..writeAsStringSync('hello world');
+      expect(calculateSha(file), '2aae6c35c94fcfb415dbe95f408b9ce91ee846ed');
+    });
+
+    testWithoutContext('correctly calculates the SHA-1 hash of an empty file', () {
+      final File file = fileSystem.file('test_file')..createSync();
+      expect(calculateSha(file), 'da39a3ee5e6b4b0d3255bfef95601890afd80709');
+    });
+
+    testWithoutContext('correctly calculates the SHA-1 hash of a larger file in chunks', () {
+      // 128KB of data (more than the 64KB buffer size to verify chunking)
+      final data = Uint8List(128 * 1024);
+      for (var i = 0; i < data.length; i++) {
+        data[i] = i % 256;
+      }
+      final File file = fileSystem.file('test_file')..writeAsBytesSync(data);
+
+      final expectedHash = sha1.convert(data).toString();
+      expect(calculateSha(file), expectedHash);
     });
   });
 }

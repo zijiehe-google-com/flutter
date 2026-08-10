@@ -36,8 +36,6 @@ void SurfaceTextureExternalTextureGLImpeller::ProcessFrame(
     // The contents will be initialized later in the call to `Attach` instead of
     // by Impeller.
     texture_->MarkContentsInitialized();
-    texture_->SetCoordinateSystem(
-        impeller::TextureCoordinateSystem::kUploadFromHost);
     auto maybe_handle = texture_->GetGLHandle();
     if (!maybe_handle.has_value()) {
       FML_LOG(ERROR) << "Could not get GL handle from impeller::TextureGLES!";
@@ -55,6 +53,9 @@ void SurfaceTextureExternalTextureGLImpeller::ProcessFrame(
 
 void SurfaceTextureExternalTextureGLImpeller::Detach() {
   SurfaceTextureExternalTexture::Detach();
+  // Detach will collect the texture handle.
+  // See also: https://github.com/flutter/flutter/issues/152459
+  texture_->Leak();
   texture_.reset();
 }
 

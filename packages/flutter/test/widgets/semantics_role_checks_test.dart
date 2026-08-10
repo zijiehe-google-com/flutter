@@ -7,6 +7,10 @@ import 'dart:ui';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'checkbox_tester.dart';
+import 'radio_group_tester.dart';
+import 'radio_tester.dart';
+
 void main() {
   group('tab', () {
     testWidgets('failure case, empty', (WidgetTester tester) async {
@@ -18,7 +22,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'A tab needs selected states');
     });
 
@@ -31,7 +35,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'A tab must have a tap action');
     });
 
@@ -61,7 +65,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(
         error.message,
         startsWith('Semantics node 1 has role ${SemanticsRole.listItem}, but its parent'),
@@ -96,7 +100,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'a TabBar cannot be empty');
     });
 
@@ -113,7 +117,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'Children of TabBar must have the tab role');
     });
 
@@ -138,7 +142,7 @@ void main() {
   });
 
   group('radioGroup', () {
-    testWidgets('failure case, child is not mutually exclusive', (WidgetTester tester) async {
+    testWidgets('success case, child is not mutually exclusive', (WidgetTester tester) async {
       await tester.pumpWidget(
         Directionality(
           textDirection: TextDirection.ltr,
@@ -154,9 +158,7 @@ void main() {
         ),
       );
       final Object? exception = tester.takeException();
-      expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
-      expect(error.message, 'Radio buttons in a radio group must be in a mutually exclusive group');
+      expect(exception, isNull);
     });
 
     testWidgets('failure case, multiple checked children', (WidgetTester tester) async {
@@ -185,42 +187,8 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'Radio groups must not have multiple checked children');
-    });
-
-    testWidgets('error case, reports first error', (WidgetTester tester) async {
-      await tester.pumpWidget(
-        Directionality(
-          textDirection: TextDirection.ltr,
-          child: Semantics(
-            role: SemanticsRole.radioGroup,
-            explicitChildNodes: true,
-            child: Column(
-              children: <Widget>[
-                Semantics(
-                  label: 'Option A',
-                  child: Semantics(checked: true, child: const SizedBox.square(dimension: 1)),
-                ),
-                Semantics(
-                  label: 'Option B',
-                  child: Semantics(
-                    checked: true,
-                    inMutuallyExclusiveGroup: true,
-                    child: const SizedBox.square(dimension: 1),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-      // The widget tree has multiple errors. The validation walk should stop
-      // on the first error.
-      final Object? exception = tester.takeException();
-      expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
-      expect(error.message, 'Radio buttons in a radio group must be in a mutually exclusive group');
     });
 
     testWidgets('success case', (WidgetTester tester) async {
@@ -298,6 +266,54 @@ void main() {
       );
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('success case, radio group can have checkbox children', (
+      WidgetTester tester,
+    ) async {
+      final node0 = FocusNode();
+      addTearDown(node0.dispose);
+      final node1 = FocusNode();
+      addTearDown(node1.dispose);
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: TestRadioGroup<int>(
+            child: Column(
+              children: <Widget>[
+                TestCheckbox(value: false, onChanged: (bool? value) {}),
+                const TestRadio<int>(value: 0),
+                const TestRadio<int>(value: 1),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('success case, radio group can nest', (WidgetTester tester) async {
+      final stringNode = FocusNode();
+      addTearDown(stringNode.dispose);
+      final node0 = FocusNode();
+      addTearDown(node0.dispose);
+      final node1 = FocusNode();
+      addTearDown(node1.dispose);
+      await tester.pumpWidget(
+        const Directionality(
+          textDirection: TextDirection.ltr,
+          child: TestRadioGroup<int>(
+            child: Column(
+              children: <Widget>[
+                TestRadioGroup<String>(child: TestRadio<String>(value: 'string')),
+                TestRadio<int>(value: 0),
+                TestRadio<int>(value: 1),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
   });
 
   group('menu', () {
@@ -313,7 +329,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'a menu cannot be empty');
     });
 
@@ -350,7 +366,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'a menu bar cannot be empty');
     });
 
@@ -387,7 +403,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'A menu item must be a child of a menu or a menu bar');
     });
 
@@ -441,7 +457,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'a menu item checkbox must be checkable');
     });
 
@@ -458,7 +474,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'A menu item checkbox must be a child of a menu or a menu bar');
     });
 
@@ -514,7 +530,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'a menu item radio must be checkable');
     });
 
@@ -531,7 +547,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(error.message, 'A menu item radio must be a child of a menu or a menu bar');
     });
 
@@ -588,7 +604,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(
         error.message,
         startsWith('Node 1 has role SemanticsRole.alert but is also a live region.'),
@@ -608,7 +624,7 @@ void main() {
       );
       final Object? exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception! as FlutterError;
+      final error = exception! as FlutterError;
       expect(
         error.message,
         startsWith('Node 1 has role SemanticsRole.status but is also a live region.'),
@@ -676,6 +692,594 @@ void main() {
             role: SemanticsRole.radioGroup,
             explicitChildNodes: true,
             child: Semantics(toggled: true, child: const SizedBox.square(dimension: 1)),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('landmarks', () {
+    testWidgets('failure case, complementary role is contained by other landmark roles', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.main,
+            child: SizedBox(
+              child: Semantics(role: SemanticsRole.complementary, child: const Text('some child')),
+            ),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        startsWith(
+          'The complementary landmark role should not contained within any other landmark roles.',
+        ),
+      );
+    });
+
+    testWidgets('failure case, multiple nodes have the same complementary role', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: <Widget>[
+              Semantics(
+                role: SemanticsRole.complementary,
+                child: const SizedBox.square(dimension: 1),
+              ),
+              Semantics(
+                container: true,
+                child: SizedBox(
+                  child: Semantics(
+                    role: SemanticsRole.complementary,
+                    child: const SizedBox.square(dimension: 1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        startsWith(
+          'The complementary landmark role should have a unique label as it is used more than once.',
+        ),
+      );
+    });
+
+    testWidgets('Success case, complementary role', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(role: SemanticsRole.complementary, child: const Text('some child')),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Success case, complementary role is used more than once', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: <Widget>[
+              Semantics(
+                label: 'complementary 1',
+                role: SemanticsRole.complementary,
+                child: const SizedBox.square(dimension: 1),
+              ),
+              Semantics(
+                label: 'complementary 2',
+                role: SemanticsRole.complementary,
+                child: const SizedBox.square(dimension: 1),
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('failure case, multiple nodes have the same contentInfo role', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: <Widget>[
+              Semantics(
+                role: SemanticsRole.contentInfo,
+                child: const SizedBox.square(dimension: 1),
+              ),
+              Semantics(
+                container: true,
+                child: SizedBox(
+                  child: Semantics(
+                    role: SemanticsRole.contentInfo,
+                    child: const SizedBox.square(dimension: 1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        startsWith(
+          'The contentInfo landmark role should have a unique label as it is used more than once.',
+        ),
+      );
+    });
+
+    testWidgets('failure case, contentInfo role is contained by other landmark roles', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.complementary,
+            child: SizedBox(
+              child: Semantics(role: SemanticsRole.contentInfo, child: const Text('some child')),
+            ),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        startsWith(
+          'The contentInfo landmark role should not contained within any other landmark roles.',
+        ),
+      );
+    });
+
+    testWidgets('Success case, contentInfo role', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(role: SemanticsRole.contentInfo, child: const Text('some child')),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Success case, contentInfo role is used more than once', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: <Widget>[
+              Semantics(
+                label: 'contentInfo 1',
+                role: SemanticsRole.contentInfo,
+                child: const SizedBox.square(dimension: 1),
+              ),
+              Semantics(
+                label: 'contentInfo 2',
+                role: SemanticsRole.contentInfo,
+                child: const SizedBox.square(dimension: 1),
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('failure case, multiple nodes have the same main role', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: <Widget>[
+              Semantics(role: SemanticsRole.main, child: const SizedBox.square(dimension: 1)),
+              Semantics(
+                container: true,
+                child: SizedBox(
+                  child: Semantics(
+                    role: SemanticsRole.main,
+                    child: const SizedBox.square(dimension: 1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        startsWith(
+          'The main landmark role should have a unique label as it is used more than once.',
+        ),
+      );
+    });
+
+    testWidgets('failure case, main role is contained by other landmark roles', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.contentInfo,
+            child: SizedBox(
+              child: Semantics(role: SemanticsRole.main, child: const Text('some child')),
+            ),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        startsWith('The main landmark role should not contained within any other landmark roles.'),
+      );
+    });
+
+    testWidgets('Success case, main role', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(role: SemanticsRole.main, child: const Text('some child')),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Success case, main role is used more than once', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: <Widget>[
+              Semantics(
+                label: 'main 1',
+                role: SemanticsRole.main,
+                child: const SizedBox.square(dimension: 1),
+              ),
+              Semantics(
+                label: 'main 2',
+                role: SemanticsRole.main,
+                child: const SizedBox.square(dimension: 1),
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('failure case, multiple nodes have the same navigation role', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: <Widget>[
+              Semantics(role: SemanticsRole.navigation, child: const SizedBox.square(dimension: 1)),
+              Semantics(
+                container: true,
+                child: SizedBox(
+                  child: Semantics(
+                    role: SemanticsRole.navigation,
+                    child: const SizedBox.square(dimension: 1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        startsWith(
+          'The navigation landmark role should have a unique label as it is used more than once.',
+        ),
+      );
+    });
+
+    testWidgets('Success case, navigation role', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(role: SemanticsRole.navigation, child: const Text('some child')),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Success case, navigation role is used more than once', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: <Widget>[
+              Semantics(
+                label: 'navigation 1',
+                role: SemanticsRole.navigation,
+                child: const SizedBox.square(dimension: 1),
+              ),
+              Semantics(
+                label: 'navigation 2',
+                role: SemanticsRole.navigation,
+                child: const SizedBox.square(dimension: 1),
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('failure case, region role without label', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(role: SemanticsRole.region, child: const SizedBox()),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        startsWith(
+          'A region role should include a label that describes the purpose of the content.',
+        ),
+      );
+    });
+
+    testWidgets('Success case, region role', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(label: 'Header 1', role: SemanticsRole.region, child: const SizedBox()),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('progressBar', () {
+    testWidgets('failure case, missing value, min, and max', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(role: SemanticsRole.progressBar, child: const SizedBox()),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(error.message, 'A progress bar must have a value, a minValue, a maxValue.');
+    });
+
+    testWidgets('failure case, has min and max but not value', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.progressBar,
+            minValue: '0',
+            maxValue: '10',
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(error.message, 'A progress bar must have a value, a minValue, a maxValue.');
+    });
+
+    testWidgets('failure case, has value but not min and max', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(role: SemanticsRole.progressBar, value: '5', child: const SizedBox()),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(error.message, 'A progress bar must have a value, a minValue, a maxValue.');
+    });
+
+    testWidgets('failure case, valid min and max but invalid value', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.progressBar,
+            value: 'invalid',
+            minValue: '0',
+            maxValue: '10',
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        'Progress bar value, minValue, and maxValue must be valid numbers. '
+        'value: "invalid", minValue: "0", maxValue: "10"',
+      );
+    });
+
+    testWidgets('failure case, min and max are percentages, invalid value', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.progressBar,
+            value: 'invalid',
+            minValue: '0%',
+            maxValue: '100%',
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        'Progress bar value, minValue, and maxValue must be valid numbers. '
+        'value: "invalid", minValue: "0%", maxValue: "100%"',
+      );
+    });
+
+    testWidgets('failure case, invalid numbers', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.progressBar,
+            value: 'invalid',
+            minValue: 'invalid',
+            maxValue: 'invalid',
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        'Progress bar value, minValue, and maxValue must be valid numbers. '
+        'value: "invalid", minValue: "invalid", maxValue: "invalid"',
+      );
+    });
+
+    testWidgets('failure case, min >= max', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.progressBar,
+            value: '5',
+            minValue: '10',
+            maxValue: '0',
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(error.message, 'Progress bar minValue (10) must be less than maxValue (0)');
+    });
+
+    testWidgets('failure case, value out of range (number)', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.progressBar,
+            value: '20',
+            minValue: '0',
+            maxValue: '10',
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(
+        error.message,
+        'Progress bar value (20) must be between minValue (0) and maxValue (10)',
+      );
+    });
+
+    testWidgets('failure case, value out of range (percentage)', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.progressBar,
+            value: '150%',
+            minValue: '0',
+            maxValue: '10',
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      final Object? exception = tester.takeException();
+      expect(exception, isFlutterError);
+      final error = exception! as FlutterError;
+      expect(error.message, 'Progress bar percentage value (150%) must be between 0% and 100%');
+    });
+
+    testWidgets('success case, value is a valid number', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.progressBar,
+            value: '5',
+            minValue: '0',
+            maxValue: '10',
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('success case, value is a valid percentage', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Semantics(
+            role: SemanticsRole.progressBar,
+            value: '50%',
+            minValue: '0',
+            maxValue: '10',
+            child: const SizedBox(),
           ),
         ),
       );

@@ -12,28 +12,36 @@ typedef _OutputSender =
       int? variablesReference,
     });
 
-/// A formatter for improving the display of Flutter structured errors over DAP.
+/// Deserializes and formats a Flutter structured error.
 ///
-/// The formatter deserializes a `Flutter.Error` event and produces output
-/// similar to the `renderedErrorText` field, but may include ansi color codes
-/// to provide improved formatting (such as making stack frames from non-user
-/// code faint) if the client indicated support.
+/// Produces output similar to the `renderedErrorText` field, but may include
+/// ansi color codes to provide improved formatting (such as making stack frames
+/// from non-user code faint) if the client indicated support.
 ///
 /// Lines that look like stack frames will be marked so they can be parsed by
-/// the base adapter and attached as [Source]s to allow them to be clickable
+/// the base adapter and attached as `Source`s to allow them to be clickable
 /// in the client.
+///
+/// If the error contains a `DevToolsDeepLinkProperty` node, its URL will be
+/// extracted into [devToolsDeepLinkUrl].
 class FlutterErrorFormatter {
-  final List<_BatchedOutput> batchedOutput = <_BatchedOutput>[];
+  final batchedOutput = <_BatchedOutput>[];
+
+  /// The text of the ErrorSummary node, if exists.
+  String? errorSummary;
+
+  /// The url of any DevTools deep link node.
+  String? devToolsDeepLinkUrl;
 
   /// Formats a Flutter error.
   ///
   /// If this is not the first error since the reload, only a summary will be
   /// included.
   void formatError(Map<String, Object?> errorData) {
-    final _ErrorData data = _ErrorData(errorData);
+    final data = _ErrorData(errorData);
 
-    const int assumedTerminalSize = 80;
-    const String barChar = '═';
+    const assumedTerminalSize = 80;
+    const barChar = '═';
     final String headerPrefix = barChar * 8;
     final String headerSuffix =
         barChar *
@@ -41,7 +49,7 @@ class FlutterErrorFormatter {
           assumedTerminalSize - (data.description?.length ?? 0) - 2 - headerPrefix.length,
           0,
         );
-    final String header = '$headerPrefix ${data.description} $headerSuffix';
+    final header = '$headerPrefix ${data.description} $headerSuffix';
     _write('');
     _write(header, isError: true);
 
@@ -74,7 +82,7 @@ class FlutterErrorFormatter {
   void _write(String? text, {int indent = 0, bool isError = false, bool parseStackFrames = false}) {
     if (text != null) {
       final String indentString = '    ' * indent;
-      final String message = '$indentString${text.trim()}';
+      final message = '$indentString${text.trim()}';
 
       _BatchedOutput? output = batchedOutput.lastOrNull;
       if (output == null ||
@@ -89,6 +97,14 @@ class FlutterErrorFormatter {
   /// Writes [node] to the output using [indent], recursing unless [recursive]
   /// is `false`.
   void _writeNode(_ErrorNode node, {int indent = 0, bool recursive = true}) {
+    if (node.type == _DiagnosticsNodeType.ErrorSummary) {
+      // Probably there is only one error summary, but keep the first
+      // (outer-most) if not.
+      errorSummary ??= node.description;
+    } else if (node.type == _DiagnosticsNodeType.DevToolsDeepLinkProperty) {
+      _parseDevToolsDeepLink(node);
+    }
+
     // Errors, summaries and lines starting "Exception:" are marked as errors so
     // they go to stderr instead of stdout (this may cause the client to colour
     // them like errors).
@@ -117,7 +133,7 @@ class FlutterErrorFormatter {
 
   /// Writes [nodes] to the output.
   void _writeNodes(List<_ErrorNode> nodes, {int indent = 0, bool recursive = true}) {
-    for (final _ErrorNode child in nodes) {
+    for (final child in nodes) {
       _writeNode(child, indent: indent, recursive: recursive);
     }
   }
@@ -138,6 +154,17 @@ class FlutterErrorFormatter {
       );
     }
   }
+
+  /// Parse the DevTools deep link URL out of a
+  /// [_DiagnosticsNodeType.DevToolsDeepLinkProperty] node.
+  void _parseDevToolsDeepLink(_ErrorNode node) {
+    assert(node.type == _DiagnosticsNodeType.DevToolsDeepLinkProperty);
+    if (node.value case final url?) {
+      // Probably there is only one deep link, but keep the first
+      // (outer-most) if not.
+      devToolsDeepLinkUrl ??= url;
+    }
+  }
 }
 
 /// A container for output to be sent to the client.
@@ -149,7 +176,7 @@ class _BatchedOutput {
 
   final bool isError;
   final bool parseStackFrames;
-  final StringBuffer _buffer = StringBuffer();
+  final _buffer = StringBuffer();
 
   String get output => _buffer.toString();
 
@@ -160,7 +187,7 @@ enum _DiagnosticsNodeLevel { error, summary }
 
 enum _DiagnosticsNodeStyle { flat }
 
-enum _DiagnosticsNodeType { DiagnosticsBlock }
+enum _DiagnosticsNodeType { ErrorSummary, DevToolsDeepLinkProperty, DiagnosticsBlock }
 
 class _ErrorData extends _ErrorNode {
   _ErrorData(super.data);
@@ -182,6 +209,7 @@ class _ErrorNode {
   bool get showName => data['showName'] != false;
   _DiagnosticsNodeStyle? get style => asEnum('style', _DiagnosticsNodeStyle.values);
   _DiagnosticsNodeType? get type => asEnum('type', _DiagnosticsNodeType.values);
+  String? get value => asString('value');
 
   String? asString(String field) {
     final Object? value = data[field];

@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'dart:math' as math;
 
 import 'package:meta/meta.dart';
@@ -17,8 +18,8 @@ import 'dom.dart';
 import 'platform_dispatcher.dart';
 import 'pointer_binding/event_position_helper.dart';
 import 'pointer_converter.dart';
-import 'safe_browser_api.dart';
 import 'semantics.dart';
+import 'view_embedder/embedding_strategy/full_page_embedding_strategy.dart';
 import 'window.dart';
 
 /// Set this flag to true to log all the browser events.
@@ -26,6 +27,21 @@ const bool _debugLogPointerEvents = false;
 
 /// Set this to true to log all the events sent to the Flutter framework.
 const bool _debugLogFlutterEvents = false;
+
+// Note: debugResetIframeDetectionCache() and debugSetIframeEmbeddingForTests()
+// are now in dom.dart as shared utilities.
+
+/// Resets full-page app detection override for tests.
+@visibleForTesting
+void debugResetFullPageAppCache() {
+  _WheelEventListenerMixin._debugIsFullPageApp = null;
+}
+
+/// Overrides full-page app detection for tests. Pass `null` to restore auto-detection.
+@visibleForTesting
+void debugSetFullPageAppForTests(bool? isFullPage) {
+  _WheelEventListenerMixin._debugIsFullPageApp = isFullPage;
+}
 
 /// The signature of a callback that handles pointer events.
 typedef _PointerDataCallback = void Function(DomEvent event, List<ui.PointerData>);
@@ -69,16 +85,12 @@ int _nthButton(int n) => 0x1 << n;
 @visibleForTesting
 int convertButtonToButtons(int button) {
   assert(button >= 0, 'Unexpected negative button $button.');
-  switch (button) {
-    case 0:
-      return _kPrimaryMouseButton;
-    case 1:
-      return _kMiddleMouseButton;
-    case 2:
-      return _kSecondaryMouseButton;
-    default:
-      return _nthButton(button);
-  }
+  return switch (button) {
+    0 => _kPrimaryMouseButton,
+    1 => _kMiddleMouseButton,
+    2 => _kSecondaryMouseButton,
+    _ => _nthButton(button),
+  };
 }
 
 /// Wrapping the Safari iOS workaround that adds a dummy event listener
@@ -171,7 +183,12 @@ class PointerBinding {
 typedef QueuedEvent = ({DomEvent event, Duration timeStamp, List<ui.PointerData> data});
 
 @visibleForTesting
-typedef DebounceState = ({DomElement target, Timer timer, List<QueuedEvent> queue});
+typedef DebounceState = ({
+  bool started,
+  DomEventTarget target,
+  Timer timer,
+  List<QueuedEvent> queue,
+});
 
 /// Disambiguates taps and clicks that are produced both by the framework from
 /// `pointerdown`/`pointerup` events and those detected as DOM "click" events by
@@ -225,7 +242,8 @@ class ClickDebouncer {
   /// This value is normally false, and it flips to true when the first
   /// pointerdown is observed that lands on a tappable semantics node, denoted
   /// by the presence of the `flt-tappable` attribute.
-  bool get isDebouncing => _state != null;
+  bool get isDebouncing => _isDebouncing;
+  bool _isDebouncing = false;
 
   /// Processes a pointer event.
   ///
@@ -249,7 +267,7 @@ class ClickDebouncer {
     if (isDebouncing) {
       _debounce(event, data);
     } else if (event.type == 'pointerdown') {
-      _startDebouncing(event, data);
+      _maybeStartDebouncing(event, data);
     } else {
       if (event.type == 'pointerup') {
         // Record the last pointerup event even if not debouncing. This is
@@ -294,6 +312,7 @@ class ClickDebouncer {
       // The semantic node is not listening to taps. Flush the pointer events
       // for the framework to figure out what to do with them. It's possible
       // the framework is interested in gestures other than taps.
+      click.stopPropagation();
       _flush();
     }
   }
@@ -317,25 +336,34 @@ class ClickDebouncer {
     reset();
   }
 
-  void _startDebouncing(DomEvent event, List<ui.PointerData> data) {
-    assert(_state == null, 'Cannot start debouncing. Already debouncing.');
+  /// Starts debouncing pointer events if the [event] is a `pointerdown` on a
+  /// tappable element.
+  ///
+  /// To work around an issue in iOS Safari, the debouncing does not start
+  /// immediately, but at the end of the event loop.
+  ///
+  /// See also:
+  ///
+  ///  * [_doStartDebouncing], which actually starts the debouncing.
+  void _maybeStartDebouncing(DomEvent event, List<ui.PointerData> data) {
+    assert(!isDebouncing, 'Cannot start debouncing. Already debouncing.');
     assert(event.type == 'pointerdown', 'Click debouncing must begin with a pointerdown');
 
     final DomEventTarget? target = event.target;
     if (target.isA<DomElement>() && (target! as DomElement).hasAttribute('flt-tappable')) {
+      _isDebouncing = true;
       _state = (
-        target: target as DomElement,
-        // The 200ms duration was chosen empirically by testing tapping, mouse
-        // clicking, trackpad tapping and clicking, as well as the following
-        // screen readers: TalkBack on Android, VoiceOver on macOS, Narrator/
-        // NVDA/JAWS on Windows. 200ms seemed to hit the sweet spot by
-        // satisfying the following:
-        //   * It was short enough that delaying the `pointerdown` still allowed
-        //     drag gestures to begin reasonably soon (e.g. scrolling).
-        //   * It was long enough to register taps and clicks.
-        //   * It was successful at detecting taps generated by all tested
-        //     screen readers.
-        timer: Timer(const Duration(milliseconds: 200), _onTimerExpired),
+        started: false,
+        target: event.target!,
+        // In some cases, iOS Safari tracks timers that are initiated from within a `pointerdown`
+        // event, and waits until those timers go off before sending the `click` event.
+        //
+        // This iOS Safari behavior breaks the `ClickDebouncer` because it creates a 200ms timer. To
+        // work around it, the `ClickDebouncer` should start debouncing after the end of the event
+        // loop.
+        //
+        // See: https://github.com/flutter/flutter/issues/172180
+        timer: Timer(Duration.zero, _doStartDebouncing),
         queue: <QueuedEvent>[
           (
             event: event,
@@ -351,9 +379,37 @@ class ClickDebouncer {
     }
   }
 
+  /// The core logic for starting to debounce pointer events.
+  ///
+  /// This method is called asynchronously from [_maybeStartDebouncing].
+  void _doStartDebouncing() {
+    // It's possible that debouncing was canceled between the pointerdown event and the execution
+    // of this method.
+    if (!isDebouncing) {
+      return;
+    }
+
+    _state = (
+      started: true,
+      target: _state!.target,
+      queue: _state!.queue,
+      // The 200ms duration was chosen empirically by testing tapping, mouse
+      // clicking, trackpad tapping and clicking, as well as the following
+      // screen readers: TalkBack on Android, VoiceOver on macOS, Narrator/
+      // NVDA/JAWS on Windows. 200ms seemed to hit the sweet spot by
+      // satisfying the following:
+      //   * It was short enough that delaying the `pointerdown` still allowed
+      //     drag gestures to begin reasonably soon (e.g. scrolling).
+      //   * It was long enough to register taps and clicks.
+      //   * It was successful at detecting taps generated by all tested
+      //     screen readers.
+      timer: Timer(const Duration(milliseconds: 200), _onTimerExpired),
+    );
+  }
+
   void _debounce(DomEvent event, List<ui.PointerData> data) {
     assert(
-      _state != null,
+      isDebouncing,
       'Cannot debounce event. Debouncing state not established by _startDebouncing.',
     );
 
@@ -367,7 +423,7 @@ class ClickDebouncer {
     // It's only interesting to debounce clicks when both `pointerdown` and
     // `pointerup` land on the same element.
     if (event.type == 'pointerup') {
-      final bool targetChanged = event.target != state.target;
+      final targetChanged = event.target != state.target;
       if (targetChanged) {
         _flush();
       }
@@ -398,12 +454,12 @@ class ClickDebouncer {
   }
 
   void _flush() {
-    assert(_state != null);
+    assert(isDebouncing);
 
     final DebounceState state = _state!;
     state.timer.cancel();
 
-    final List<ui.PointerData> aggregateData = <ui.PointerData>[];
+    final aggregateData = <ui.PointerData>[];
     for (final QueuedEvent queuedEvent in state.queue) {
       if (queuedEvent.event.type == 'pointerup') {
         _lastSentPointerUpTimeStamp = queuedEvent.timeStamp;
@@ -413,16 +469,31 @@ class ClickDebouncer {
 
     _sendToFramework(null, aggregateData);
     _state = null;
+    _isDebouncing = false;
   }
 
   void _sendToFramework(DomEvent? event, List<ui.PointerData> data) {
-    final ui.PointerDataPacket packet = ui.PointerDataPacket(data: data.toList());
+    final packet = ui.PointerDataPacket(data: data.toList());
     if (_debugLogFlutterEvents) {
-      for (final ui.PointerData datum in data) {
+      for (final datum in data) {
         print('fw:${datum.change}    ${datum.physicalX},${datum.physicalY}');
       }
     }
     EnginePlatformDispatcher.instance.invokeOnPointerDataPacket(packet);
+  }
+
+  /// Flushes any in-progress debounce, then forwards [data] to the framework.
+  ///
+  /// For synthetic events that must not be queued or dropped by an in-progress
+  /// debounce, such as cancels that repair a pointer the browser abandoned.
+  /// Flushing first keeps the stream ordered: a queued `pointerdown` has to
+  /// reach the framework before the cancel that closes it out, otherwise the
+  /// framework is left holding a down it can never match.
+  void flushAndSend(List<ui.PointerData> data) {
+    if (isDebouncing) {
+      _flush();
+    }
+    _sendToFramework(null, data);
   }
 
   /// Cancels any pending debounce process and forgets anything that happened so
@@ -432,6 +503,7 @@ class ClickDebouncer {
   void reset() {
     _state?.timer.cancel();
     _state = null;
+    _isDebouncing = false;
     _lastSentPointerUpTimeStamp = null;
   }
 }
@@ -439,7 +511,7 @@ class ClickDebouncer {
 class PointerSupportDetector {
   const PointerSupportDetector();
 
-  bool get hasPointerEvents => hasJsProperty(domWindow, 'PointerEvent');
+  bool get hasPointerEvents => domWindow.has('PointerEvent');
 
   @override
   String toString() => 'pointers:$hasPointerEvents';
@@ -470,11 +542,11 @@ class Listener {
     if (passive == null) {
       target.addEventListener(event, jsHandler);
     } else {
-      final Map<String, Object> eventOptions = <String, Object>{'passive': passive};
+      final eventOptions = <String, Object>{'passive': passive};
       target.addEventListener(event, jsHandler, eventOptions.toJSAnyDeep);
     }
 
-    final Listener listener = Listener._(event: event, target: target, handler: jsHandler);
+    final listener = Listener._(event: event, target: target, handler: jsHandler);
 
     return listener;
   }
@@ -504,7 +576,16 @@ abstract class _BaseAdapter {
   final List<Listener> _listeners = <Listener>[];
   DomWheelEvent? _lastWheelEvent;
   bool _lastWheelEventWasTrackpad = false;
+
+  /// Two flags to track scroll handling for the two-flag system:
+  /// 1. _lastWheelEventAllowedDefault: true if a scrollable is at boundary
+  /// 2. _lastWheelEventHandledByWidget: true if a scrollable consumed the event
+  ///
+  /// This enables proper handling of nested scrollables:
+  /// - If inner scrollable handles the event, don't scroll parent page
+  /// - If all scrollables are at boundary, scroll parent page
   bool _lastWheelEventAllowedDefault = false;
+  bool _lastWheelEventHandledByWidget = false;
 
   DomElement get _viewTarget => _view.dom.rootElement;
   DomEventTarget get _globalTarget => _view.embeddingStrategy.globalEventTarget;
@@ -531,7 +612,7 @@ abstract class _BaseAdapter {
     void loggedHandler(DomEvent event) {
       if (_debugLogPointerEvents) {
         if (event.isA<DomPointerEvent>()) {
-          final DomPointerEvent pointerEvent = event as DomPointerEvent;
+          final pointerEvent = event as DomPointerEvent;
           final ui.Offset offset = computeEventOffsetToTarget(event, _view);
           print(
             '${pointerEvent.type}    '
@@ -564,6 +645,22 @@ abstract class _BaseAdapter {
 
 mixin _WheelEventListenerMixin on _BaseAdapter {
   static double? _defaultScrollLineHeight;
+
+  /// Test-only override for full-page app detection.
+  static bool? _debugIsFullPageApp;
+
+  /// Check if Flutter is running as a full-page app (not embedded as a component).
+  ///
+  /// This distinction is important for scroll handling in iframes:
+  /// - Full-page in iframe: conditionally preventDefault, let browser bubble to parent at boundary
+  /// - Custom element in iframe: let browser handle normal scroll flow
+  bool get _isFullPageApp {
+    // Test override takes precedence
+    if (_debugIsFullPageApp != null) {
+      return _debugIsFullPageApp!;
+    }
+    return _view.embeddingStrategy is FullPageEmbeddingStrategy;
+  }
 
   bool _isAcceleratedMouseWheelDelta(num delta, num? wheelDelta) {
     // On macOS, scrolling using a mouse wheel by default uses an acceleration
@@ -631,9 +728,9 @@ mixin _WheelEventListenerMixin on _BaseAdapter {
   }
 
   List<ui.PointerData> _convertWheelEventToPointerData(DomWheelEvent event) {
-    const int domDeltaPixel = 0x00;
-    const int domDeltaLine = 0x01;
-    const int domDeltaPage = 0x02;
+    const domDeltaPixel = 0x00;
+    const domDeltaLine = 0x01;
+    const domDeltaPage = 0x02;
 
     ui.PointerDeviceKind kind = ui.PointerDeviceKind.mouse;
     int deviceId = _mouseDeviceId;
@@ -665,9 +762,9 @@ mixin _WheelEventListenerMixin on _BaseAdapter {
         break;
     }
 
-    final List<ui.PointerData> data = <ui.PointerData>[];
+    final data = <ui.PointerData>[];
     final ui.Offset offset = computeEventOffsetToTarget(event, _view);
-    bool ignoreCtrlKey = false;
+    var ignoreCtrlKey = false;
     if (ui_web.browser.operatingSystem == ui_web.OperatingSystem.macOs) {
       ignoreCtrlKey =
           (_keyboardConverter?.keyIsPressed(kPhysicalControlLeft) ?? false) ||
@@ -706,8 +803,14 @@ mixin _WheelEventListenerMixin on _BaseAdapter {
         scrollDeltaX: deltaX,
         scrollDeltaY: deltaY,
         onRespond: ({bool allowPlatformDefault = false}) {
-          // Once `allowPlatformDefault` is `true`, never go back to `false`!
-          _lastWheelEventAllowedDefault |= allowPlatformDefault;
+          // Track both: platform default and widget handling
+          if (allowPlatformDefault) {
+            // Widget is at boundary, wants platform to handle
+            _lastWheelEventAllowedDefault = true;
+          } else {
+            // Widget explicitly handled this event
+            _lastWheelEventHandledByWidget = true;
+          }
         },
       );
     }
@@ -734,15 +837,43 @@ mixin _WheelEventListenerMixin on _BaseAdapter {
     if (_debugLogPointerEvents) {
       print(event.type);
     }
+
+    // Reset flags before dispatching to framework
     _lastWheelEventAllowedDefault = false;
-    // [ui.PointerData] can set the `_lastWheelEventAllowedDefault` variable
-    // to true, when the framework says so. See the implementation of `respond`
-    // when creating the PointerData object above.
-    _callback(event, _convertWheelEventToPointerData(event as DomWheelEvent));
-    // This works because the `_callback` is handled synchronously in the
-    // framework, so it's able to modify `_lastWheelEventAllowedDefault`.
-    if (!_lastWheelEventAllowedDefault) {
-      event.preventDefault();
+    _lastWheelEventHandledByWidget = false;
+
+    final wheelEvent = event as DomWheelEvent;
+
+    // Dispatch to framework (this triggers onRespond callbacks synchronously)
+    _callback(event, _convertWheelEventToPointerData(wheelEvent));
+
+    // Determine if we should prevent default
+    final bool isInIframe = isEmbeddedInIframe();
+
+    // Special handling only for full-page Flutter apps running inside an iframe.
+    // Custom element apps (Flutter embedded as a component) should let the
+    // browser handle normal scroll flow.
+    if (isInIframe && _isFullPageApp) {
+      // Full-page app in an iframe: only preventDefault when Flutter handles
+      // the scroll. When scrollables are at boundary, skip preventDefault to
+      // let the browser naturally bubble the scroll to the parent window.
+      //
+      // Fixes GitHub issue #156985
+      final bool shouldScrollParent =
+          _lastWheelEventAllowedDefault && !_lastWheelEventHandledByWidget;
+      if (!shouldScrollParent) {
+        event.preventDefault();
+      }
+    } else {
+      // Original behavior for:
+      // 1. Apps NOT in an iframe (normal page)
+      // 2. Multi-view mode inside an iframe
+      //
+      // Only preventDefault when a scrollable widget handles the event.
+      // This preserves native scroll behavior when Flutter can't scroll.
+      if (!_lastWheelEventAllowedDefault) {
+        event.preventDefault();
+      }
     }
   }
 
@@ -751,7 +882,7 @@ mixin _WheelEventListenerMixin on _BaseAdapter {
   ///
   /// Use Firefox to test this code path.
   double _computeDefaultScrollLineHeight() {
-    const double kFallbackFontHeight = 16.0;
+    const kFallbackFontHeight = 16.0;
     final DomHTMLDivElement probe = createDomHTMLDivElement();
     probe.style
       ..fontSize = 'initial'
@@ -890,6 +1021,13 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
 
   final Map<int, _ButtonSanitizer> _sanitizers = <int, _ButtonSanitizer>{};
 
+  /// Touch devices that went down and have not been released yet.
+  ///
+  /// A device leaves this set when the browser reports `pointerup` or
+  /// `pointercancel`, or when [_cancelAbandonedTouches] gives up on it. It is
+  /// what that method reconciles against the touches actually on the surface.
+  final Set<int> _downTouchDevices = <int>{};
+
   @visibleForTesting
   Iterable<int> debugTrackedDevices() => _sanitizers.keys;
 
@@ -908,7 +1046,9 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
 
   void _removePointerIfUnhoverable(DomPointerEvent event) {
     if (event.pointerType == 'touch') {
-      _sanitizers.remove(event.pointerId);
+      final int device = _getPointerId(event);
+      _sanitizers.remove(device);
+      _downTouchDevices.remove(device);
     }
   }
 
@@ -919,7 +1059,7 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
     bool checkModifiers = true,
   }) {
     addEventListener(target, eventName, (DomEvent event) {
-      final DomPointerEvent pointerEvent = event as DomPointerEvent;
+      final pointerEvent = event as DomPointerEvent;
       if (checkModifiers) {
         _checkModifiersState(event);
       }
@@ -941,7 +1081,7 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
   void setup() {
     _addPointerEventListener(_viewTarget, 'pointerdown', (DomPointerEvent event) {
       final int device = _getPointerId(event);
-      final List<ui.PointerData> pointerData = <ui.PointerData>[];
+      final pointerData = <ui.PointerData>[];
       final _ButtonSanitizer sanitizer = _ensureSanitizer(device);
       final _SanitizedDetails? up = sanitizer.sanitizeMissingRightClickUp(
         buttons: event.buttons!.toInt(),
@@ -954,6 +1094,9 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
         buttons: event.buttons!.toInt(),
       );
       _convertEventsToPointerData(data: pointerData, event: event, details: down);
+      if (event.pointerType == 'touch') {
+        _downTouchDevices.add(device);
+      }
       _callback(event, pointerData);
 
       if (event.target == _viewTarget) {
@@ -989,9 +1132,9 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
     _addPointerEventListener(_globalTarget, 'pointermove', (DomPointerEvent moveEvent) {
       final int device = _getPointerId(moveEvent);
       final _ButtonSanitizer sanitizer = _ensureSanitizer(device);
-      final List<ui.PointerData> pointerData = <ui.PointerData>[];
+      final pointerData = <ui.PointerData>[];
       final List<DomPointerEvent> expandedEvents = _expandEvents(moveEvent);
-      for (final DomPointerEvent event in expandedEvents) {
+      for (final event in expandedEvents) {
         final _SanitizedDetails? up = sanitizer.sanitizeMissingRightClickUp(
           buttons: event.buttons!.toInt(),
         );
@@ -1019,7 +1162,7 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
     _addPointerEventListener(_viewTarget, 'pointerleave', (DomPointerEvent event) {
       final int device = _getPointerId(event);
       final _ButtonSanitizer sanitizer = _ensureSanitizer(device);
-      final List<ui.PointerData> pointerData = <ui.PointerData>[];
+      final pointerData = <ui.PointerData>[];
       final _SanitizedDetails? details = sanitizer.sanitizeLeaveEvent(
         buttons: event.buttons!.toInt(),
       );
@@ -1033,7 +1176,7 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
     _addPointerEventListener(_globalTarget, 'pointerup', (DomPointerEvent event) {
       final int device = _getPointerId(event);
       if (_hasSanitizer(device)) {
-        final List<ui.PointerData> pointerData = <ui.PointerData>[];
+        final pointerData = <ui.PointerData>[];
         final _SanitizedDetails? details = _getSanitizer(
           device,
         ).sanitizeUpEvent(buttons: event.buttons?.toInt());
@@ -1052,7 +1195,7 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
     _addPointerEventListener(_viewTarget, 'pointercancel', (DomPointerEvent event) {
       final int device = _getPointerId(event);
       if (_hasSanitizer(device)) {
-        final List<ui.PointerData> pointerData = <ui.PointerData>[];
+        final pointerData = <ui.PointerData>[];
         final _SanitizedDetails details = _getSanitizer(device).sanitizeCancelEvent();
         _removePointerIfUnhoverable(event);
         _convertEventsToPointerData(data: pointerData, event: event, details: details);
@@ -1060,9 +1203,78 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
       }
     }, checkModifiers: false);
 
+    // Safety net for touches the browser abandons without a `pointerup` or a
+    // `pointercancel`. See [_cancelAbandonedTouches].
+    addEventListener(_globalTarget, 'touchend', (DomEvent event) {
+      _cancelAbandonedTouches(event as DomTouchEvent);
+    });
+    addEventListener(_globalTarget, 'touchcancel', (DomEvent event) {
+      _cancelAbandonedTouches(event as DomTouchEvent);
+    });
+
     _addWheelEventListener((DomEvent event) {
       _handleWheelEvent(event);
     });
+  }
+
+  /// Cancels touch pointers that the browser stopped reporting mid-gesture.
+  ///
+  /// iOS WebKit stops dispatching pointer events for a touch once it promotes
+  /// that touch to a native gesture, such as dragging the caret inside a text
+  /// field. It delivers neither `pointerup` nor `pointercancel`, so the
+  /// framework is left with a pointer that never lifts, and any gesture
+  /// recognizer tracking it is wedged forever.
+  ///
+  /// Observed on iOS 27; iOS 26 does not do it. Gated to iOS because the
+  /// reconciliation below relies on WebKit behavior that other engines do not
+  /// guarantee, in particular that a `Touch.identifier` equals its pointer
+  /// event's `pointerId`. Despite its name, [isIosSafari] means WebKit on iOS,
+  /// so the gate covers every browser on iOS, not just Safari.
+  /// See: https://github.com/flutter/flutter/issues/188781
+  ///
+  /// On iOS WebKit, `touches` still reports the truth throughout: it lists the
+  /// touches in contact with the surface, and drops an abandoned one once the
+  /// finger leaves. Only the pointer events go missing. So any touch this class
+  /// believes is down, but which the browser does not report as being on the
+  /// surface, has been abandoned and must be cancelled.
+  ///
+  /// The cancel does not join the click debouncer's queue: it repairs an older
+  /// pointer and must not be dropped by debouncing of a concurrent tap. Any
+  /// queued events are flushed ahead of it, so the framework still sees the
+  /// abandoned pointer's `down` before its `cancel`.
+  void _cancelAbandonedTouches(DomTouchEvent event) {
+    if (!isIosSafari || _downTouchDevices.isEmpty) {
+      return;
+    }
+
+    final onSurface = <int>{
+      for (final DomTouch touch in event.touches)
+        if (touch.identifier?.toInt() case final int device) device,
+    };
+    final Set<int> stale = _downTouchDevices.difference(onSurface);
+    if (stale.isEmpty) {
+      return;
+    }
+
+    final pointerData = <ui.PointerData>[];
+    final Duration timeStamp = _BaseAdapter._eventTimeStampToDuration(event.timeStamp!);
+    for (final device in stale) {
+      _sanitizers.remove(device);
+      // `convert` defaults `change` to `PointerChange.cancel`. It also replaces
+      // a cancel's coordinates with the pointer's last known location, so no
+      // position is supplied here.
+      _pointerDataConverter.convert(
+        pointerData,
+        viewId: _view.viewId,
+        timeStamp: timeStamp,
+        signalKind: ui.PointerSignalKind.none,
+        device: device,
+        pressureMax: 1.0,
+      );
+    }
+    _downTouchDevices.removeAll(stale);
+
+    PointerBinding.clickDebouncer.flushAndSend(pointerData);
   }
 
   // For each event that is de-coalesced from `event` and described in
@@ -1102,9 +1314,10 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
   List<DomPointerEvent> _expandEvents(DomPointerEvent event) {
     // For browsers that don't support `getCoalescedEvents`, we fallback to
     // using the original event.
-    if (hasJsProperty(event, 'getCoalescedEvents')) {
-      final List<DomPointerEvent> coalescedEvents =
-          event.getCoalescedEvents().cast<DomPointerEvent>();
+    if (event.has('getCoalescedEvents')) {
+      final List<DomPointerEvent> coalescedEvents = event
+          .getCoalescedEvents()
+          .cast<DomPointerEvent>();
       // Some events don't perform coalescing, so they return an empty list. In
       // that case, we also fallback to using the original event.
       if (coalescedEvents.isNotEmpty) {
@@ -1119,16 +1332,12 @@ class _PointerAdapter extends _BaseAdapter with _WheelEventListenerMixin {
   }
 
   ui.PointerDeviceKind _pointerTypeToDeviceKind(String pointerType) {
-    switch (pointerType) {
-      case 'mouse':
-        return ui.PointerDeviceKind.mouse;
-      case 'pen':
-        return ui.PointerDeviceKind.stylus;
-      case 'touch':
-        return ui.PointerDeviceKind.touch;
-      default:
-        return ui.PointerDeviceKind.unknown;
-    }
+    return switch (pointerType) {
+      'mouse' => ui.PointerDeviceKind.mouse,
+      'pen' => ui.PointerDeviceKind.stylus,
+      'touch' => ui.PointerDeviceKind.touch,
+      _ => ui.PointerDeviceKind.unknown,
+    };
   }
 
   int _getPointerId(DomPointerEvent event) {

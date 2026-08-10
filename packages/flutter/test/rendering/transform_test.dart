@@ -187,6 +187,22 @@ void main() {
     );
   });
 
+  test('RenderTransform - globalToLocal with parallel view direction returns zero', () {
+    RenderBox inner;
+    final RenderBox sizer = RenderTransform(
+      transform: rotateAroundXAxis90Degrees(),
+      alignment: Alignment.center,
+      child: inner = RenderSizedBox(const Size(100.0, 100.0)),
+    );
+    layout(
+      sizer,
+      constraints: BoxConstraints.tight(const Size(100.0, 100.0)),
+      alignment: Alignment.topLeft,
+    );
+
+    expect(inner.globalToLocal(const Offset(25.0, 50.0)), Offset.zero);
+  });
+
   test('RenderTransform - perspective - localToGlobal', () {
     RenderBox inner;
     final RenderBox sizer = RenderTransform(
@@ -210,9 +226,9 @@ void main() {
 
 Matrix4 rotateAroundXAxis(double a) {
   // 3D rotation transform with alpha=a
-  const double x = 1.0;
-  const double y = 0.0;
-  const double z = 0.0;
+  const x = 1.0;
+  const y = 0.0;
+  const z = 0.0;
   final double sc = math.sin(a / 2.0) * math.cos(a / 2.0);
   final double sq = math.sin(a / 2.0) * math.sin(a / 2.0);
   return Matrix4.fromList(<double>[
@@ -231,6 +247,19 @@ Matrix4 rotateAroundXAxis(double a) {
     2.0 * (y * z * sq - x * sc),
     1.0 - 2.0 * (x * x + z * z) * sq,
     0.0,
+    // col 4
+    0.0, 0.0, 0.0, 1.0,
+  ]);
+}
+
+Matrix4 rotateAroundXAxis90Degrees() {
+  return Matrix4.fromList(<double>[
+    // col 1
+    1.0, 0.0, 0.0, 0.0,
+    // col 2
+    0.0, 0.0, 1.0, 0.0,
+    // col 3
+    0.0, -1.0, 0.0, 0.0,
     // col 4
     0.0, 0.0, 0.0, 1.0,
   ]);

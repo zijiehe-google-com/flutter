@@ -7,6 +7,7 @@ import 'dart:io' show ProcessStartMode;
 import 'package:collection/collection.dart';
 import 'package:engine_build_configs/engine_build_configs.dart';
 import 'package:meta/meta.dart';
+import 'package:process_runner/process_runner.dart';
 
 import '../build_plan.dart';
 import '../build_utils.dart';
@@ -28,6 +29,15 @@ final class RunCommand extends CommandBase {
     @visibleForTesting FlutterTool? flutterTool,
   }) {
     builds = BuildPlan.configureArgParser(argParser, environment, configs: configs, help: help);
+    argParser.addMultiOption(
+      'flutter-flags',
+      help:
+          'Arguments to pass to the "flutter run" command. '
+          'This can be specified multiple times. For multiple flags, '
+          'separate them by spaces, e.g. '
+          '--flutter-flags="--profile --verbose".',
+      splitCommas: false,
+    );
     _flutterTool = flutterTool ?? FlutterTool.fromEnvironment(environment);
   }
 
@@ -50,7 +60,7 @@ See `flutter run --help` for a listing
 ''';
 
   Build? _findTargetBuild(String configName) {
-    final demangledName = demangleConfigName(environment, configName);
+    final String demangledName = demangleConfigName(environment, configName);
     return builds.firstWhereOrNull((build) => build.name == demangledName);
   }
 
@@ -58,7 +68,7 @@ See `flutter run --help` for a listing
     if (targetBuild == null) {
       return null;
     }
-    final mangledName = mangleConfigName(environment, targetBuild.name);
+    final String mangledName = mangleConfigName(environment, targetBuild.name);
     if (mangledName.contains('host_')) {
       return targetBuild;
     }
@@ -77,13 +87,13 @@ See `flutter run --help` for a listing
 
   String _getDeviceId() {
     if (argResults!.rest.contains('-d')) {
-      final index = argResults!.rest.indexOf('-d') + 1;
+      final int index = argResults!.rest.indexOf('-d') + 1;
       if (index < argResults!.rest.length) {
         return argResults!.rest[index];
       }
     }
     if (argResults!.rest.contains('--device-id')) {
-      final index = argResults!.rest.indexOf('--device-id') + 1;
+      final int index = argResults!.rest.indexOf('--device-id') + 1;
       if (index < argResults!.rest.length) {
         return argResults!.rest[index];
       }
@@ -102,11 +112,10 @@ See `flutter run --help` for a listing
     return mode;
   }
 
-  late final Future<RunTarget?> _runTarget =
-      (() async {
-        final devices = await _flutterTool.devices();
-        return RunTarget.detectAndSelect(devices, idPrefix: _getDeviceId());
-      })();
+  late final Future<RunTarget?> _runTarget = (() async {
+    final List<Device> devices = await _flutterTool.devices();
+    return RunTarget.detectAndSelect(devices, idPrefix: _getDeviceId());
+  })();
 
   @override
   Future<int> run() async {
@@ -114,7 +123,7 @@ See `flutter run --help` for a listing
       throw FatalError('Cannot find the "flutter" command in your PATH');
     }
 
-    final target = await _runTarget;
+    final RunTarget? target = await _runTarget;
     final plan = BuildPlan.fromArgResults(
       argResults!,
       environment,
@@ -122,15 +131,15 @@ See `flutter run --help` for a listing
       defaultBuild: () => target?.buildConfigFor(_getMode()),
     );
 
-    final hostBuild = _findHostBuild(plan.build);
+    final Build? hostBuild = _findHostBuild(plan.build);
     if (hostBuild == null) {
       throw FatalError('Could not find host build for ${plan.build.name}');
     }
 
-    final buildTargetsForShell = target?.buildTargetsForShell ?? [];
+    final List<Label> buildTargetsForShell = target?.buildTargetsForShell ?? [];
 
     // First build the host.
-    var r = await runBuild(
+    int r = await runBuild(
       environment,
       hostBuild,
       concurrency: plan.concurrency ?? 0,
@@ -158,8 +167,8 @@ See `flutter run --help` for a listing
       }
     }
 
-    final mangledBuildName = mangleConfigName(environment, plan.build.name);
-    final mangledHostBuildName = mangleConfigName(environment, hostBuild.name);
+    final String mangledBuildName = mangleConfigName(environment, plan.build.name);
+    final String mangledHostBuildName = mangleConfigName(environment, hostBuild.name);
     final command = <String>[
       'flutter',
       'run',
@@ -169,12 +178,19 @@ See `flutter run --help` for a listing
       mangledBuildName,
       '--local-engine-host',
       mangledHostBuildName,
-      ...argResults!.rest,
     ];
+
+    // Add flags passed to --flutter-flags.
+    final flutterFlags = argResults!['flutter-flags'] as List<String>;
+    for (final flagGroup in flutterFlags) {
+      command.addAll(flagGroup.split(' ').where((String s) => s.isNotEmpty));
+    }
+
+    command.addAll(argResults!.rest);
 
     // TODO(johnmccutchan): Be smart and if the user requested a profile
     // config, add the '--profile' flag when invoking flutter run.
-    final result = await environment.processRunner.runProcess(
+    final ProcessRunnerResult result = await environment.processRunner.runProcess(
       command,
       runInShell: true,
       startMode: ProcessStartMode.inheritStdio,
@@ -235,6 +251,7 @@ final class RunTarget {
       TargetPlatform.androidX86 => 'android_${mode}_x86',
       TargetPlatform.androidX64 => 'android_${mode}_x64',
       TargetPlatform.androidArm64 => 'android_${mode}_arm64',
+      TargetPlatform.androidRiscv64 => 'android_${mode}_riscv64',
 
       // DESKTOP (MacOS, Linux, Windows)
       // We do not support cross-builds, so implicitly assume the host platform.
@@ -253,19 +270,19 @@ final class RunTarget {
       // -----------------------------------------------------------------------
       // iOS.
       // TODO(matanlurey): https://github.com/flutter/flutter/issues/155960
-      TargetPlatform.iOSUnspecified || TargetPlatform.iOSX64 || TargetPlatform.iOSArm64 =>
-        throw FatalError(
-          'iOS targets are currently unsupported.\n\nIf you are an '
-          'iOS engine developer, and have a need for this, please either +1 or '
-          'help us implement https://github.com/flutter/flutter/issues/155960.',
-        ),
+      TargetPlatform.iOSUnspecified ||
+      TargetPlatform.iOSX64 ||
+      TargetPlatform.iOSArm64 => throw FatalError(
+        'iOS targets are currently unsupported.\n\nIf you are an '
+        'iOS engine developer, and have a need for this, please either +1 or '
+        'help us implement https://github.com/flutter/flutter/issues/155960.',
+      ),
 
       // LEGACY ANDROID
-      TargetPlatform.androidArm =>
-        throw FatalError(
-          'Legacy Android targets are not supported. '
-          'Please use android-arm64 or android-x64.',
-        ),
+      TargetPlatform.androidArm => throw FatalError(
+        'Legacy Android targets are not supported. '
+        'Please use android-arm64 or android-x64.',
+      ),
 
       // FUCHSIA
       TargetPlatform.fuchsiaArm64 ||
@@ -275,12 +292,11 @@ final class RunTarget {
       TargetPlatform.tester => throw FatalError('flutter_tester is not supported.'),
 
       // Platforms that maybe could be supported, but we don't know about.
-      _ =>
-        throw FatalError(
-          'Unknown target platform: ${device.targetPlatform.identifier}.\n\nIf '
-          'this is a new platform that should be supported, please file a bug: '
-          'https://github.com/flutter/flutter/issues/new?labels=e:%20engine-tool.',
-        ),
+      _ => throw FatalError(
+        'Unknown target platform: ${device.targetPlatform.identifier}.\n\nIf '
+        'this is a new platform that should be supported, please file a bug: '
+        'https://github.com/flutter/flutter/issues/new?labels=e:%20engine-tool.',
+      ),
     };
   }
 
@@ -293,8 +309,10 @@ final class RunTarget {
       TargetPlatform.androidUnspecified ||
       TargetPlatform.androidX86 ||
       TargetPlatform.androidX64 ||
-      TargetPlatform
-          .androidArm64 => [Label.parseGn('//flutter/shell/platform/android:android_jar')],
+      TargetPlatform.androidRiscv64 ||
+      TargetPlatform.androidArm64 => [
+        Label.parseGn('//flutter/shell/platform/android:android_jar'),
+      ],
 
       // iOS.
       TargetPlatform.iOSUnspecified || TargetPlatform.iOSX64 || TargetPlatform.iOSArm64 => [
@@ -319,12 +337,11 @@ final class RunTarget {
 
       // Unsupported platforms.
       // -----------------------------------------------------------------------
-      _ =>
-        throw FatalError(
-          'Unknown target platform: ${device.targetPlatform.identifier}.\n\nIf '
-          'this is a new platform that should be supported, please file a bug: '
-          'https://github.com/flutter/flutter/issues/new?labels=e:%20engine-tool.',
-        ),
+      _ => throw FatalError(
+        'Unknown target platform: ${device.targetPlatform.identifier}.\n\nIf '
+        'this is a new platform that should be supported, please file a bug: '
+        'https://github.com/flutter/flutter/issues/new?labels=e:%20engine-tool.',
+      ),
     };
   }
 }

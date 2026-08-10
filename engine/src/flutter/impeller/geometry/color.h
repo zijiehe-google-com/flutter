@@ -156,7 +156,7 @@ struct Color {
   }
 
   /// @brief Convert this color to a 32-bit representation.
-  static constexpr uint32_t ToIColor(Color color) {
+  static inline uint32_t ToIColor(Color color) {
     return (((std::lround(color.alpha * 255.0f) & 0xff) << 24) |
             ((std::lround(color.red * 255.0f) & 0xff) << 16) |
             ((std::lround(color.green * 255.0f) & 0xff) << 8) |
@@ -243,7 +243,7 @@ struct Color {
    *
    * @return constexpr std::array<u_int8, 4>
    */
-  constexpr std::array<uint8_t, 4> ToR8G8B8A8() const {
+  inline std::array<uint8_t, 4> ToR8G8B8A8() const {
     uint8_t r = std::round(red * 255.0f);
     uint8_t g = std::round(green * 255.0f);
     uint8_t b = std::round(blue * 255.0f);
@@ -256,9 +256,14 @@ struct Color {
    *
    * @return constexpr uint32_t
    */
-  constexpr uint32_t ToARGB() const {
+  inline uint32_t ToARGB() const {
     std::array<uint8_t, 4> result = ToR8G8B8A8();
     return result[3] << 24 | result[0] << 16 | result[1] << 8 | result[2];
+  }
+
+  template <typename H>
+  friend H AbslHashValue(H h, const Color& c) {
+    return H::combine(std::move(h), c.ToARGB());
   }
 
   static constexpr Color White() { return {1.0f, 1.0f, 1.0f, 1.0f}; }
@@ -915,8 +920,6 @@ constexpr inline Color operator/(T value, const Color& c) {
   auto v = static_cast<Scalar>(value);
   return {v / c.red, v / c.green, v / c.blue, v / c.alpha};
 }
-
-std::string ColorToString(const Color& color);
 
 static_assert(sizeof(Color) == 4 * sizeof(Scalar));
 

@@ -14,9 +14,14 @@
 
 namespace impeller {
 
-SweepGradientContents::SweepGradientContents() = default;
+SweepGradientContents::SweepGradientContents(const Geometry* geometry)
+    : geometry_(geometry) {}
 
 SweepGradientContents::~SweepGradientContents() = default;
+
+const Geometry* SweepGradientContents::GetGeometry() const {
+  return geometry_;
+}
 
 void SweepGradientContents::SetCenterAndAngles(Point center,
                                                Degrees start_angle,
@@ -62,12 +67,18 @@ bool SweepGradientContents::IsOpaque(const Matrix& transform) const {
 }
 
 #define ARRAY_LEN(a) (sizeof(a) / sizeof(a[0]))
-#define UNIFORM_FRAG_INFO(t) \
-  t##GradientUniformFillPipeline::FragmentShader::FragInfo
-#define UNIFORM_COLOR_SIZE ARRAY_LEN(UNIFORM_FRAG_INFO(Sweep)::colors)
-#define UNIFORM_STOP_SIZE ARRAY_LEN(UNIFORM_FRAG_INFO(Sweep)::stop_pairs)
+#define UNIFORM_COLORS_INFO(t) \
+  t##GradientUniformFillPipeline::FragmentShader::ColorsInfo
+#define UNIFORM_STOP_PAIRS_INFO(t) \
+  t##GradientUniformFillPipeline::FragmentShader::StopPairsInfo
+#define UNIFORM_COLOR_SIZE ARRAY_LEN(UNIFORM_COLORS_INFO(Sweep)::colors)
+#define UNIFORM_STOP_SIZE ARRAY_LEN(UNIFORM_STOP_PAIRS_INFO(Sweep)::stop_pairs)
 static_assert(UNIFORM_COLOR_SIZE == kMaxUniformGradientStops);
 static_assert(UNIFORM_STOP_SIZE == kMaxUniformGradientStops / 2);
+static_assert(sizeof(UNIFORM_COLORS_INFO(Sweep)) ==
+              sizeof(UNIFORM_COLORS_INFO(Sweep)::colors));
+static_assert(sizeof(UNIFORM_STOP_PAIRS_INFO(Sweep)) ==
+              sizeof(UNIFORM_STOP_PAIRS_INFO(Sweep)::stop_pairs));
 
 bool SweepGradientContents::Render(const ContentContext& renderer,
                                    const Entity& entity,
@@ -90,8 +101,8 @@ bool SweepGradientContents::RenderSSBO(const ContentContext& renderer,
 
   VS::FrameInfo frame_info;
   frame_info.matrix = GetInverseEffectTransform();
-  VS::BindFrameInfo(pass,
-                    renderer.GetTransientsBuffer().EmplaceUniform(frame_info));
+  VS::BindFrameInfo(
+      pass, renderer.GetTransientsDataBuffer().EmplaceUniform(frame_info));
 
   PipelineBuilderCallback pipeline_callback =
       [&renderer](ContentContextOptions options) {
@@ -110,18 +121,19 @@ bool SweepGradientContents::RenderSSBO(const ContentContext& renderer,
             GetOpacityFactor() *
             GetGeometry()->ComputeAlphaCoverage(entity.GetTransform());
 
-        auto& host_buffer = renderer.GetTransientsBuffer();
+        auto& data_host_buffer = renderer.GetTransientsDataBuffer();
         auto colors = CreateGradientColors(colors_, stops_);
 
         frag_info.colors_length = colors.size();
-        auto color_buffer =
-            host_buffer.Emplace(colors.data(), colors.size() * sizeof(StopData),
-                                host_buffer.GetMinimumUniformAlignment());
+        auto color_buffer = data_host_buffer.Emplace(
+            colors.data(), colors.size() * sizeof(StopData),
+            renderer.GetDeviceCapabilities()
+                .GetMinimumStorageBufferAlignment());
 
         pass.SetCommandLabel("SweepGradientSSBOFill");
 
         FS::BindFragInfo(
-            pass, renderer.GetTransientsBuffer().EmplaceUniform(frag_info));
+            pass, renderer.GetTransientsDataBuffer().EmplaceUniform(frag_info));
         FS::BindColorData(pass, color_buffer);
 
         return true;
@@ -136,8 +148,8 @@ bool SweepGradientContents::RenderUniform(const ContentContext& renderer,
 
   VS::FrameInfo frame_info;
   frame_info.matrix = GetInverseEffectTransform();
-  VS::BindFrameInfo(pass,
-                    renderer.GetTransientsBuffer().EmplaceUniform(frame_info));
+  VS::BindFrameInfo(
+      pass, renderer.GetTransientsDataBuffer().EmplaceUniform(frame_info));
 
   PipelineBuilderCallback pipeline_callback =
       [&renderer](ContentContextOptions options) {
@@ -147,6 +159,9 @@ bool SweepGradientContents::RenderUniform(const ContentContext& renderer,
       renderer, entity, pass, pipeline_callback, frame_info,
       [this, &renderer, &entity](RenderPass& pass) {
         FS::FragInfo frag_info;
+        FS::ColorsInfo colors_info;
+        FS::StopPairsInfo stop_pairs_info;
+
         frag_info.center = center_;
         frag_info.bias = bias_;
         frag_info.scale = scale_;
@@ -155,14 +170,17 @@ bool SweepGradientContents::RenderUniform(const ContentContext& renderer,
             GetOpacityFactor() *
             GetGeometry()->ComputeAlphaCoverage(entity.GetTransform());
         frag_info.colors_length = PopulateUniformGradientColors(
-            colors_, stops_, frag_info.colors, frag_info.stop_pairs);
+            colors_, stops_, colors_info.colors, stop_pairs_info.stop_pairs);
 
         frag_info.decal_border_color = decal_border_color_;
 
         pass.SetCommandLabel("SweepGradientUniformFill");
 
-        FS::BindFragInfo(
-            pass, renderer.GetTransientsBuffer().EmplaceUniform(frag_info));
+        auto& transients_buffer = renderer.GetTransientsDataBuffer();
+        FS::BindFragInfo(pass, transients_buffer.EmplaceUniform(frag_info));
+        FS::BindColorsInfo(pass, transients_buffer.EmplaceUniform(colors_info));
+        FS::BindStopPairsInfo(
+            pass, transients_buffer.EmplaceUniform(stop_pairs_info));
 
         return true;
       });
@@ -195,8 +213,6 @@ bool SweepGradientContents::RenderTexture(const ContentContext& renderer,
         frag_info.center = center_;
         frag_info.bias = bias_;
         frag_info.scale = scale_;
-        frag_info.texture_sampler_y_coord_scale =
-            gradient_texture->GetYCoordScale();
         frag_info.tile_mode = static_cast<Scalar>(tile_mode_);
         frag_info.decal_border_color = decal_border_color_;
         frag_info.alpha =
@@ -213,7 +229,7 @@ bool SweepGradientContents::RenderTexture(const ContentContext& renderer,
         pass.SetCommandLabel("SweepGradientFill");
 
         FS::BindFragInfo(
-            pass, renderer.GetTransientsBuffer().EmplaceUniform(frag_info));
+            pass, renderer.GetTransientsDataBuffer().EmplaceUniform(frag_info));
         FS::BindTextureSampler(
             pass, gradient_texture,
             renderer.GetContext()->GetSamplerLibrary()->GetSampler(

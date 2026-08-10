@@ -7,11 +7,16 @@ import '../utils.dart';
 import 'use_cases.dart';
 
 class BadgeUseCase extends UseCase {
+  BadgeUseCase();
+
   @override
   String get name => 'Badge';
 
   @override
   String get route => '/badge';
+
+  @override
+  List<Tag> get tags => <Tag>[Tag.batch1, Tag.core];
 
   @override
   Widget build(BuildContext context) => const MainWidget();
@@ -30,13 +35,14 @@ class MainWidgetState extends State<MainWidget> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Semantics(headingLevel: 1, child: Text('$pageTitle Demo')),
-      ),
+      appBar: AppBar(title: Semantics(headingLevel: 1, child: Text('$pageTitle Demo'))),
       body: const Center(
         child: Badge(
-          label: Text('5', semanticsLabel: '5 new messages', style: TextStyle(color: Colors.white)),
+          label: Text(
+            '5',
+            semanticsLabel: '5 new messages',
+            style: TextStyle(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
           child: Icon(Icons.mail, semanticLabel: 'Messages'),
         ),

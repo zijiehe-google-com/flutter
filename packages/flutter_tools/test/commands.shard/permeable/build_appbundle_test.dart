@@ -63,6 +63,7 @@ void main() {
               commandHasTerminal: false,
               buildAppBundleTargetPlatform: 'android-arm,android-arm64,android-x64',
               buildAppBundleBuildMode: 'release',
+              buildBundleEnableHcpp: false,
             ),
           ),
         );
@@ -73,8 +74,101 @@ void main() {
       },
     );
 
+    testUsingContext(
+      'reports hcpp analytics default false when not in the manifest and no explicit flag is passed',
+      () async {
+        final String projectPath = await createProject(
+          tempDir,
+          arguments: <String>['--no-pub', '--template=app'],
+        );
+
+        await runBuildAppBundleCommand(projectPath);
+
+        expect(
+          fakeAnalytics.sentEvents,
+          contains(
+            Event.commandUsageValues(
+              workflow: 'appbundle',
+              commandHasTerminal: false,
+              buildAppBundleTargetPlatform: 'android-arm,android-arm64,android-x64',
+              buildAppBundleBuildMode: 'release',
+              buildBundleEnableHcpp: false,
+            ),
+          ),
+        );
+      },
+      overrides: <Type, Generator>{
+        AndroidBuilder: () => FakeAndroidBuilder(),
+        Analytics: () => fakeAnalytics,
+        FlutterProjectFactory: () => FakeFlutterProjectFactory(tempDir),
+      },
+    );
+
+    testUsingContext(
+      'reports hcpp analytics from an explicit --enable-hcpp flag when not in the manifest',
+      () async {
+        final String projectPath = await createProject(
+          tempDir,
+          arguments: <String>['--no-pub', '--template=app'],
+        );
+
+        // The manifest does not set EnableHcpp, so the build injects the flag value and the
+        // packaged app has HCPP on. Analytics has to report what was packaged, not what the
+        // source manifest happened to say.
+        await runBuildAppBundleCommand(projectPath, arguments: <String>['--enable-hcpp']);
+
+        expect(
+          fakeAnalytics.sentEvents,
+          contains(
+            Event.commandUsageValues(
+              workflow: 'appbundle',
+              commandHasTerminal: false,
+              buildAppBundleTargetPlatform: 'android-arm,android-arm64,android-x64',
+              buildAppBundleBuildMode: 'release',
+              buildBundleEnableHcpp: true,
+            ),
+          ),
+        );
+      },
+      overrides: <Type, Generator>{
+        AndroidBuilder: () => FakeAndroidBuilder(),
+        Analytics: () => fakeAnalytics,
+        FlutterProjectFactory: () => FakeFlutterProjectFactory(tempDir),
+      },
+    );
+
+    testUsingContext(
+      'reports hcpp analytics from an explicit --no-enable-hcpp flag',
+      () async {
+        final String projectPath = await createProject(
+          tempDir,
+          arguments: <String>['--no-pub', '--template=app'],
+        );
+
+        await runBuildAppBundleCommand(projectPath, arguments: <String>['--no-enable-hcpp']);
+
+        expect(
+          fakeAnalytics.sentEvents,
+          contains(
+            Event.commandUsageValues(
+              workflow: 'appbundle',
+              commandHasTerminal: false,
+              buildAppBundleTargetPlatform: 'android-arm,android-arm64,android-x64',
+              buildAppBundleBuildMode: 'release',
+              buildBundleEnableHcpp: false,
+            ),
+          ),
+        );
+      },
+      overrides: <Type, Generator>{
+        AndroidBuilder: () => FakeAndroidBuilder(),
+        Analytics: () => fakeAnalytics,
+        FlutterProjectFactory: () => FakeFlutterProjectFactory(tempDir),
+      },
+    );
+
     testUsingContext('alias aab', () async {
-      final BuildAppBundleCommand command = BuildAppBundleCommand(logger: BufferLogger.test());
+      final command = BuildAppBundleCommand(logger: BufferLogger.test());
       expect(command.aliases, contains('aab'));
     });
 
@@ -95,6 +189,7 @@ void main() {
               commandHasTerminal: false,
               buildAppBundleTargetPlatform: 'android-arm,android-arm64,android-x64',
               buildAppBundleBuildMode: 'release',
+              buildBundleEnableHcpp: false,
             ),
           ),
         );
@@ -109,6 +204,7 @@ void main() {
               commandHasTerminal: false,
               buildAppBundleTargetPlatform: 'android-arm,android-arm64,android-x64',
               buildAppBundleBuildMode: 'release',
+              buildBundleEnableHcpp: false,
             ),
           ),
         );
@@ -123,6 +219,7 @@ void main() {
               commandHasTerminal: false,
               buildAppBundleTargetPlatform: 'android-arm,android-arm64,android-x64',
               buildAppBundleBuildMode: 'debug',
+              buildBundleEnableHcpp: false,
             ),
           ),
         );
@@ -138,6 +235,7 @@ void main() {
               commandHasTerminal: false,
               buildAppBundleTargetPlatform: 'android-arm,android-arm64,android-x64',
               buildAppBundleBuildMode: 'profile',
+              buildBundleEnableHcpp: false,
             ),
           ),
         );
@@ -176,6 +274,147 @@ void main() {
         ProcessInfo: () => processInfo,
       },
     );
+
+    group('Impeller AndroidManifest.xml setting', () {
+      // Adds a key-value `<meta-data>` pair to the `<application>` tag in the
+      // corresponding `AndroidManifest.xml` file, right before the closing
+      // `</application>` tag.
+      void writeManifestMetadata({
+        required String projectPath,
+        required String name,
+        required String value,
+      }) {
+        final String manifestPath = globals.fs.path.join(
+          projectPath,
+          'android',
+          'app',
+          'src',
+          'main',
+          'AndroidManifest.xml',
+        );
+
+        // It would be unnecessarily complicated to parse this XML file and
+        // insert the key-value pair, so we just insert it right before the
+        // closing </application> tag.
+        final String oldManifest = globals.fs.file(manifestPath).readAsStringSync();
+        final String newManifest = oldManifest.replaceFirst(
+          '</application>',
+          '    <meta-data\n'
+              '        android:name="$name"\n'
+              '        android:value="$value" />\n'
+              '    </application>',
+        );
+        globals.fs.file(manifestPath).writeAsStringSync(newManifest);
+      }
+
+      testUsingContext(
+        'a default appbundle build reports Impeller as enabled',
+        () async {
+          final String projectPath = await createProject(
+            tempDir,
+            arguments: <String>['--empty', '--no-pub', '--template=app'],
+          );
+
+          final Directory oldCwd = globals.localFileSystem.currentDirectory;
+          try {
+            globals.localFileSystem.currentDirectory = globals.localFileSystem.directory(
+              projectPath,
+            );
+            await runBuildAppBundleCommand(projectPath);
+          } finally {
+            globals.localFileSystem.currentDirectory = oldCwd;
+          }
+
+          expect(
+            fakeAnalytics.sentEvents,
+            contains(
+              Event.flutterBuildInfo(label: 'manifest-impeller-enabled', buildType: 'android'),
+            ),
+          );
+        },
+        overrides: <Type, Generator>{
+          AndroidBuilder: () => FakeAndroidBuilder(),
+          Analytics: () => fakeAnalytics,
+          ProcessInfo: () => processInfo,
+        },
+      );
+
+      testUsingContext(
+        'EnableImpeller="true" reports an enabled event',
+        () async {
+          final String projectPath = await createProject(
+            tempDir,
+            arguments: <String>['--empty', '--no-pub', '--template=app'],
+          );
+
+          writeManifestMetadata(
+            projectPath: projectPath,
+            name: 'io.flutter.embedding.android.EnableImpeller',
+            value: 'true',
+          );
+
+          final Directory oldCwd = globals.localFileSystem.currentDirectory;
+          try {
+            globals.localFileSystem.currentDirectory = globals.localFileSystem.directory(
+              projectPath,
+            );
+            await runBuildAppBundleCommand(projectPath);
+          } finally {
+            globals.localFileSystem.currentDirectory = oldCwd;
+          }
+
+          expect(
+            fakeAnalytics.sentEvents,
+            contains(
+              Event.flutterBuildInfo(label: 'manifest-impeller-enabled', buildType: 'android'),
+            ),
+          );
+        },
+        overrides: <Type, Generator>{
+          AndroidBuilder: () => FakeAndroidBuilder(),
+          Analytics: () => fakeAnalytics,
+          ProcessInfo: () => processInfo,
+        },
+      );
+
+      testUsingContext(
+        'EnableImpeller="false" reports a disabled event',
+        () async {
+          final String projectPath = await createProject(
+            tempDir,
+            arguments: <String>['--empty', '--no-pub', '--template=app'],
+          );
+
+          writeManifestMetadata(
+            projectPath: projectPath,
+            name: 'io.flutter.embedding.android.EnableImpeller',
+            value: 'false',
+          );
+
+          final Directory oldCwd = globals.localFileSystem.currentDirectory;
+          try {
+            globals.localFileSystem.currentDirectory = globals.localFileSystem.directory(
+              projectPath,
+            );
+            await runBuildAppBundleCommand(projectPath);
+          } finally {
+            globals.localFileSystem.currentDirectory = oldCwd;
+          }
+
+          expect(
+            fakeAnalytics.sentEvents,
+            contains(
+              Event.flutterBuildInfo(label: 'manifest-impeller-disabled', buildType: 'android'),
+            ),
+          );
+        },
+        overrides: <Type, Generator>{
+          AndroidBuilder: () => FakeAndroidBuilder(),
+          Analytics: () => fakeAnalytics,
+          ProcessInfo: () => processInfo,
+        },
+      );
+    });
 
     testUsingContext(
       'use of the deferred components feature sends a build info event indicating so',
@@ -287,13 +526,9 @@ void main() {
           await runBuildAppBundleCommand(projectPath);
         }, throwsToolExit());
 
-        expect(testLogger.statusText, containsIgnoringWhitespace("Your app isn't using AndroidX"));
         expect(
           testLogger.statusText,
-          containsIgnoringWhitespace(
-            'To avoid potential build failures, you can quickly migrate your app by '
-            'following the steps on https://goo.gl/CP92wY',
-          ),
+          isNot(containsIgnoringWhitespace("Your app isn't using AndroidX")),
         );
 
         expect(
@@ -367,7 +602,7 @@ Future<BuildAppBundleCommand> runBuildAppBundleCommand(
   String target, {
   List<String>? arguments,
 }) async {
-  final BuildAppBundleCommand command = BuildAppBundleCommand(logger: BufferLogger.test());
+  final command = BuildAppBundleCommand(logger: BufferLogger.test());
   final CommandRunner<void> runner = createTestCommandRunner(command);
   await runner.run(<String>[
     'appbundle',

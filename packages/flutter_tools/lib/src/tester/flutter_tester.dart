@@ -97,9 +97,12 @@ class FlutterTesterDevice extends Device {
   Future<TargetPlatform> get targetPlatform async => TargetPlatform.tester;
 
   @override
+  Future<CpuArch> get cpuArch async => CpuArch.unknown;
+
+  @override
   void clearLogs() {}
 
-  final DesktopLogReader _logReader = DesktopLogReader();
+  final _logReader = DesktopLogReader();
 
   @override
   DeviceLogReader getLogReader({ApplicationPackage? app, bool includePastLogs = false}) {
@@ -116,7 +119,7 @@ class FlutterTesterDevice extends Device {
   Future<bool> isLatestBuildInstalled(ApplicationPackage app) async => false;
 
   @override
-  bool isSupported() => true;
+  Future<bool> isSupported() async => true;
 
   @override
   Future<LaunchResult> startApp(
@@ -153,7 +156,7 @@ class FlutterTesterDevice extends Device {
       assetDirPath: assetDirectory.path,
     );
 
-    final List<String> command = <String>[
+    final command = <String>[
       _artifacts.getArtifactPath(Artifact.flutterTester),
       '--run-forever',
       '--non-interactive',
@@ -162,6 +165,7 @@ class FlutterTesterDevice extends Device {
       '--flutter-assets-dir=${assetDirectory.path}',
       if (debuggingOptions.startPaused) '--start-paused',
       if (debuggingOptions.disableServiceAuthCodes) '--disable-service-auth-codes',
+      if (debuggingOptions.disableServiceOriginCheck) '--disable-service-origin-check',
       if (debuggingOptions.hostVmServicePort != null)
         '--vm-service-port=${debuggingOptions.hostVmServicePort}',
       applicationKernelFilePath,
@@ -183,14 +187,14 @@ class FlutterTesterDevice extends Device {
         return LaunchResult.succeeded();
       }
 
+      _logReader.listenToProcessOutput(_process!);
       vmServiceDiscovery = ProtocolDiscovery.vmService(
-        getLogReader(),
+        SingleLaunchLogReader(_logReader.logLines, _process!.exitCode),
         hostPort: debuggingOptions.hostVmServicePort,
         devicePort: debuggingOptions.deviceVmServicePort,
         ipv6: debuggingOptions.ipv6,
         logger: _logger,
       );
-      _logReader.initializeProcess(_process!);
 
       final Uri? vmServiceUri = await vmServiceDiscovery.uri;
       if (vmServiceUri != null) {
@@ -252,7 +256,7 @@ class FlutterTesterDevices extends PollingDeviceDiscovery {
        ),
        super('Flutter tester');
 
-  static const String kTesterDeviceId = 'flutter-tester';
+  static const kTesterDeviceId = 'flutter-tester';
 
   static bool showFlutterTesterDevice = false;
 
@@ -265,7 +269,10 @@ class FlutterTesterDevices extends PollingDeviceDiscovery {
   bool get supportsPlatform => true;
 
   @override
-  Future<List<Device>> pollingGetDevices({Duration? timeout}) async {
+  Future<List<Device>> pollingGetDevices({
+    Duration? timeout,
+    bool forWirelessDiscovery = false,
+  }) async {
     return showFlutterTesterDevice ? <Device>[_testerDevice] : <Device>[];
   }
 

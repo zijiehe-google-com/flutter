@@ -7,7 +7,7 @@ import 'package:flutter_tools/src/artifacts.dart';
 import 'package:flutter_tools/src/base/file_system.dart';
 import 'package:flutter_tools/src/base/logger.dart';
 import 'package:flutter_tools/src/base/platform.dart';
-import 'package:flutter_tools/src/build_info.dart';
+import 'package:flutter_tools/src/base/process.dart';
 import 'package:flutter_tools/src/cache.dart';
 import 'package:flutter_tools/src/device.dart';
 import 'package:flutter_tools/src/ios/core_devices.dart';
@@ -18,6 +18,7 @@ import 'package:flutter_tools/src/ios/mac.dart';
 import 'package:flutter_tools/src/ios/xcode_debug.dart';
 import 'package:flutter_tools/src/project.dart';
 import 'package:test/fake.dart';
+import 'package:unified_analytics/unified_analytics.dart';
 
 import '../../src/common.dart';
 import '../../src/context.dart';
@@ -100,6 +101,8 @@ IOSDevice setUpIOSDevice(FileSystem fileSystem) {
     'test',
     fileSystem: fileSystem,
     logger: logger,
+    processUtils: ProcessUtils(processManager: processManager, logger: logger),
+    xcode: null,
     iosDeploy: IOSDeploy(
       platform: platform,
       logger: logger,
@@ -107,13 +110,15 @@ IOSDevice setUpIOSDevice(FileSystem fileSystem) {
       artifacts: Artifacts.test(),
       cache: Cache.test(processManager: processManager),
     ),
+    analytics: FakeAnalytics(),
     iMobileDevice: IMobileDevice.test(processManager: processManager),
     coreDeviceControl: FakeIOSCoreDeviceControl(),
+    coreDeviceLauncher: FakeIOSCoreDeviceLauncher(),
     xcodeDebug: FakeXcodeDebug(),
     platform: platform,
     name: 'iPhone 1',
     sdkVersion: '13.3',
-    cpuArchitecture: DarwinArch.arm64,
+    cpuArch: .arm64,
     iProxy: IProxy.test(logger: logger, processManager: processManager),
     connectionInterface: DeviceConnectionInterface.attached,
     isConnected: true,
@@ -126,3 +131,7 @@ IOSDevice setUpIOSDevice(FileSystem fileSystem) {
 class FakeXcodeDebug extends Fake implements XcodeDebug {}
 
 class FakeIOSCoreDeviceControl extends Fake implements IOSCoreDeviceControl {}
+
+class FakeIOSCoreDeviceLauncher extends Fake implements IOSCoreDeviceLauncher {}
+
+class FakeAnalytics extends Fake implements Analytics {}

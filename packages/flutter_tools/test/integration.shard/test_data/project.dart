@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'hot_reload_project.dart';
+library;
+
 import 'package:file/file.dart';
 
 import '../../src/package_config.dart';
 import '../test_utils.dart';
 import 'deferred_components_config.dart';
 
-const String _kDefaultHtml = '''
+const _kDefaultHtml = '''
 <html>
     <head>
         <meta charset='utf-8'>
@@ -24,17 +27,19 @@ abstract class Project {
   /// Creates a flutter Project for testing.
   ///
   /// If passed, `indexHtml` is used as the contents of the web/index.html file.
-  Project({this.indexHtml = _kDefaultHtml});
+  Project({this.indexHtml = _kDefaultHtml, String? name}) : name = name ?? 'test';
+
+  final String name;
 
   late Directory dir;
 
   String get pubspec;
-  String? get main => null;
-  String? get test => null;
-  String? get generatedFile => null;
+  String get main => '';
+  String get test => '';
+  String get generatedFile => '';
   DeferredComponentsConfig? get deferredComponents => null;
 
-  Uri get mainDart => Uri.parse('package:test/main.dart');
+  Uri get mainDart => Uri.parse('package:$name/main.dart');
 
   /// The contents for the index.html file of this `Project`.
   ///
@@ -43,19 +48,16 @@ abstract class Project {
   /// (Used by [HotReloadProject].)
   final String indexHtml;
 
-  Future<void> setUpIn(Directory dir) async {
+  Future<void> setUpIn(Directory dir, {bool generateMain = true}) async {
     this.dir = dir;
     writeFile(fileSystem.path.join(dir.path, 'pubspec.yaml'), pubspec);
-    final String? main = this.main;
-    if (main != null) {
+    if (main.isNotEmpty && generateMain) {
       writeFile(fileSystem.path.join(dir.path, 'lib', 'main.dart'), main);
     }
-    final String? test = this.test;
-    if (test != null) {
+    if (test.isNotEmpty) {
       writeFile(fileSystem.path.join(dir.path, 'test', 'test.dart'), test);
     }
-    final String? generatedFile = this.generatedFile;
-    if (generatedFile != null) {
+    if (generatedFile.isNotEmpty) {
       writeFile(
         fileSystem.path.join(dir.path, '.dart_tool', 'flutter_gen', 'flutter_gen.dart'),
         generatedFile,
@@ -67,7 +69,7 @@ abstract class Project {
     writeFile(fileSystem.path.join(dir.path, 'web', 'index.html'), indexHtml);
     writeFile(fileSystem.path.join(dir.path, 'web', 'flutter.js'), '');
     writeFile(fileSystem.path.join(dir.path, 'web', 'flutter_service_worker.js'), '');
-    writePackageConfigFile(directory: dir, mainLibName: 'test');
+    writePackageConfigFiles(directory: dir, mainLibName: name);
     await getPackages(dir.path);
   }
 

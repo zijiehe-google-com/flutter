@@ -4,9 +4,9 @@
 
 #include "impeller/renderer/render_target.h"
 
+#include <format>
 #include <sstream>
 
-#include "impeller/base/strings.h"
 #include "impeller/base/validation.h"
 #include "impeller/core/allocator.h"
 #include "impeller/core/formats.h"
@@ -15,6 +15,18 @@
 #include "impeller/renderer/context.h"
 
 namespace impeller {
+
+// The dimensions of `texture` at `mip_level`, clamped to a minimum of 1x1.
+// Rendering into a mip level uses that level's size, not the base size.
+static ISize SizeForMipLevel(const std::shared_ptr<Texture>& texture,
+                             uint32_t mip_level) {
+  ISize size = texture->GetSize();
+  // Any real texture reaches 1x1 well before this; clamping the shift also
+  // avoids undefined behavior for absurd mip levels.
+  uint32_t shift = std::min(mip_level, 31u);
+  return ISize{std::max<int64_t>(1, size.width >> shift),
+               std::max<int64_t>(1, size.height >> shift)};
+}
 
 RenderTarget::RenderTarget() = default;
 
@@ -34,10 +46,12 @@ bool RenderTarget::IsValid() const {
     std::optional<ISize> size;
     bool sizes_are_same = true;
     auto iterator = [&](const Attachment& attachment) -> bool {
+      ISize attachment_size =
+          SizeForMipLevel(attachment.texture, attachment.mip_level);
       if (!size.has_value()) {
-        size = attachment.texture->GetSize();
+        size = attachment_size;
       }
-      if (size != attachment.texture->GetSize()) {
+      if (size != attachment_size) {
         sizes_are_same = false;
         return false;
       }
@@ -155,7 +169,8 @@ bool RenderTarget::HasColorAttachment(size_t index) const {
 std::optional<ISize> RenderTarget::GetColorAttachmentSize(size_t index) const {
   if (index == 0u) {
     if (color0_.has_value()) {
-      return color0_.value().texture->GetSize();
+      return SizeForMipLevel(color0_.value().texture,
+                             color0_.value().mip_level);
     }
     return std::nullopt;
   }
@@ -165,7 +180,7 @@ std::optional<ISize> RenderTarget::GetColorAttachmentSize(size_t index) const {
     return std::nullopt;
   }
 
-  return found->second.texture->GetSize();
+  return SizeForMipLevel(found->second.texture, found->second.mip_level);
 }
 
 ISize RenderTarget::GetRenderTargetSize() const {
@@ -188,7 +203,7 @@ PixelFormat RenderTarget::GetRenderTargetPixelFormat() const {
   return PixelFormat::kUnknown;
 }
 
-size_t RenderTarget::GetMaxColorAttacmentBindIndex() const {
+size_t RenderTarget::GetMaxColorAttachmentBindIndex() const {
   size_t max = 0;
   for (const auto& color : colors_) {
     max = std::max(color.first, max);
@@ -279,22 +294,22 @@ std::string RenderTarget::ToString() const {
   std::stringstream stream;
 
   if (color0_.has_value()) {
-    stream << SPrintF("Color[%d]=(%s)", 0,
-                      ColorAttachmentToString(color0_.value()).c_str());
+    stream << std::format("Color[{}]=({})", 0,
+                          ColorAttachmentToString(color0_.value()));
   }
   for (const auto& [index, color] : colors_) {
-    stream << SPrintF("Color[%zu]=(%s)", index,
-                      ColorAttachmentToString(color).c_str());
+    stream << std::format("Color[{}]=({})", index,
+                          ColorAttachmentToString(color));
   }
   if (depth_) {
     stream << ",";
-    stream << SPrintF("Depth=(%s)",
-                      DepthAttachmentToString(depth_.value()).c_str());
+    stream << std::format("Depth=({})",
+                          DepthAttachmentToString(depth_.value()));
   }
   if (stencil_) {
     stream << ",";
-    stream << SPrintF("Stencil=(%s)",
-                      StencilAttachmentToString(stencil_.value()).c_str());
+    stream << std::format("Stencil=({})",
+                          StencilAttachmentToString(stencil_.value()));
   }
   return stream.str();
 }
@@ -327,7 +342,8 @@ RenderTarget RenderTargetAllocator::CreateOffscreen(
     RenderTarget::AttachmentConfig color_attachment_config,
     std::optional<RenderTarget::AttachmentConfig> stencil_attachment_config,
     const std::shared_ptr<Texture>& existing_color_texture,
-    const std::shared_ptr<Texture>& existing_depth_stencil_texture) {
+    const std::shared_ptr<Texture>& existing_depth_stencil_texture,
+    std::optional<PixelFormat> target_pixel_format) {
   if (size.IsEmpty()) {
     return {};
   }
@@ -338,11 +354,12 @@ RenderTarget RenderTargetAllocator::CreateOffscreen(
   if (existing_color_texture) {
     color0_tex = existing_color_texture;
   } else {
-    PixelFormat pixel_format =
-        context.GetCapabilities()->GetDefaultColorFormat();
     TextureDescriptor color0_tex_desc;
     color0_tex_desc.storage_mode = color_attachment_config.storage_mode;
-    color0_tex_desc.format = pixel_format;
+    color0_tex_desc.format =
+        target_pixel_format.has_value()
+            ? target_pixel_format.value()
+            : context.GetCapabilities()->GetDefaultColorFormat();
     color0_tex_desc.size = size;
     color0_tex_desc.mip_count = mip_count;
     color0_tex_desc.usage =
@@ -382,13 +399,17 @@ RenderTarget RenderTargetAllocator::CreateOffscreenMSAA(
     std::optional<RenderTarget::AttachmentConfig> stencil_attachment_config,
     const std::shared_ptr<Texture>& existing_color_msaa_texture,
     const std::shared_ptr<Texture>& existing_color_resolve_texture,
-    const std::shared_ptr<Texture>& existing_depth_stencil_texture) {
+    const std::shared_ptr<Texture>& existing_depth_stencil_texture,
+    std::optional<PixelFormat> target_pixel_format) {
   if (size.IsEmpty()) {
     return {};
   }
 
   RenderTarget target;
-  PixelFormat pixel_format = context.GetCapabilities()->GetDefaultColorFormat();
+  PixelFormat pixel_format =
+      target_pixel_format.has_value()
+          ? target_pixel_format.value()
+          : context.GetCapabilities()->GetDefaultColorFormat();
 
   // Create MSAA color texture.
   std::shared_ptr<Texture> color0_msaa_tex;

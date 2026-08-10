@@ -40,7 +40,7 @@ void IOSExternalViewEmbedder::BeginFrame(
     const fml::RefPtr<fml::RasterThreadMerger>& raster_thread_merger) {}
 
 // |ExternalViewEmbedder|
-void IOSExternalViewEmbedder::PrepareFlutterView(SkISize frame_size, double device_pixel_ratio) {
+void IOSExternalViewEmbedder::PrepareFlutterView(DlISize frame_size, double device_pixel_ratio) {
   FML_CHECK(platform_views_controller_);
   [platform_views_controller_ beginFrameWithSize:frame_size];
 }
@@ -52,16 +52,6 @@ void IOSExternalViewEmbedder::PrerollCompositeEmbeddedView(
   TRACE_EVENT0("flutter", "IOSExternalViewEmbedder::PrerollCompositeEmbeddedView");
   FML_CHECK(platform_views_controller_);
   [platform_views_controller_ prerollCompositeEmbeddedView:view_id withParams:std::move(params)];
-}
-
-// |ExternalViewEmbedder|
-PostPrerollResult IOSExternalViewEmbedder::PostPrerollAction(
-    const fml::RefPtr<fml::RasterThreadMerger>& raster_thread_merger) {
-  TRACE_EVENT0("flutter", "IOSExternalViewEmbedder::PostPrerollAction");
-  FML_CHECK(platform_views_controller_);
-  PostPrerollResult result =
-      [platform_views_controller_ postPrerollActionWithThreadMerger:raster_thread_merger];
-  return result;
 }
 
 // |ExternalViewEmbedder|
@@ -88,15 +78,6 @@ void IOSExternalViewEmbedder::SubmitFlutterView(
 }
 
 // |ExternalViewEmbedder|
-void IOSExternalViewEmbedder::EndFrame(
-    bool should_resubmit_frame,
-    const fml::RefPtr<fml::RasterThreadMerger>& raster_thread_merger) {
-  TRACE_EVENT0("flutter", "IOSExternalViewEmbedder::EndFrame");
-  [platform_views_controller_ endFrameWithResubmit:should_resubmit_frame
-                                      threadMerger:raster_thread_merger];
-}
-
-// |ExternalViewEmbedder|
 bool IOSExternalViewEmbedder::SupportsDynamicThreadMerging() {
   return false;
 }
@@ -104,13 +85,34 @@ bool IOSExternalViewEmbedder::SupportsDynamicThreadMerging() {
 // |ExternalViewEmbedder|
 void IOSExternalViewEmbedder::PushFilterToVisitedPlatformViews(
     const std::shared_ptr<DlImageFilter>& filter,
-    const SkRect& filter_rect) {
+    const DlRect& filter_rect) {
   [platform_views_controller_ pushFilterToVisitedPlatformViews:filter withRect:filter_rect];
 }
 
 // |ExternalViewEmbedder|
 void IOSExternalViewEmbedder::PushVisitedPlatformView(int64_t view_id) {
   [platform_views_controller_ pushVisitedPlatformViewId:view_id];
+}
+
+// |ExternalViewEmbedder|
+void IOSExternalViewEmbedder::PushClipRectToVisitedPlatformViews(const DlRect& clip_rect) {
+  [platform_views_controller_ pushClipRectToVisitedPlatformViews:clip_rect];
+}
+
+// |ExternalViewEmbedder|
+void IOSExternalViewEmbedder::PushClipRRectToVisitedPlatformViews(const DlRoundRect& clip_rrect) {
+  [platform_views_controller_ pushClipRRectToVisitedPlatformViews:clip_rrect];
+}
+
+// |ExternalViewEmbedder|
+void IOSExternalViewEmbedder::PushClipRSuperellipseToVisitedPlatformViews(
+    const DlRoundSuperellipse& clip_rse) {
+  [platform_views_controller_ pushClipRSuperellipseToVisitedPlatformViews:clip_rse];
+}
+
+// |ExternalViewEmbedder|
+void IOSExternalViewEmbedder::PushClipPathToVisitedPlatformViews(const DlPath& clip_path) {
+  [platform_views_controller_ pushClipPathToVisitedPlatformViews:clip_path];
 }
 
 }  // namespace flutter

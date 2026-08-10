@@ -77,15 +77,16 @@ GeometryResult SuperellipseGeometry::GetPositionBuffer(
     indices.push_back(i);
   }
 
-  auto& host_buffer = renderer.GetTransientsBuffer();
+  auto& data_host_buffer = renderer.GetTransientsDataBuffer();
+  auto& indexes_host_buffer = renderer.GetTransientsIndexesBuffer();
   return GeometryResult{
       .type = PrimitiveType::kTriangle,
       .vertex_buffer =
           {
-              .vertex_buffer = host_buffer.Emplace(
+              .vertex_buffer = data_host_buffer.Emplace(
                   geometry.data(), geometry.size() * sizeof(Point),
                   alignof(Point)),
-              .index_buffer = host_buffer.Emplace(
+              .index_buffer = indexes_host_buffer.Emplace(
                   indices.data(), indices.size() * sizeof(uint16_t),
                   alignof(uint16_t)),
               .vertex_count = indices.size(),
@@ -97,12 +98,11 @@ GeometryResult SuperellipseGeometry::GetPositionBuffer(
 
 std::optional<Rect> SuperellipseGeometry::GetCoverage(
     const Matrix& transform) const {
-  return Rect::MakeOriginSize(center_ - Point(radius_, radius_),
-                              Size(radius_ * 2, radius_ * 2));
+  return Rect::MakeCircleBounds(center_, radius_);
 }
 
 bool SuperellipseGeometry::CoversArea(const Matrix& transform,
-                                      const Rect& rect) const {
+                                      const IRect& rect) const {
   return false;
 }
 

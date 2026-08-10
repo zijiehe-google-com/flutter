@@ -51,7 +51,7 @@ bool GPUSurfaceMetalImpeller::IsValid() {
 }
 
 // |Surface|
-std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrame(const SkISize& frame_size) {
+std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrame(const DlISize& frame_size) {
   TRACE_EVENT0("impeller", "GPUSurfaceMetalImpeller::AcquireFrame");
 
   if (!IsValid()) {
@@ -59,16 +59,27 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrame(const SkISiz
     return nullptr;
   }
 
-  if (frame_size.isEmpty()) {
+  if (frame_size.IsEmpty()) {
     FML_LOG(ERROR) << "Metal surface was asked for an empty frame.";
     return nullptr;
   }
 
   if (!render_to_surface_) {
+#ifdef IMPELLER_DEBUG
+    impeller::ContextMTL::Cast(*aiks_context_->GetContext()).GetCaptureManager()->StartCapture();
+#endif  // IMPELLER_DEBUG
     return std::make_unique<SurfaceFrame>(
         nullptr, SurfaceFrame::FramebufferInfo(),
         [](const SurfaceFrame& surface_frame, DlCanvas* canvas) { return true; },
-        [](const SurfaceFrame& surface_frame) { return true; }, frame_size);
+#ifdef IMPELLER_DEBUG
+        [context = aiks_context_->GetContext()](const SurfaceFrame& surface_frame) {
+          impeller::ContextMTL::Cast(*context).GetCaptureManager()->FinishCapture();
+          return true;
+        },
+#else
+        [](const SurfaceFrame& surface_frame) { return true; },
+#endif  // IMPELLER_DEBUG
+        frame_size);
   }
 
   switch (render_target_type_) {
@@ -84,7 +95,7 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrame(const SkISiz
 }
 
 std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrameFromCAMetalLayer(
-    const SkISize& frame_size) {
+    const DlISize& frame_size) {
   CAMetalLayer* layer = (__bridge CAMetalLayer*)delegate_->GetCAMetalLayer(frame_size);
   if (!layer) {
     FML_LOG(ERROR) << "Invalid CAMetalLayer given by the embedder.";
@@ -137,19 +148,20 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrameFromCAMetalLa
             if (entry.first != texture) {
               // Accumulate damage for other framebuffers
               if (surface_frame.submit_info().frame_damage) {
-                entry.second.join(*surface_frame.submit_info().frame_damage);
+                entry.second = entry.second.Union(*surface_frame.submit_info().frame_damage);
               }
             }
           }
           // Reset accumulated damage for current framebuffer
-          (*damage)[texture] = SkIRect::MakeEmpty();
+          (*damage)[texture] = DlIRect();
         }
 
         std::optional<impeller::IRect> clip_rect;
         if (surface_frame.submit_info().buffer_damage.has_value()) {
           auto buffer_damage = surface_frame.submit_info().buffer_damage;
-          clip_rect = impeller::IRect::MakeXYWH(buffer_damage->x(), buffer_damage->y(),
-                                                buffer_damage->width(), buffer_damage->height());
+          clip_rect =
+              impeller::IRect::MakeLTRB(buffer_damage->GetLeft(), buffer_damage->GetTop(),
+                                        buffer_damage->GetRight(), buffer_damage->GetBottom());
         }
 
         auto surface = impeller::SurfaceMTL::MakeFromMetalLayerDrawable(
@@ -170,15 +182,14 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrameFromCAMetalLa
           return true;
         }
 
-        impeller::IRect cull_rect = surface->coverage();
-        SkIRect sk_cull_rect = SkIRect::MakeWH(cull_rect.GetWidth(), cull_rect.GetHeight());
+        impeller::Rect cull_rect = impeller::Rect::Make(surface->coverage());
         surface->SetFrameBoundary(surface_frame.submit_info().frame_boundary);
 
         const bool reset_host_buffer = surface_frame.submit_info().frame_boundary;
         auto render_result = impeller::RenderToTarget(aiks_context->GetContentContext(),       //
                                                       surface->GetRenderTarget(),              //
                                                       display_list,                            //
-                                                      sk_cull_rect,                            //
+                                                      cull_rect,                               //
                                                       /*reset_host_buffer=*/reset_host_buffer  //
         );
         if (!render_result) {
@@ -218,7 +229,7 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrameFromCAMetalLa
 }
 
 std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrameFromMTLTexture(
-    const SkISize& frame_size) {
+    const DlISize& frame_size) {
   GPUMTLTextureInfo texture_info = delegate_->GetMTLTexture(frame_size);
   id<MTLTexture> mtl_texture = (__bridge id<MTLTexture>)texture_info.texture;
   if (!mtl_texture) {
@@ -261,19 +272,20 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrameFromMTLTextur
             if (entry.first != texture_ptr) {
               // Accumulate damage for other framebuffers
               if (surface_frame.submit_info().frame_damage) {
-                entry.second.join(*surface_frame.submit_info().frame_damage);
+                entry.second = entry.second.Union(*surface_frame.submit_info().frame_damage);
               }
             }
           }
           // Reset accumulated damage for current framebuffer
-          (*damage)[texture_ptr] = SkIRect::MakeEmpty();
+          (*damage)[texture_ptr] = DlIRect();
         }
 
         std::optional<impeller::IRect> clip_rect;
         if (surface_frame.submit_info().buffer_damage.has_value()) {
           auto buffer_damage = surface_frame.submit_info().buffer_damage;
-          clip_rect = impeller::IRect::MakeXYWH(buffer_damage->x(), buffer_damage->y(),
-                                                buffer_damage->width(), buffer_damage->height());
+          clip_rect =
+              impeller::IRect::MakeLTRB(buffer_damage->GetLeft(), buffer_damage->GetTop(),
+                                        buffer_damage->GetRight(), buffer_damage->GetBottom());
         }
 
         auto surface = impeller::SurfaceMTL::MakeFromTexture(
@@ -288,12 +300,11 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrameFromMTLTextur
           return surface->Present();
         }
 
-        impeller::IRect cull_rect = surface->coverage();
-        SkIRect sk_cull_rect = SkIRect::MakeWH(cull_rect.GetWidth(), cull_rect.GetHeight());
+        impeller::Rect cull_rect = impeller::Rect::Make(surface->coverage());
         auto render_result = impeller::RenderToTarget(aiks_context->GetContentContext(),  //
                                                       surface->GetRenderTarget(),         //
                                                       display_list,                       //
-                                                      sk_cull_rect,                       //
+                                                      cull_rect,                          //
                                                       /*reset_host_buffer=*/true          //
         );
         if (!render_result) {
@@ -336,7 +347,7 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrameFromMTLTextur
 }
 
 // |Surface|
-SkMatrix GPUSurfaceMetalImpeller::GetRootTransformation() const {
+DlMatrix GPUSurfaceMetalImpeller::GetRootTransformation() const {
   // This backend does not currently support root surface transformations. Just
   // return identity.
   return {};

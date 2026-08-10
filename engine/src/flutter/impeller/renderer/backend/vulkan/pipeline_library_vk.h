@@ -13,6 +13,7 @@
 #include "impeller/base/thread.h"
 #include "impeller/renderer/backend/vulkan/compute_pipeline_vk.h"
 #include "impeller/renderer/backend/vulkan/pipeline_cache_vk.h"
+#include "impeller/renderer/backend/vulkan/pipeline_compile_queue_vulkan.h"
 #include "impeller/renderer/backend/vulkan/pipeline_vk.h"
 #include "impeller/renderer/backend/vulkan/vk.h"
 #include "impeller/renderer/pipeline.h"
@@ -48,6 +49,7 @@ class PipelineLibraryVK final
   PipelineKey pipeline_key_ IPLR_GUARDED_BY(pipelines_mutex_) = 1;
   bool is_valid_ = false;
   bool cache_dirty_ = false;
+  std::shared_ptr<PipelineCompileQueueVulkan> compile_queue_;
 
   PipelineLibraryVK(
       const std::shared_ptr<DeviceHolderVK>& device_holder,
@@ -59,8 +61,10 @@ class PipelineLibraryVK final
   bool IsValid() const override;
 
   // |PipelineLibrary|
-  PipelineFuture<PipelineDescriptor> GetPipeline(PipelineDescriptor descriptor,
-                                                 bool async) override;
+  PipelineFuture<PipelineDescriptor> GetPipeline(
+      PipelineDescriptor descriptor,
+      bool async,
+      bool threadsafe = false) override;
 
   // |PipelineLibrary|
   PipelineFuture<ComputePipelineDescriptor> GetPipeline(
@@ -73,6 +77,9 @@ class PipelineLibraryVK final
   // |PipelineLibrary|
   void RemovePipelinesWithEntryPoint(
       std::shared_ptr<const ShaderFunction> function) override;
+
+  // |PipelineLibrary|
+  PipelineCompileQueue* GetPipelineCompileQueue() const override;
 
   std::unique_ptr<ComputePipelineVK> CreateComputePipeline(
       const ComputePipelineDescriptor& desc,

@@ -26,7 +26,8 @@ PipelineLibraryVK::PipelineLibraryVK(
       pso_cache_(std::make_shared<PipelineCacheVK>(std::move(caps),
                                                    device_holder,
                                                    std::move(cache_directory))),
-      worker_task_runner_(std::move(worker_task_runner)) {
+      worker_task_runner_(std::move(worker_task_runner)),
+      compile_queue_(PipelineCompileQueueVulkan::Create(worker_task_runner_)) {
   FML_DCHECK(worker_task_runner_);
   if (!pso_cache_->IsValid() || !worker_task_runner_) {
     return;
@@ -64,8 +65,10 @@ std::unique_ptr<ComputePipelineVK> PipelineLibraryVK::CreateComputePipeline(
   auto device_properties = strong_device->GetPhysicalDevice().getProperties();
   auto max_wg_size = device_properties.limits.maxComputeWorkGroupSize;
 
-  // Give all compute shaders a specialization constant entry for the
-  // workgroup/threadgroup size.
+  // Specialization constant 0 carries the workgroup size. Set it to the device
+  // maximum. This only affects shaders that declare their size with
+  // `local_size_x_id = 0`. A shader with a literal `local_size` has no such
+  // constant, so Vulkan ignores this and uses the size baked into the module.
   vk::SpecializationMapEntry specialization_map_entry[1];
 
   uint32_t workgroup_size_x = max_wg_size[0];
@@ -152,7 +155,8 @@ std::unique_ptr<ComputePipelineVK> PipelineLibraryVK::CreateComputePipeline(
 // |PipelineLibrary|
 PipelineFuture<PipelineDescriptor> PipelineLibraryVK::GetPipeline(
     PipelineDescriptor descriptor,
-    bool async) {
+    bool async,
+    bool threadsafe) {
   Lock lock(pipelines_mutex_);
   if (auto found = pipelines_.find(descriptor); found != pipelines_.end()) {
     return found->second;
@@ -178,8 +182,6 @@ PipelineFuture<PipelineDescriptor> PipelineLibraryVK::GetPipeline(
     auto thiz = weak_this.lock();
     if (!thiz) {
       promise->set_value(nullptr);
-      VALIDATION_LOG << "Pipeline library was collected before the pipeline "
-                        "could be created.";
       return;
     }
 
@@ -192,7 +194,8 @@ PipelineFuture<PipelineDescriptor> PipelineLibraryVK::GetPipeline(
   };
 
   if (async) {
-    worker_task_runner_->PostTask(generation_task);
+    compile_queue_->PostJobForDescriptor(descriptor,
+                                         std::move(generation_task));
   } else {
     generation_task();
   }
@@ -301,6 +304,10 @@ const std::shared_ptr<PipelineCacheVK>& PipelineLibraryVK::GetPSOCache() const {
 const std::shared_ptr<fml::ConcurrentTaskRunner>&
 PipelineLibraryVK::GetWorkerTaskRunner() const {
   return worker_task_runner_;
+}
+
+PipelineCompileQueue* PipelineLibraryVK::GetPipelineCompileQueue() const {
+  return compile_queue_.get();
 }
 
 }  // namespace impeller

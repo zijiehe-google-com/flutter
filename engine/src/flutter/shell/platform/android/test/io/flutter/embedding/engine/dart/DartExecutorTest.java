@@ -49,7 +49,7 @@ public class DartExecutorTest {
     assertNotNull(dartExecutor.getBinaryMessenger());
 
     // Execute the behavior under test.
-    ByteBuffer fakeMessage = mock(ByteBuffer.class);
+    ByteBuffer fakeMessage = ByteBuffer.allocate(0);
     dartExecutor.getBinaryMessenger().send("fake_channel", fakeMessage);
 
     // Verify that DartExecutor sent our message to FlutterJNI.
@@ -83,7 +83,7 @@ public class DartExecutorTest {
     FlutterInjector.setInstance(
         new FlutterInjector.Builder().setFlutterLoader(mockFlutterLoader).build());
     DartEntrypoint entrypoint = DartEntrypoint.createDefault();
-    assertEquals(entrypoint.pathToBundle, "my/custom/path");
-    assertEquals(entrypoint.dartEntrypointFunctionName, "main");
+    assertEquals("my/custom/path", entrypoint.pathToBundle);
+    assertEquals("main", entrypoint.dartEntrypointFunctionName);
   }
 }

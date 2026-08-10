@@ -2,20 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "display_list/display_list.h"
-#include "display_list/dl_blend_mode.h"
-#include "display_list/dl_tile_mode.h"
-#include "display_list/effects/dl_color_source.h"
-#include "display_list/effects/dl_mask_filter.h"
+#include "flutter/display_list/display_list.h"
+#include "flutter/display_list/dl_blend_mode.h"
 #include "flutter/display_list/dl_builder.h"
 #include "flutter/display_list/dl_color.h"
 #include "flutter/display_list/dl_paint.h"
+#include "flutter/display_list/dl_tile_mode.h"
+#include "flutter/display_list/effects/dl_color_source.h"
+#include "flutter/display_list/effects/dl_mask_filter.h"
+#include "flutter/display_list/geometry/dl_path_builder.h"
+#include "flutter/display_list/testing/dl_test_snippets.h"
 #include "flutter/fml/build_config.h"
 #include "flutter/impeller/display_list/aiks_unittests.h"
 #include "flutter/testing/testing.h"
 #include "impeller/display_list/aiks_context.h"
 #include "impeller/display_list/dl_dispatcher.h"
+#include "impeller/display_list/dl_text_impeller.h"
 #include "impeller/entity/contents/content_context.h"
+#include "impeller/entity/contents/solid_color_contents.h"
 #include "impeller/entity/contents/text_contents.h"
 #include "impeller/entity/entity.h"
 #include "impeller/geometry/matrix.h"
@@ -88,8 +92,8 @@ bool RenderTextInCanvasSkia(const std::shared_ptr<Context>& context,
   text_paint.setStrokeWidth(options.stroke_width);
   text_paint.setDrawStyle(options.stroke ? DlDrawStyle::kStroke
                                          : DlDrawStyle::kFill);
-  canvas.DrawTextFrame(frame, options.position.x, options.position.y,
-                       text_paint);
+  canvas.DrawText(DlTextImpeller::Make(frame), options.position.x,
+                  options.position.y, text_paint);
   return true;
 }
 
@@ -194,8 +198,8 @@ TEST_P(AiksTest, ScaledK) {
 TEST_P(AiksTest, MassiveScaleConvertToPath) {
   Scalar scale = 16.0;
   auto callback = [&]() -> sk_sp<DisplayList> {
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Scale", &scale, 4, 20);
       ImGui::End();
     }
@@ -223,8 +227,8 @@ TEST_P(AiksTest, CanRenderTextFrameWithScalingOverflow) {
   Scalar offsetx = -500.0;
   Scalar offsety = 700.0;
   auto callback = [&]() -> sk_sp<DisplayList> {
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("scale", &scale, 1.f, 300.f);
       ImGui::SliderFloat("offsetx", &offsetx, -600.f, 100.f);
       ImGui::SliderFloat("offsety", &offsety, 600.f, 2048.f);
@@ -251,8 +255,8 @@ TEST_P(AiksTest, CanRenderTextFrameWithFractionScaling) {
   Scalar fine_scale = 0.f;
   bool is_subpixel = false;
   auto callback = [&]() -> sk_sp<DisplayList> {
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Fine Scale", &fine_scale, -1, 1);
       ImGui::Checkbox("subpixel", &is_subpixel);
       ImGui::End();
@@ -281,8 +285,8 @@ TEST_P(AiksTest, TextRotated180Degrees) {
   float foffset[2] = {200, 200};
 
   auto callback = [&]() -> sk_sp<DisplayList> {
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("pivotx", &fpivot[0], 0, 300);
       ImGui::SliderFloat("pivoty", &fpivot[1], 0, 300);
       ImGui::SliderFloat("rotation", &rotation, 0, 360);
@@ -324,8 +328,8 @@ TEST_P(AiksTest, TextFrameSubpixelAlignment) {
     static float phase_variation = 0.2;
     static float speed = 0.5;
     static float magnitude = 100;
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Font size", &font_size, 5, 50);
       ImGui::SliderFloat("Phase variation", &phase_variation, 0, 1);
       ImGui::SliderFloat("Oscillation speed", &speed, 0, 2);
@@ -476,7 +480,7 @@ TEST_P(AiksTest, CanRenderTextOutsideBoundaries) {
       auto blob = SkTextBlob::MakeFromString(t.text, sk_font);
       ASSERT_NE(blob, nullptr);
       auto frame = MakeTextFrameFromTextBlobSkia(blob);
-      builder.DrawTextFrame(frame, 0, 0, text_paint);
+      builder.DrawText(DlTextImpeller::Make(frame), 0, 0, text_paint);
     }
     builder.Restore();
   }
@@ -485,6 +489,16 @@ TEST_P(AiksTest, CanRenderTextOutsideBoundaries) {
 }
 
 TEST_P(AiksTest, TextRotated) {
+  // This test used to be intentionally excluded for impeller_golden_tests
+  // but when the SDF backend variants were added, the explicit exclusions
+  // for those backends were not added to the exclusion list. So it has
+  // actually been running just fine for a while now generating goldens
+  // for the SDF backends.
+  // We will let it run on all backends now in the playground-based golden
+  // mechanism as the underlying flakiness may have been resolved since the
+  // exclusion was added.
+  // https://github.com/flutter/flutter/blame/ad80825c24d770a19e33f67800fc0338a3b89ec7/engine/src/flutter/impeller/golden_tests/golden_playground_test_mac.cc#L107
+
   DisplayListBuilder builder;
 
   builder.Scale(GetContentScale().x, GetContentScale().y);
@@ -621,7 +635,7 @@ TEST_P(AiksTest, TextForegroundShaderWithTransform) {
   auto blob = SkTextBlob::MakeFromString("Hello", sk_font);
   ASSERT_NE(blob, nullptr);
   auto frame = MakeTextFrameFromTextBlobSkia(blob);
-  builder.DrawTextFrame(frame, 0, 0, text_paint);
+  builder.DrawText(DlTextImpeller::Make(frame), 0, 0, text_paint);
 
   ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
 }
@@ -683,7 +697,7 @@ TEST_P(AiksTest, DifferenceClipsMustRenderIdenticallyAcrossBackends) {
   path_builder.LineTo(DlPoint(25.0, 118.0));
   path_builder.LineTo(DlPoint(150.0, 29.5));
   path_builder.Close();
-  DlPath path(path_builder);
+  DlPath path = path_builder.TakePath();
 
   DlColor fill_color(1.0, 1.0, 0.0, 0.0, DlColorSpace::kSRGB);
   DlColor stroke_color(1.0, 0.0, 0.0, 0.0, DlColorSpace::kSRGB);
@@ -729,16 +743,11 @@ TEST_P(AiksTest, TextContentsMismatchedTransformTest) {
       Matrix::MakeTranslateScale({1.5, 1.5, 1}, {100, 50, 0});
   Point preroll_point = Point{23, 45};
   {
-    auto scale = TextFrame::RoundScaledFontSize(
-        (preroll_matrix * Matrix::MakeTranslation(preroll_point))
-            .GetMaxBasisLengthXY());
-
     aiks_context.GetContentContext().GetLazyGlyphAtlas()->AddTextFrame(
-        text_frame,     //
-        scale,          //
-        preroll_point,  //
-        preroll_matrix,
-        std::nullopt  //
+        text_frame,        //
+        preroll_point,     //
+        preroll_matrix,    //
+        GlyphProperties{}  //
     );
   }
 
@@ -750,12 +759,12 @@ TEST_P(AiksTest, TextContentsMismatchedTransformTest) {
 
   TextContents text_contents;
   text_contents.SetTextFrame(text_frame);
-  text_contents.SetOffset(preroll_point);
-  text_contents.SetScale(1.6);
+  text_contents.SetPosition(preroll_point);
+  text_contents.SetScreenTransform(preroll_matrix);
   text_contents.SetColor(Color::Aqua());
 
   Matrix not_preroll_matrix =
-      Matrix::MakeTranslateScale({1.5, 1.5, 1}, {100, 50, 0});
+      preroll_matrix * Matrix::MakeScale({2.0f, 2.0f, 1.0f});
 
   Entity entity;
   entity.SetTransform(not_preroll_matrix);
@@ -767,6 +776,48 @@ TEST_P(AiksTest, TextContentsMismatchedTransformTest) {
 
   EXPECT_TRUE(text_contents.Render(aiks_context.GetContentContext(), entity,
                                    *render_pass));
+}
+
+TEST_P(AiksTest, CanRenderTextFrameWithThinLightAndDarkColors) {
+  DisplayListBuilder builder;
+  DlPaint paint;
+  paint.setColor(DlColor::ARGB(1, 0.1, 0.1, 0.1));
+  builder.DrawPaint(paint);
+
+  auto mapping =
+      flutter::testing::OpenFixtureAsSkData("RobotoSlab-VariableFont_wght.ttf");
+  ASSERT_TRUE(mapping);
+  sk_sp<SkFontMgr> font_mgr = txt::GetDefaultFontManager();
+
+  // Set the variation axis for weight to 100 (typically "Thin").
+  SkFontArguments::VariationPosition::Coordinate weight_coord{
+      SkSetFourByteTag('w', 'g', 'h', 't'), 100.0f};
+  SkFontArguments args;
+  args.setVariationDesignPosition({&weight_coord, 1});
+
+  SkFont thin_font(font_mgr->makeFromData(mapping)->makeClone(args), 25);
+
+  // Render light text
+  ASSERT_TRUE(RenderTextInCanvasSkia(
+      GetContext(), builder, "the quick brown fox jumped over the lazy dog!.?",
+      "RobotoSlab-VariableFont_wght.ttf",
+      TextRenderOptions{.color = DlColor::kWhite(),
+                        .position = DlPoint(100, 200)},
+      thin_font));
+
+  // Render dark text on a light background
+  DlPaint dart_text_background_paint;
+  dart_text_background_paint.setColor(DlColor::ARGB(1, 0.9, 0.9, 0.9));
+  builder.DrawRect(DlRect::MakeXYWH(50, 250, 900, 100),
+                   dart_text_background_paint);
+  ASSERT_TRUE(RenderTextInCanvasSkia(
+      GetContext(), builder, "the quick brown fox jumped over the lazy dog!.?",
+      "RobotoSlab-VariableFont_wght.ttf",
+      TextRenderOptions{.color = DlColor::kDarkGreen(),
+                        .position = DlPoint(100, 300)},
+      thin_font));
+
+  ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
 }
 
 TEST_P(AiksTest, TextWithShadowCache) {
@@ -830,6 +881,44 @@ TEST_P(AiksTest, MultipleTextWithShadowCache) {
                 .GetTextShadowCache()
                 .GetCacheSizeForTesting(),
             5u);
+}
+
+TEST_P(AiksTest, MultipleColorWithShadowCache) {
+  DisplayListBuilder builder;
+  builder.Scale(GetContentScale().x, GetContentScale().y);
+  DlPaint paint;
+  paint.setColor(DlColor::kWhite());
+  builder.DrawPaint(paint);
+
+  AiksContext aiks_context(GetContext(),
+                           std::make_shared<TypographerContextSkia>());
+  // Cache empty
+  EXPECT_EQ(aiks_context.GetContentContext()
+                .GetTextShadowCache()
+                .GetCacheSizeForTesting(),
+            0u);
+
+  SkFont sk_font = flutter::testing::CreateTestFontOfSize(12);
+
+  std::array<DlColor, 4> colors{DlColor::kRed(), DlColor::kGreen(),
+                                DlColor::kBlue(), DlColor::kRed()};
+  for (const auto& color : colors) {
+    ASSERT_TRUE(RenderTextInCanvasSkia(
+        GetContext(), builder, "A", kFontFixture,
+        TextRenderOptions{
+            .color = color,
+            .filter = DlBlurMaskFilter::Make(DlBlurStyle::kNormal, 4)},
+        sk_font));
+  }
+
+  DisplayListToTexture(builder.Build(), {400, 400}, aiks_context);
+
+  // The count of cache entries should match the number of distinct colors
+  // in the list.  Repeated usage of a color should not add to the cache.
+  EXPECT_EQ(aiks_context.GetContentContext()
+                .GetTextShadowCache()
+                .GetCacheSizeForTesting(),
+            3u);
 }
 
 TEST_P(AiksTest, SingleIconShadowTest) {
@@ -896,6 +985,202 @@ TEST_P(AiksTest, VarietyOfTextScalesShowingRasterAndPath) {
     }
     builder.Restore();
   }
+  ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
+}
+
+namespace {
+std::shared_ptr<TextFrame> MakeDefaultTextFrame(const std::string& text,
+                                                Scalar font_size) {
+  // Construct the text blob.
+  auto mapping = flutter::testing::OpenFixtureAsSkData("Roboto-Regular.ttf");
+  if (mapping == nullptr) {
+    return nullptr;
+  }
+
+  sk_sp<SkFontMgr> font_mgr = txt::GetDefaultFontManager();
+  SkFont sk_font(font_mgr->makeFromData(mapping), font_size);
+  sk_sp<SkTextBlob> blob = SkTextBlob::MakeFromString("Hi", sk_font);
+
+  std::shared_ptr<TextFrame> text_frame = MakeTextFrameFromTextBlobSkia(blob);
+  return text_frame;
+}
+
+void DrawTextFramesMultipleScalesWithReuse(AiksTest* test,
+                                           Scalar first_scale,
+                                           Scalar second_scale) {
+  DisplayListBuilder builder;
+  builder.Scale(test->GetContentScale().x, test->GetContentScale().y);
+  builder.DrawColor(DlColor::kWhite(), DlBlendMode::kSrc);
+
+  std::shared_ptr<TextFrame> reuse_frame = MakeDefaultTextFrame("Hi", 20.0f);
+  ASSERT_NE(reuse_frame, nullptr);
+
+  builder.Save();
+  builder.Translate(100, 100);
+  builder.Scale(first_scale, first_scale);
+  builder.DrawText(DlTextImpeller::Make(reuse_frame), 0, 0,
+                   DlPaint(DlColor::kBlue()));
+  builder.Restore();
+
+  builder.Save();
+  builder.Translate(400, 100);
+  builder.Scale(second_scale, second_scale);
+  builder.DrawText(DlTextImpeller::Make(reuse_frame), 0, 0,
+                   DlPaint(DlColor::kPurple()));
+  builder.Restore();
+
+  builder.Save();
+  builder.Translate(100, 400);
+  builder.Scale(first_scale, first_scale);
+  std::shared_ptr<TextFrame> single_use_frame1 =
+      MakeDefaultTextFrame("Hi", 20.0f);
+  builder.DrawText(DlTextImpeller::Make(single_use_frame1), 0, 0,
+                   DlPaint(DlColor::kBlue()));
+  builder.Restore();
+
+  builder.Save();
+  builder.Translate(400, 400);
+  builder.Scale(second_scale, second_scale);
+  std::shared_ptr<TextFrame> single_use_frame2 =
+      MakeDefaultTextFrame("Hi", 20.0f);
+  builder.DrawText(DlTextImpeller::Make(single_use_frame2), 0, 0,
+                   DlPaint(DlColor::kPurple()));
+  builder.Restore();
+
+  ASSERT_TRUE(test->OpenPlaygroundHere(builder.Build()));
+}
+}  // namespace
+
+TEST_P(AiksTest, TextFramesDoNotShareRenderDataBigSmall) {
+  DrawTextFramesMultipleScalesWithReuse(this,                  //
+                                        /*first_scale=*/4.0f,  //
+                                        /*second_scale=*/0.5f);
+}
+
+TEST_P(AiksTest, TextFramesDoNotShareRenderDataSmallBig) {
+  DrawTextFramesMultipleScalesWithReuse(this,                  //
+                                        /*first_scale=*/0.5f,  //
+                                        /*second_scale=*/4.0f);
+}
+
+// Verifies that non-uniform (anisotropic) scaling uses bilinear filtering
+// to avoid jagged/aliased text, while uniform scaling remains pixel-perfect.
+// Regression test for https://github.com/flutter/flutter/issues/182143
+TEST_P(AiksTest, TextWithNonUniformScale) {
+  DisplayListBuilder builder;
+
+  DlPaint paint;
+  paint.setColor(DlColor::ARGB(1, 0.1, 0.1, 0.1));
+  builder.DrawPaint(paint);
+
+  // Row 1: Uniform scale (should use nearest-neighbor, pixel-perfect).
+  builder.Save();
+  builder.Scale(2, 2);
+  ASSERT_TRUE(RenderTextInCanvasSkia(
+      GetContext(), builder, "Uniform 2x2", "Roboto-Regular.ttf",
+      TextRenderOptions{.font_size = 30, .position = DlPoint(20, 40)}));
+  builder.Restore();
+
+  // Row 2: Non-uniform scale Y-only (ratio 2.0, triggers bilinear).
+  builder.Save();
+  builder.Scale(1, 2);
+  ASSERT_TRUE(RenderTextInCanvasSkia(
+      GetContext(), builder, "ScaleY 1x2", "Roboto-Regular.ttf",
+      TextRenderOptions{.font_size = 30, .position = DlPoint(20, 140)}));
+  builder.Restore();
+
+  // Row 3: Non-uniform scale X-only (ratio 3.0, triggers bilinear).
+  builder.Save();
+  builder.Scale(3, 1);
+  ASSERT_TRUE(RenderTextInCanvasSkia(
+      GetContext(), builder, "ScaleX 3x1", "Roboto-Regular.ttf",
+      TextRenderOptions{.font_size = 30, .position = DlPoint(20, 300)}));
+  builder.Restore();
+
+  // Row 4: Slightly non-uniform (ratio 1.1, below threshold, nearest).
+  builder.Save();
+  builder.Scale(2, 2.2);
+  ASSERT_TRUE(RenderTextInCanvasSkia(
+      GetContext(), builder, "Near-uniform 2x2.2", "Roboto-Regular.ttf",
+      TextRenderOptions{.font_size = 30, .position = DlPoint(20, 200)}));
+  builder.Restore();
+
+  ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
+}
+
+TEST_P(AiksTest, TextGammaCorrectionGoldenTest) {
+  constexpr const char* font_fixture = "Roboto-Regular.ttf";
+  auto c_font_fixture = std::string(font_fixture);
+  auto mapping = flutter::testing::OpenFixtureAsSkData(c_font_fixture.c_str());
+  ASSERT_TRUE(mapping);
+
+  sk_sp<SkFontMgr> font_mgr = txt::GetDefaultFontManager();
+  SkFont sk_font(/*typeface=*/font_mgr->makeFromData(mapping), /*size=*/60);
+  sk_font.setSubpixel(true);
+
+  auto blob_corrected =
+      SkTextBlob::MakeFromString("Gamma Corrected (true)", sk_font);
+  ASSERT_TRUE(blob_corrected);
+  auto text_frame_corrected = MakeTextFrameFromTextBlobSkia(blob_corrected);
+  text_frame_corrected->SetEnableGammaCorrection(true);
+
+  auto blob_uncorrected =
+      SkTextBlob::MakeFromString("Gamma Corrected (false)", sk_font);
+  ASSERT_TRUE(blob_uncorrected);
+  auto text_frame_uncorrected = MakeTextFrameFromTextBlobSkia(blob_uncorrected);
+  text_frame_uncorrected->SetEnableGammaCorrection(false);
+
+  auto callback = [&]() -> sk_sp<flutter::DisplayList> {
+    DisplayListBuilder builder;
+
+    DlPaint bg_paint;
+    bg_paint.setColor(DlColor::ARGB(1.0, 0.1, 0.1, 0.1));
+    builder.DrawPaint(bg_paint);
+
+    DlPaint text_paint;
+    text_paint.setColor(DlColor::kWhite());
+
+    builder.DrawText(/*text=*/DlTextImpeller::Make(text_frame_corrected),
+                     /*x=*/50, /*y=*/100, /*paint=*/text_paint);
+    builder.DrawText(/*text=*/DlTextImpeller::Make(text_frame_uncorrected),
+                     /*x=*/50, /*y=*/200, /*paint=*/text_paint);
+
+    builder.DrawText(/*text=*/DlTextImpeller::Make(text_frame_corrected),
+                     /*x=*/50, /*y=*/300, /*paint=*/text_paint);
+    DlPaint diff_paint = text_paint;
+    diff_paint.setBlendMode(DlBlendMode::kDifference);
+    builder.DrawText(/*text=*/DlTextImpeller::Make(text_frame_uncorrected),
+                     /*x=*/50, /*y=*/300, /*paint=*/diff_paint);
+
+    return builder.Build();
+  };
+
+  ASSERT_TRUE(OpenPlaygroundHere(callback));
+}
+
+TEST_P(AiksTest, TextWithShadowAndPosition) {
+  DisplayListBuilder builder;
+  builder.Scale(GetContentScale().x, GetContentScale().y);
+  builder.Clear(DlColor::kWhite());
+
+  auto frame = MakeDefaultTextFrame("Hello", 25.0f);
+  auto text = DlTextImpeller::Make(frame);
+  DlPaint paint = DlPaint().setColor(DlColor::kMagenta());
+  DlPaint shadow_paint_ctm = DlPaint().setMaskFilter(
+      DlBlurMaskFilter::Make(DlBlurStyle::kNormal, 5.0f, true));
+  DlPaint shadow_paint_no_ctm = DlPaint().setMaskFilter(
+      DlBlurMaskFilter::Make(DlBlurStyle::kNormal, 5.0f, false));
+
+  builder.Translate(100, 100);
+  builder.Scale(4, 4);
+  for (int x = 10; x <= 100; x += 30) {
+    builder.DrawText(text, x, 20, shadow_paint_ctm);
+    builder.DrawText(text, x, 20, paint);
+
+    builder.DrawText(text, x, 50, shadow_paint_no_ctm);
+    builder.DrawText(text, x, 50, paint);
+  }
+
   ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
 }
 

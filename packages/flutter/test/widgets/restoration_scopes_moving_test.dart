@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -31,8 +31,9 @@ void main() {
     final TestRestorationData dataWithChild = await tester.getRestorationData();
 
     tester
-        .state<TestWidgetWithCounterChildState>(find.byType(TestWidgetWithCounterChild))
-        .restoreChild = false;
+            .state<TestWidgetWithCounterChildState>(find.byType(TestWidgetWithCounterChild))
+            .restoreChild =
+        false;
     await tester.pump();
     expect(
       tester
@@ -206,8 +207,8 @@ class CounterState extends State<Counter> with RestorationMixin {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: () {
+    return GestureDetector(
+      onTap: () {
         setState(() {
           count.value++;
         });

@@ -7,7 +7,6 @@ package io.flutter.embedding.android;
 import static android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW;
 import static io.flutter.embedding.android.FlutterActivityLaunchConfigs.DEFAULT_INITIAL_ROUTE;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.ComponentCallbacks2;
 import android.content.Context;
@@ -30,6 +29,7 @@ import io.flutter.FlutterInjector;
 import io.flutter.Log;
 import io.flutter.embedding.engine.FlutterEngine;
 import io.flutter.embedding.engine.FlutterEngineCache;
+import io.flutter.embedding.engine.FlutterEngineFlags;
 import io.flutter.embedding.engine.FlutterEngineGroup;
 import io.flutter.embedding.engine.FlutterEngineGroupCache;
 import io.flutter.embedding.engine.FlutterShellArgs;
@@ -39,6 +39,7 @@ import io.flutter.plugin.platform.PlatformPlugin;
 import io.flutter.plugin.view.SensitiveContentPlugin;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Delegate that implements all Flutter logic that is the same between a {@link FlutterActivity} and
@@ -64,9 +65,9 @@ import java.util.List;
  * <p>Any time that a "delegate" is created with the purpose of encapsulating the internal behaviors
  * of another object, that delegate is highly susceptible to degeneration. It is easy to tack new
  * responsibilities on to the delegate which would not otherwise be added to the original object. It
- * is also easy to begin hanging listeners and callbacks on a delegate object that likewise would
- * not be added to the original object. A delegate can quickly become a complex web of dependencies
- * and optional references that are very difficult to track.
+ * is also easy to begin hanging listeners and callbacks objectn a delegate object that likewise
+ * would not be added to the original object. A delegate can quickly become a complex web of
+ * dependencies and optional references that are very difficult to track.
  *
  * <p>Maintainers of this class should take care to only place code in this delegate that would
  * otherwise be placed in either {@link FlutterActivity} or {@link FlutterFragment}, and in exactly
@@ -332,6 +333,7 @@ import java.util.List;
         "No preferred FlutterEngine was provided. Creating a new FlutterEngine for"
             + " this FlutterFragment.");
 
+    warnIfEngineFlagsSetViaIntent(host.getActivity().getIntent());
     FlutterEngineGroup group =
         engineGroup == null
             ? new FlutterEngineGroup(host.getContext(), host.getFlutterShellArgs().toArray())
@@ -343,6 +345,32 @@ import java.util.List;
                     .setAutomaticallyRegisterPlugins(false)
                     .setWaitForRestorationData(host.shouldRestoreAndSaveState())));
     isFlutterEngineFromHost = false;
+  }
+
+  // As part of https://github.com/flutter/flutter/issues/180686, the ability
+  // to set engine flags via Intent extras will be removed, so warn
+  // developers that engine shell arguments set that way will be ignored.
+  private void warnIfEngineFlagsSetViaIntent(@NonNull Intent intent) {
+    if (intent.getExtras() == null) {
+      return;
+    }
+
+    Bundle extras = intent.getExtras();
+    Set<String> extrasKeys = extras.keySet();
+
+    for (String extrasKey : extrasKeys) {
+      FlutterEngineFlags.Flag flag = FlutterEngineFlags.getFlagFromIntentKey(extrasKey);
+      if (flag != null) {
+        Log.i(
+            TAG,
+            "If you are attempting to set "
+                + flag.engineArgument
+                + " via Intent extras to launch a Flutter component outside of using the Flutter CLI, note that support for setting engine flags on Android via Intent will soon be dropped; see https://github.com/flutter/flutter/issues/180686 for more information on this breaking change. To migrate, set "
+                + flag.engineArgument
+                + " or any other flags specified via Intent extras on the command line instead or see https://github.com/flutter/flutter/blob/main/docs/engine/Flutter-Android-Engine-Flags.md for alternative methods.");
+        break;
+      }
+    }
   }
 
   /**
@@ -571,6 +599,7 @@ import java.util.List;
   void onResume() {
     Log.v(TAG, "onResume()");
     ensureAlive();
+    flutterEngine.getRenderer().restoreSurfaceProducers();
     if (host.shouldDispatchAppLifecycleState() && flutterEngine != null) {
       flutterEngine.getLifecycleChannel().appIsResumed();
     }
@@ -821,7 +850,6 @@ import java.util.List;
    *
    * @param backEvent The BackEvent object containing information about the touch.
    */
-  @TargetApi(API_LEVELS.API_34)
   @RequiresApi(API_LEVELS.API_34)
   void startBackGesture(@NonNull BackEvent backEvent) {
     ensureAlive();
@@ -844,7 +872,6 @@ import java.util.List;
    *
    * @param backEvent An BackEvent object describing the progress event.
    */
-  @TargetApi(API_LEVELS.API_34)
   @RequiresApi(API_LEVELS.API_34)
   void updateBackGestureProgress(@NonNull BackEvent backEvent) {
     ensureAlive();
@@ -869,7 +896,6 @@ import java.util.List;
    * navigation, including finalizing animations and updating the UI to reflect the navigation
    * outcome.
    */
-  @TargetApi(API_LEVELS.API_34)
   @RequiresApi(API_LEVELS.API_34)
   void commitBackGesture() {
     ensureAlive();
@@ -891,7 +917,6 @@ import java.util.List;
    * in response to the back gesture. This includes resetting UI elements to their state prior to
    * the gesture's start.
    */
-  @TargetApi(API_LEVELS.API_34)
   @RequiresApi(API_LEVELS.API_34)
   void cancelBackGesture() {
     ensureAlive();

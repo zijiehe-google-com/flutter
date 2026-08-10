@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <UIKit/UIKit.h>
 #include "common/settings.h"
 #define FML_USED_ON_EMBEDDER
 
@@ -20,6 +21,7 @@
 #include "flutter/shell/common/switches.h"
 #include "flutter/shell/common/thread_host.h"
 #include "flutter/shell/common/variable_refresh_rate_display.h"
+#import "flutter/shell/platform/darwin/common/InternalFlutterSwiftCommon/InternalFlutterSwiftCommon.h"
 #import "flutter/shell/platform/darwin/common/command_line.h"
 #import "flutter/shell/platform/darwin/common/framework/Source/FlutterBinaryMessengerRelay.h"
 #import "flutter/shell/platform/darwin/ios/InternalFlutterSwift/InternalFlutterSwift.h"
@@ -39,7 +41,6 @@
 #import "flutter/shell/platform/darwin/ios/framework/Source/profiler_metrics_ios.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/vsync_waiter_ios.h"
 #import "flutter/shell/platform/darwin/ios/platform_view_ios.h"
-#import "flutter/shell/platform/darwin/ios/rendering_api_selection.h"
 #include "flutter/shell/profiling/sampling_profiler.h"
 
 FLUTTER_ASSERT_ARC
@@ -87,10 +88,22 @@ NSString* const FlutterDefaultInitialRoute = nil;
 
 NSString* const kFlutterKeyDataChannel = @"flutter/keydata";
 static constexpr int kNumProfilerSamplesPerSec = 5;
+NSString* const kFlutterApplicationRegistrarKey = @"io.flutter.flutter.application_registrar";
 
-@interface FlutterEngineRegistrar : NSObject <FlutterPluginRegistrar>
+@interface FlutterEngineBaseRegistrar : NSObject <FlutterBaseRegistrar>
+
 @property(nonatomic, weak) FlutterEngine* flutterEngine;
-- (instancetype)initWithPlugin:(NSString*)pluginKey flutterEngine:(FlutterEngine*)flutterEngine;
+@property(nonatomic, readonly) NSString* key;
+
+- (instancetype)initWithKey:(NSString*)key flutterEngine:(FlutterEngine*)flutterEngine;
+
+@end
+
+@interface FlutterEngineApplicationRegistrar
+    : FlutterEngineBaseRegistrar <FlutterApplicationRegistrar>
+@end
+
+@interface FlutterEnginePluginRegistrar : FlutterEngineBaseRegistrar <FlutterPluginRegistrar>
 @end
 
 @interface FlutterEngine () <FlutterIndirectScribbleDelegate,
@@ -107,11 +120,13 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
 @property(nonatomic, readonly, assign) BOOL restorationEnabled;
 
 @property(nonatomic, strong) FlutterPlatformViewsController* platformViewsController;
+@property(nonatomic, strong) FlutterEnginePluginSceneLifeCycleDelegate* sceneLifeCycleDelegate;
 
 // Maintains a dictionary of plugin names that have registered with the engine.  Used by
-// FlutterEngineRegistrar to implement a FlutterPluginRegistrar.
+// FlutterEnginePluginRegistrar to implement a FlutterPluginRegistrar.
 @property(nonatomic, readonly) NSMutableDictionary* pluginPublications;
-@property(nonatomic, readonly) NSMutableDictionary<NSString*, FlutterEngineRegistrar*>* registrars;
+@property(nonatomic, readonly)
+    NSMutableDictionary<NSString*, FlutterEngineBaseRegistrar*>* registrars;
 
 @property(nonatomic, readwrite, copy) NSString* isolateId;
 @property(nonatomic, copy) NSString* initialRoute;
@@ -131,6 +146,9 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
 @property(nonatomic, strong) FlutterMethodChannel* navigationChannel;
 @property(nonatomic, strong) FlutterMethodChannel* restorationChannel;
 @property(nonatomic, strong) FlutterMethodChannel* platformChannel;
+// This channel only sends status bar related events to the framework thus has
+// no handlers.
+@property(nonatomic, strong) FlutterMethodChannel* statusBarChannel;
 @property(nonatomic, strong) FlutterMethodChannel* platformViewsChannel;
 @property(nonatomic, strong) FlutterMethodChannel* textInputChannel;
 @property(nonatomic, strong) FlutterMethodChannel* undoManagerChannel;
@@ -150,15 +168,44 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
 
 @end
 
+@implementation FlutterImplicitEngineBridgeImpl {
+  FlutterEngine* _engine;
+  NSObject<FlutterApplicationRegistrar>* _appRegistrar;
+}
+
+- (instancetype)initWithEngine:(FlutterEngine*)engine {
+  self = [super init];
+  if (self) {
+    _engine = engine;
+    _appRegistrar = [engine registrarForApplication:kFlutterApplicationRegistrarKey];
+  }
+  return self;
+}
+
+- (NSObject<FlutterPluginRegistry>*)pluginRegistry {
+  return _engine;
+}
+
+- (NSObject<FlutterApplicationRegistrar>*)applicationRegistrar {
+  return _appRegistrar;
+}
+@end
+
 @implementation FlutterEngine {
   std::shared_ptr<flutter::ThreadHost> _threadHost;
   std::unique_ptr<flutter::Shell> _shell;
 
-  flutter::IOSRenderingAPI _renderingApi;
+  // Callers to -waitForFirstFrame:callback: that are currently queued/processing.
+  // -destroyContext must wait for this group to drain before it is safe to free _shell.
+  dispatch_group_t _firstFrameWaiters;
+
   std::shared_ptr<flutter::SamplingProfiler> _profiler;
 
   FlutterBinaryMessengerRelay* _binaryMessenger;
   FlutterTextureRegistryRelay* _textureRegistry;
+
+  FlutterFMLTaskRunner* _platformTaskRunnerWrapper;
+  FlutterFMLTaskRunner* _rasterTaskRunnerWrapper;
 }
 
 - (int64_t)engineIdentifier {
@@ -235,6 +282,8 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
                  name:NSCurrentLocaleDidChangeNotification
                object:nil];
 
+  self.sceneLifeCycleDelegate = [[FlutterEnginePluginSceneLifeCycleDelegate alloc] init];
+
   return self;
 }
 
@@ -245,6 +294,10 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
 
 - (void)setUpLifecycleNotifications:(NSNotificationCenter*)center {
   // If the application is not available, use the scene for lifecycle notifications if available.
+  [center addObserver:self
+             selector:@selector(sceneWillConnect:)
+                 name:UISceneWillConnectNotification
+               object:nil];
   if (!FlutterSharedApplication.isAvailable) {
     [center addObserver:self
                selector:@selector(sceneWillEnterForeground:)
@@ -266,13 +319,28 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
                object:nil];
 }
 
-- (void)recreatePlatformViewsController {
-  _renderingApi = flutter::GetRenderingAPIForProcess(/*force_software=*/false);
-  _platformViewsController = [[FlutterPlatformViewsController alloc] init];
+- (void)sceneWillConnect:(NSNotification*)notification API_AVAILABLE(ios(13.0)) {
+  if (self.viewController && ![self.viewController shouldHandleSceneNotification:notification]) {
+    return;
+  }
+  UIScene* scene = notification.object;
+  if (!FlutterSharedApplication.application.supportsMultipleScenes) {
+    // Since there is only one scene, we can assume that the FlutterEngine is within this scene and
+    // register it to the scene.
+    // The FlutterEngine needs to be registered with the scene when the scene connects in order for
+    // plugins to receive the `scene:willConnectToSession:options` event.
+    // If we want to support multi-window on iPad later, we may need to add a way for deveopers to
+    // register their FlutterEngine to the scene manually during this event.
+    FlutterPluginSceneLifeCycleDelegate* sceneLifeCycleDelegate =
+        [FlutterPluginSceneLifeCycleDelegate fromScene:scene];
+    if (sceneLifeCycleDelegate != nil) {
+      return [sceneLifeCycleDelegate engine:self receivedConnectNotificationFor:scene];
+    }
+  }
 }
 
-- (flutter::IOSRenderingAPI)platformViewsRenderingAPI {
-  return _renderingApi;
+- (void)recreatePlatformViewsController {
+  _platformViewsController = [[FlutterPlatformViewsController alloc] init];
 }
 
 - (void)dealloc {
@@ -280,18 +348,20 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
   /// plugins may be talking to things like the binaryMessenger.
   [_pluginPublications enumerateKeysAndObjectsUsingBlock:^(id key, id object, BOOL* stop) {
     if ([object respondsToSelector:@selector(detachFromEngineForRegistrar:)]) {
-      NSObject<FlutterPluginRegistrar>* registrar = self.registrars[key];
-      [object detachFromEngineForRegistrar:registrar];
+      FlutterEngineBaseRegistrar* registrar = self.registrars[key];
+      if ([registrar conformsToProtocol:@protocol(FlutterPluginRegistrar)]) {
+        [object detachFromEngineForRegistrar:((id<FlutterPluginRegistrar>)registrar)];
+      }
     }
   }];
 
   // nil out weak references.
   // TODO(cbracken): https://github.com/flutter/flutter/issues/156222
-  // Ensure that FlutterEngineRegistrar is using weak pointers, then eliminate this code.
-  [_registrars
-      enumerateKeysAndObjectsUsingBlock:^(id key, FlutterEngineRegistrar* registrar, BOOL* stop) {
-        registrar.flutterEngine = nil;
-      }];
+  // Ensure that FlutterEnginePluginRegistrar is using weak pointers, then eliminate this code.
+  [_registrars enumerateKeysAndObjectsUsingBlock:^(id key, FlutterEngineBaseRegistrar* registrar,
+                                                   BOOL* stop) {
+    registrar.flutterEngine = nil;
+  }];
 
   _binaryMessenger.parent = nil;
   _textureRegistry.parent = nil;
@@ -322,6 +392,14 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
   self.platformView->DispatchPointerDataPacket(std::move(packet));
 }
 
+- (BOOL)platformViewShouldAcceptTouchAtTouchBeganLocation:(flutter::PointData)location
+                                                   viewId:(uint64_t)viewId {
+  if (!self.platformView) {
+    return NO;
+  }
+  return self.platformView->HitTest(viewId, location).has_platform_view;
+}
+
 - (void)installFirstFrameCallback:(void (^)(void))block {
   if (!self.platformView) {
     return;
@@ -335,9 +413,11 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
     }
     FML_DCHECK(strongSelf.platformTaskRunner);
     FML_DCHECK(strongSelf.rasterTaskRunner);
-    FML_DCHECK(strongSelf.rasterTaskRunner->RunsTasksOnCurrentThread());
+    FML_DCHECK([strongSelf.rasterTaskRunner runsTasksOnCurrentThread]);
     // Get callback on raster thread and jump back to platform thread.
-    strongSelf.platformTaskRunner->PostTask([block]() { block(); });
+    [strongSelf.platformTaskRunner postTask:^{
+      block();
+    }];
   });
 }
 
@@ -370,25 +450,17 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
   return static_cast<flutter::PlatformViewIOS*>(_shell->GetPlatformView().get());
 }
 
-- (fml::RefPtr<fml::TaskRunner>)platformTaskRunner {
-  if (!_shell) {
-    return {};
-  }
-  return _shell->GetTaskRunners().GetPlatformTaskRunner();
+- (FlutterFMLTaskRunner*)platformTaskRunner {
+  return _platformTaskRunnerWrapper;
 }
 
-- (fml::RefPtr<fml::TaskRunner>)uiTaskRunner {
-  if (!_shell) {
-    return {};
-  }
-  return _shell->GetTaskRunners().GetUITaskRunner();
+- (FlutterFMLTaskRunner*)uiTaskRunner {
+  // The platform and UI threads are always merged on iOS.
+  return _platformTaskRunnerWrapper;
 }
 
-- (fml::RefPtr<fml::TaskRunner>)rasterTaskRunner {
-  if (!_shell) {
-    return {};
-  }
-  return _shell->GetTaskRunners().GetRasterTaskRunner();
+- (FlutterFMLTaskRunner*)rasterTaskRunner {
+  return _rasterTaskRunnerWrapper;
 }
 
 - (void)sendKeyEvent:(const FlutterKeyEvent&)event
@@ -496,16 +568,21 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
 }
 
 - (void)destroyContext {
+  // Clear any tasks waiting on first frame prior to destroying _shell.
+  if (_shell) {
+    _shell->CancelWaitForFirstFrame();
+  }
+  if (_firstFrameWaiters) {
+    dispatch_group_wait(_firstFrameWaiters, DISPATCH_TIME_FOREVER);
+  }
   [self resetChannels];
   self.isolateId = nil;
   _shell.reset();
   _profiler.reset();
   _threadHost.reset();
   _platformViewsController = nil;
-}
-
-- (NSURL*)observatoryUrl {
-  return self.publisher.url;
+  _platformTaskRunnerWrapper = nil;
+  _rasterTaskRunnerWrapper = nil;
 }
 
 - (NSURL*)vmServiceUrl {
@@ -517,6 +594,7 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
   self.navigationChannel = nil;
   self.restorationChannel = nil;
   self.platformChannel = nil;
+  self.statusBarChannel = nil;
   self.platformViewsChannel = nil;
   self.textInputChannel = nil;
   self.undoManagerChannel = nil;
@@ -580,6 +658,12 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
       [[FlutterMethodChannel alloc] initWithName:@"flutter/platform"
                                  binaryMessenger:self.binaryMessenger
                                            codec:[FlutterJSONMethodCodec sharedInstance]];
+
+  self.statusBarChannel =
+      [[FlutterMethodChannel alloc] initWithName:@"flutter/status_bar"
+                                 binaryMessenger:self.binaryMessenger
+                                           codec:[FlutterJSONMethodCodec sharedInstance]];
+  [self.statusBarChannel resizeChannelBuffer:0];  // No buffering.
 
   self.platformViewsChannel =
       [[FlutterMethodChannel alloc] initWithName:@"flutter/platform_views"
@@ -663,8 +747,8 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
     NSData* data = [NSData dataWithBytes:screenshot.data->writable_data()
                                   length:screenshot.data->size()];
     NSString* format = [NSString stringWithUTF8String:screenshot.format.c_str()];
-    NSNumber* width = @(screenshot.frame_size.fWidth);
-    NSNumber* height = @(screenshot.frame_size.fHeight);
+    NSNumber* width = @(screenshot.frame_size.width);
+    NSNumber* height = @(screenshot.frame_size.height);
     return result(@[ width, height, format ?: [NSNull null], data ]);
   }];
 }
@@ -719,6 +803,11 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
 - (void)setUpShell:(std::unique_ptr<flutter::Shell>)shell
     withVMServicePublication:(BOOL)doesVMServicePublication {
   _shell = std::move(shell);
+  _platformTaskRunnerWrapper = [[FlutterFMLTaskRunner alloc]
+      initWithTaskRunner:_shell->GetTaskRunners().GetPlatformTaskRunner()];
+  _rasterTaskRunnerWrapper = [[FlutterFMLTaskRunner alloc]
+      initWithTaskRunner:_shell->GetTaskRunners().GetRasterTaskRunner()];
+
   [self setUpChannels];
   [self onLocaleUpdated:nil];
   [self updateDisplays];
@@ -743,16 +832,14 @@ static constexpr int kNumProfilerSamplesPerSec = 5;
   return [NSString stringWithFormat:@"%@.%zu", labelPrefix, ++s_shellCount];
 }
 
-static flutter::ThreadHost MakeThreadHost(NSString* thread_label,
-                                          const flutter::Settings& settings) {
+static flutter::ThreadHost MakeThreadHost(NSString* thread_label) {
   // The current thread will be used as the platform thread. Ensure that the message loop is
   // initialized.
   fml::MessageLoop::EnsureInitializedForCurrentThread();
 
+  // No dedicated UI thread is created: on iOS the UI thread is always merged onto the platform
+  // thread. FlutterDartProject rejects any other threading configuration at startup.
   uint32_t threadHostType = flutter::ThreadHost::Type::kRaster | flutter::ThreadHost::Type::kIo;
-  if (settings.merged_platform_ui_thread != flutter::Settings::MergedPlatformUIThread::kEnabled) {
-    threadHostType |= flutter::ThreadHost::Type::kUi;
-  }
 
   if ([FlutterEngine isProfilerEnabled]) {
     threadHostType = threadHostType | flutter::ThreadHost::Type::kProfiler;
@@ -761,10 +848,6 @@ static flutter::ThreadHost MakeThreadHost(NSString* thread_label,
   flutter::ThreadHost::ThreadHostConfig host_config(thread_label.UTF8String, threadHostType,
                                                     IOSPlatformThreadConfigSetter);
 
-  host_config.ui_config =
-      fml::Thread::ThreadConfig(flutter::ThreadHost::ThreadHostConfig::MakeThreadName(
-                                    flutter::ThreadHost::Type::kUi, thread_label.UTF8String),
-                                fml::Thread::ThreadPriority::kDisplay);
   host_config.raster_config =
       fml::Thread::ThreadConfig(flutter::ThreadHost::ThreadHostConfig::MakeThreadName(
                                     flutter::ThreadHost::Type::kRaster, thread_label.UTF8String),
@@ -796,7 +879,7 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
          libraryURI:(NSString*)libraryURI
        initialRoute:(NSString*)initialRoute {
   if (_shell != nullptr) {
-    FML_LOG(WARNING) << "This FlutterEngine was already invoked.";
+    [FlutterLogger logWarning:@"This FlutterEngine was already invoked."];
     return NO;
   }
 
@@ -815,7 +898,7 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
 
   NSString* threadLabel = [FlutterEngine generateThreadLabel:self.labelPrefix];
   _threadHost = std::make_shared<flutter::ThreadHost>();
-  *_threadHost = MakeThreadHost(threadLabel, settings);
+  *_threadHost = MakeThreadHost(threadLabel);
 
   __weak FlutterEngine* weakSelf = self;
   flutter::Shell::CreateCallback<flutter::PlatformView> on_create_platform_view =
@@ -825,33 +908,32 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
           return std::unique_ptr<flutter::PlatformViewIOS>();
         }
         [strongSelf recreatePlatformViewsController];
-        strongSelf.platformViewsController.taskRunner =
-            shell.GetTaskRunners().GetPlatformTaskRunner();
-        return std::make_unique<flutter::PlatformViewIOS>(
-            shell, strongSelf->_renderingApi, strongSelf.platformViewsController,
-            shell.GetTaskRunners(), shell.GetConcurrentWorkerTaskRunner(),
-            shell.GetIsGpuDisabledSyncSwitch());
+        strongSelf.platformViewsController.taskRunner = [[FlutterFMLTaskRunner alloc]
+            initWithTaskRunner:shell.GetTaskRunners().GetPlatformTaskRunner()];
+        return std::make_unique<flutter::PlatformViewIOS>(shell, strongSelf.platformViewsController,
+                                                          shell.GetTaskRunners(),
+                                                          shell.GetIsGpuDisabledSyncSwitch());
       };
 
   flutter::Shell::CreateCallback<flutter::Rasterizer> on_create_rasterizer =
       [](flutter::Shell& shell) { return std::make_unique<flutter::Rasterizer>(shell); };
 
-  fml::RefPtr<fml::TaskRunner> ui_runner;
-  if (settings.enable_impeller &&
-      settings.merged_platform_ui_thread == flutter::Settings::MergedPlatformUIThread::kEnabled) {
-    ui_runner = fml::MessageLoop::GetCurrent().GetTaskRunner();
-  } else {
-    ui_runner = _threadHost->ui_thread->GetTaskRunner();
-  }
-  flutter::TaskRunners task_runners(threadLabel.UTF8String,                          // label
-                                    fml::MessageLoop::GetCurrent().GetTaskRunner(),  // platform
-                                    _threadHost->raster_thread->GetTaskRunner(),     // raster
-                                    ui_runner,                                       // ui
-                                    _threadHost->io_thread->GetTaskRunner()          // io
+  // The platform and UI threads are always merged on iOS, so the UI task runner is the platform
+  // thread's task runner.
+  fml::RefPtr<fml::TaskRunner> platform_runner = fml::MessageLoop::GetCurrent().GetTaskRunner();
+  flutter::TaskRunners task_runners(threadLabel.UTF8String,                       // label
+                                    platform_runner,                              // platform
+                                    _threadHost->raster_thread->GetTaskRunner(),  // raster
+                                    platform_runner,                              // ui
+                                    _threadHost->io_thread->GetTaskRunner()       // io
   );
 
   // Disable GPU if the app or scene is running in the background.
-  self.isGpuDisabled = self.viewController.stateIsBackground;
+  self.isGpuDisabled = self.viewController
+                           ? self.viewController.stateIsBackground
+                           : FlutterSharedApplication.application &&
+                                 FlutterSharedApplication.application.applicationState ==
+                                     UIApplicationStateBackground;
 
   // Create the shell. This is a blocking operation.
   std::unique_ptr<flutter::Shell> shell = flutter::Shell::Create(
@@ -863,8 +945,9 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
       /*is_gpu_disabled=*/_isGpuDisabled);
 
   if (shell == nullptr) {
-    FML_LOG(ERROR) << "Could not start a shell FlutterEngine with entrypoint: "
-                   << entrypoint.UTF8String;
+    NSString* errorMessage = [NSString
+        stringWithFormat:@"Could not start a shell FlutterEngine with entrypoint: %@", entrypoint];
+    [FlutterLogger logError:errorMessage];
   } else {
     [self setUpShell:std::move(shell)
         withVMServicePublication:settings.enable_vm_service_publication];
@@ -874,6 +957,17 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
   }
 
   return _shell != nullptr;
+}
+
+- (BOOL)performImplicitEngineCallback {
+  id appDelegate = FlutterSharedApplication.application.delegate;
+  if ([appDelegate conformsToProtocol:@protocol(FlutterImplicitEngineDelegate)]) {
+    id<FlutterImplicitEngineDelegate> provider = (id<FlutterImplicitEngineDelegate>)appDelegate;
+    [provider didInitializeImplicitFlutterEngine:[[FlutterImplicitEngineBridgeImpl alloc]
+                                                     initWithEngine:self]];
+    return YES;
+  }
+  return NO;
 }
 
 - (void)updateDisplays {
@@ -1056,6 +1150,13 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
 - (void)flutterTextInputView:(FlutterTextInputView*)textInputView
           lookUpSelectedText:(NSString*)selectedText {
   [self.platformPlugin showLookUpViewController:selectedText];
+}
+
+- (void)flutterTextInputView:(FlutterTextInputView*)textInputView
+    performContextMenuCustomActionWithActionID:(NSString*)actionID
+                               textInputClient:(int)client {
+  [self.platformChannel invokeMethod:@"ContextMenu.onPerformCustomAction"
+                           arguments:@[ @(client), actionID ]];
 }
 
 #pragma mark - FlutterViewEngineDelegate
@@ -1308,9 +1409,18 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
 - (NSObject<FlutterPluginRegistrar>*)registrarForPlugin:(NSString*)pluginKey {
   NSAssert(self.pluginPublications[pluginKey] == nil, @"Duplicate plugin key: %@", pluginKey);
   self.pluginPublications[pluginKey] = [NSNull null];
-  FlutterEngineRegistrar* result = [[FlutterEngineRegistrar alloc] initWithPlugin:pluginKey
-                                                                    flutterEngine:self];
+  FlutterEnginePluginRegistrar* result = [[FlutterEnginePluginRegistrar alloc] initWithKey:pluginKey
+                                                                             flutterEngine:self];
   self.registrars[pluginKey] = result;
+  return result;
+}
+
+- (NSObject<FlutterApplicationRegistrar>*)registrarForApplication:(NSString*)key {
+  NSAssert(self.pluginPublications[key] == nil, @"Duplicate key: %@", key);
+  self.pluginPublications[key] = [NSNull null];
+  FlutterEngineApplicationRegistrar* result =
+      [[FlutterEngineApplicationRegistrar alloc] initWithKey:key flutterEngine:self];
+  self.registrars[key] = result;
   return result;
 }
 
@@ -1322,13 +1432,23 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
   return _pluginPublications[pluginKey];
 }
 
+- (void)addSceneLifeCycleDelegate:(NSObject<FlutterSceneLifeCycleDelegate>*)delegate {
+  [self.sceneLifeCycleDelegate addDelegate:delegate];
+}
+
 #pragma mark - Notifications
 
 - (void)sceneWillEnterForeground:(NSNotification*)notification API_AVAILABLE(ios(13.0)) {
+  if (self.viewController && ![self.viewController shouldHandleSceneNotification:notification]) {
+    return;
+  }
   [self flutterWillEnterForeground:notification];
 }
 
 - (void)sceneDidEnterBackground:(NSNotification*)notification API_AVAILABLE(ios(13.0)) {
+  if (self.viewController && ![self.viewController shouldHandleSceneNotification:notification]) {
+    return;
+  }
   [self flutterDidEnterBackground:notification];
 }
 
@@ -1387,11 +1507,11 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
   [self.localizationChannel invokeMethod:@"setLocale" arguments:localeData];
 }
 
-- (void)waitForFirstFrameSync:(NSTimeInterval)timeout
-                     callback:(NS_NOESCAPE void (^_Nonnull)(BOOL didTimeout))callback {
-  fml::TimeDelta waitTime = fml::TimeDelta::FromMilliseconds(timeout * 1000);
-  fml::Status status = self.shell.WaitForFirstFrame(waitTime);
-  callback(status.code() == fml::StatusCode::kDeadlineExceeded);
+- (void)onStatusBarTap {
+  // Called by FlutterViewController to notify the framework that a tap landed
+  // on the status bar, and the most relevant vertical scroll view visible in the
+  // app, if applicable, should scroll to top.
+  [self.statusBarChannel invokeMethod:@"handleScrollToTop" arguments:nil];
 }
 
 - (void)waitForFirstFrame:(NSTimeInterval)timeout
@@ -1399,17 +1519,28 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
   dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0);
   dispatch_group_t group = dispatch_group_create();
 
+  // Increment count of tasks waiting for first frame callback. Decrement below
+  // on completion or timeout. In -destroyContext we block until all pending
+  // first frame waiter tasks are cancelled.
+  if (!_firstFrameWaiters) {
+    _firstFrameWaiters = dispatch_group_create();
+  }
+  dispatch_group_t firstFrameWaiters = _firstFrameWaiters;
+  dispatch_group_enter(firstFrameWaiters);
+
   __weak FlutterEngine* weakSelf = self;
   __block BOOL didTimeout = NO;
   dispatch_group_async(group, queue, ^{
     FlutterEngine* strongSelf = weakSelf;
-    if (!strongSelf) {
+    if (!strongSelf || !strongSelf->_shell) {
+      dispatch_group_leave(firstFrameWaiters);
       return;
     }
 
     fml::TimeDelta waitTime = fml::TimeDelta::FromMilliseconds(timeout * 1000);
     fml::Status status = strongSelf.shell.WaitForFirstFrame(waitTime);
     didTimeout = status.code() == fml::StatusCode::kDeadlineExceeded;
+    dispatch_group_leave(firstFrameWaiters);
   });
 
   // Only execute the main queue task once the background task has completely finished executing.
@@ -1459,7 +1590,8 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
   flutter::Shell::CreateCallback<flutter::PlatformView> on_create_platform_view =
       [result, context](flutter::Shell& shell) {
         [result recreatePlatformViewsController];
-        result.platformViewsController.taskRunner = shell.GetTaskRunners().GetPlatformTaskRunner();
+        result.platformViewsController.taskRunner = [[FlutterFMLTaskRunner alloc]
+            initWithTaskRunner:shell.GetTaskRunners().GetPlatformTaskRunner()];
         return std::make_unique<flutter::PlatformViewIOS>(
             shell, context, result.platformViewsController, shell.GetTaskRunners());
       };
@@ -1490,16 +1622,43 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
   return self.dartProject;
 }
 
-@end
-
-@implementation FlutterEngineRegistrar {
-  NSString* _pluginKey;
+- (void)sendDeepLinkToFramework:(NSURL*)url completionHandler:(void (^)(BOOL success))completion {
+  __weak FlutterEngine* weakSelf = self;
+  [self waitForFirstFrame:3.0
+                 callback:^(BOOL didTimeout) {
+                   if (didTimeout) {
+                     [FlutterLogger
+                         logError:@"Timeout waiting for first frame when launching a URL."];
+                     completion(NO);
+                   } else {
+                     // invove the method and get the result
+                     [weakSelf.navigationChannel
+                         invokeMethod:@"pushRouteInformation"
+                            arguments:@{
+                              @"location" : url.absoluteString ?: [NSNull null],
+                            }
+                               result:^(id _Nullable result) {
+                                 BOOL success =
+                                     [result isKindOfClass:[NSNumber class]] && [result boolValue];
+                                 if (!success) {
+                                   // Logging the error if the result is not successful
+                                   [FlutterLogger
+                                       logError:@"Failed to handle route information in Flutter."];
+                                 }
+                                 completion(success);
+                               }];
+                   }
+                 }];
 }
 
-- (instancetype)initWithPlugin:(NSString*)pluginKey flutterEngine:(FlutterEngine*)flutterEngine {
+@end
+
+@implementation FlutterEngineBaseRegistrar
+
+- (instancetype)initWithKey:(NSString*)key flutterEngine:(FlutterEngine*)flutterEngine {
   self = [super init];
   NSAssert(self, @"Super init cannot be nil");
-  _pluginKey = [pluginKey copy];
+  _key = [key copy];
   _flutterEngine = flutterEngine;
   return self;
 }
@@ -1507,38 +1666,8 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
 - (NSObject<FlutterBinaryMessenger>*)messenger {
   return _flutterEngine.binaryMessenger;
 }
-
 - (NSObject<FlutterTextureRegistry>*)textures {
   return _flutterEngine.textureRegistry;
-}
-
-- (void)publish:(NSObject*)value {
-  _flutterEngine.pluginPublications[_pluginKey] = value;
-}
-
-- (void)addMethodCallDelegate:(NSObject<FlutterPlugin>*)delegate
-                      channel:(FlutterMethodChannel*)channel {
-  [channel setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
-    [delegate handleMethodCall:call result:result];
-  }];
-}
-
-- (void)addApplicationDelegate:(NSObject<FlutterPlugin>*)delegate
-    NS_EXTENSION_UNAVAILABLE_IOS("Disallowed in plugins used in app extensions") {
-  id<UIApplicationDelegate> appDelegate = [[UIApplication sharedApplication] delegate];
-  if ([appDelegate conformsToProtocol:@protocol(FlutterAppLifeCycleProvider)]) {
-    id<FlutterAppLifeCycleProvider> lifeCycleProvider =
-        (id<FlutterAppLifeCycleProvider>)appDelegate;
-    [lifeCycleProvider addApplicationLifeCycleDelegate:delegate];
-  }
-}
-
-- (NSString*)lookupKeyForAsset:(NSString*)asset {
-  return [_flutterEngine lookupKeyForAsset:asset];
-}
-
-- (NSString*)lookupKeyForAsset:(NSString*)asset fromPackage:(NSString*)package {
-  return [_flutterEngine lookupKeyForAsset:asset fromPackage:package];
 }
 
 - (void)registerViewFactory:(NSObject<FlutterPlatformViewFactory>*)factory
@@ -1557,4 +1686,87 @@ static void SetEntryPoint(flutter::Settings* settings, NSString* entrypoint, NSS
                              gestureRecognizersBlockingPolicy:gestureRecognizersBlockingPolicy];
 }
 
+@end
+
+@implementation FlutterEnginePluginRegistrar
+
+- (nullable UIViewController*)viewController {
+  return self.flutterEngine.viewController;
+}
+
+- (void)publish:(NSObject*)value {
+  self.flutterEngine.pluginPublications[self.key] = value;
+}
+
+- (void)addMethodCallDelegate:(NSObject<FlutterPlugin>*)delegate
+                      channel:(FlutterMethodChannel*)channel {
+  [channel setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
+    [delegate handleMethodCall:call result:result];
+  }];
+}
+
+/// Returns YES if the Flutter plugin responds to any legacy app lifecycle selectors.
+/// These selectors correspond to UIApplicationDelegate methods that have scene-based
+/// equivalents and require migration to FlutterSceneLifeCycleDelegate.
+static BOOL FLTFlutterPluginRespondsToLegacyAppLifecycleSelectors(
+    NSObject<FlutterPlugin>* delegate) {
+  SEL selectors[] = {
+    @selector(applicationDidBecomeActive:),
+    @selector(applicationWillResignActive:),
+    @selector(applicationWillEnterForeground:),
+    @selector(applicationDidEnterBackground:),
+    @selector(application:continueUserActivity:restorationHandler:),
+    @selector(application:performActionForShortcutItem:completionHandler:),
+    @selector(application:openURL:options:),
+    @selector(application:performFetchWithCompletionHandler:),
+  };
+  for (SEL sel : selectors) {
+    if ([delegate respondsToSelector:sel]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+- (void)addApplicationDelegate:(NSObject<FlutterPlugin>*)delegate {
+  id<UIApplicationDelegate> appDelegate = FlutterSharedApplication.application.delegate;
+  if ([appDelegate conformsToProtocol:@protocol(FlutterAppLifeCycleProvider)]) {
+    id<FlutterAppLifeCycleProvider> lifeCycleProvider =
+        (id<FlutterAppLifeCycleProvider>)appDelegate;
+    [lifeCycleProvider addApplicationLifeCycleDelegate:delegate];
+  }
+  if (![delegate conformsToProtocol:@protocol(FlutterSceneLifeCycleDelegate)] &&
+      FLTFlutterPluginRespondsToLegacyAppLifecycleSelectors(delegate)) {
+    [FlutterLogger
+        logWarning:
+            [NSString stringWithFormat:
+                          @"Plugin %@ uses deprecated application lifecycle events. Please contact "
+                          @"plugin maintainers and request UIScene lifecycle support. This will be "
+                          @"required in a future version of Flutter. See "
+                          @"https://docs.flutter.dev/release/breaking-changes/"
+                          @"uiscenedelegate#migration-guide-for-flutter-plugins",
+                          self.key]];
+  }
+}
+
+- (void)addSceneDelegate:(NSObject<FlutterSceneLifeCycleDelegate>*)delegate {
+  // If the plugin conforms to FlutterSceneLifeCycleDelegate, add it to the engine.
+  [self.flutterEngine addSceneLifeCycleDelegate:delegate];
+}
+
+- (NSString*)lookupKeyForAsset:(NSString*)asset {
+  return [self.flutterEngine lookupKeyForAsset:asset];
+}
+
+- (NSString*)lookupKeyForAsset:(NSString*)asset fromPackage:(NSString*)package {
+  return [self.flutterEngine lookupKeyForAsset:asset fromPackage:package];
+}
+
+- (nullable NSObject*)valuePublishedByPlugin:(NSString*)pluginKey {
+  return [self.flutterEngine valuePublishedByPlugin:pluginKey];
+}
+
+@end
+
+@implementation FlutterEngineApplicationRegistrar
 @end

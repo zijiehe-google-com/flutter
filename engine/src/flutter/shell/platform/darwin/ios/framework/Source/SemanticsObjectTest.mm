@@ -8,7 +8,7 @@
 #import "flutter/shell/platform/darwin/common/framework/Headers/FlutterMacros.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/FlutterPlatformViews_Internal.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/FlutterSemanticsScrollView.h"
-#import "flutter/shell/platform/darwin/ios/framework/Source/FlutterTouchInterceptingView_Test.h"
+#import "flutter/shell/platform/darwin/ios/framework/Source/FlutterTouchInterceptingView+Test.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/SemanticsObject.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/SemanticsObjectTestMocks.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/TextInputSemanticsObject.h"
@@ -39,6 +39,22 @@ const float kFloatCompareEpsilon = 0.001;
   fml::WeakPtr<flutter::AccessibilityBridgeIos> bridge = factory.GetWeakPtr();
   SemanticsObject* object = [[SemanticsObject alloc] initWithBridge:bridge uid:0];
   XCTAssertNotNil(object);
+}
+
+- (void)testUIFocusSystemMethodsDoNotCrashWhenBridgeIsDead {
+  fml::WeakPtr<flutter::AccessibilityBridgeIos> bridge;
+  SemanticsObject* object;
+  {
+    auto mock_bridge = std::make_unique<flutter::testing::MockAccessibilityBridge>();
+    fml::WeakPtrFactory<flutter::AccessibilityBridgeIos> factory(mock_bridge.get());
+    bridge = factory.GetWeakPtr();
+    object = [[SemanticsObject alloc] initWithBridge:bridge uid:0];
+  }
+  // Now bridge is nullptr.
+
+  XCTAssertNil([object parentFocusEnvironment]);
+  XCTAssertNil([object coordinateSpace]);
+  XCTAssertTrue(CGRectEqualToRect([object frame], CGRectZero));
 }
 
 - (void)testSetChildren {
@@ -154,6 +170,32 @@ const float kFloatCompareEpsilon = 0.001;
   XCTAssertTrue(bridge->observations[0].action == flutter::SemanticsAction::kShowOnScreen);
 }
 
+- (void)testFlutterScrollableSemanticsObjectIsNotAccessibilityElementWhenVoiceOverIsRunning {
+  flutter::testing::MockAccessibilityBridge* mock = new flutter::testing::MockAccessibilityBridge();
+  mock->isVoiceOverRunningValue = true;
+  fml::WeakPtrFactory<flutter::AccessibilityBridgeIos> factory(mock);
+  fml::WeakPtr<flutter::AccessibilityBridgeIos> bridge = factory.GetWeakPtr();
+
+  flutter::SemanticsNode node;
+  node.flags.hasImplicitScrolling = true;
+
+  node.actions = flutter::kHorizontalScrollSemanticsActions |
+                 static_cast<int32_t>(flutter::SemanticsAction::kCustomAction);
+
+  node.rect = SkRect::MakeXYWH(0, 0, 100, 200);
+  node.scrollExtentMax = 100.0;
+  node.scrollPosition = 0.0;
+
+  FlutterScrollableSemanticsObject* scrollable =
+      [[FlutterScrollableSemanticsObject alloc] initWithBridge:bridge uid:0];
+  [scrollable setSemanticsNode:&node];
+  [scrollable accessibilityBridgeDidFinishUpdate];
+
+  UIScrollView* scrollView = [scrollable nativeAccessibility];
+
+  XCTAssertFalse(scrollView.isAccessibilityElement);
+}
+
 - (void)testAccessibilityScrollToVisibleWithChild {
   fml::WeakPtrFactory<flutter::testing::MockAccessibilityBridge> factory(
       new flutter::testing::MockAccessibilityBridge());
@@ -238,6 +280,17 @@ const float kFloatCompareEpsilon = 0.001;
   FlutterSemanticsObject* object = [[FlutterSemanticsObject alloc] initWithBridge:bridge uid:0];
   [object setSemanticsNode:&node];
   XCTAssertEqual([object accessibilityTraits], UIAccessibilityTraitStaticText);
+}
+
+- (void)testPlainSemanticsObjectWithHeadingLevelHasHeaderTrait {
+  fml::WeakPtrFactory<flutter::AccessibilityBridgeIos> factory(
+      new flutter::testing::MockAccessibilityBridge());
+  fml::WeakPtr<flutter::AccessibilityBridgeIos> bridge = factory.GetWeakPtr();
+  flutter::SemanticsNode node;
+  node.headingLevel = 2;
+  FlutterSemanticsObject* object = [[FlutterSemanticsObject alloc] initWithBridge:bridge uid:0];
+  [object setSemanticsNode:&node];
+  XCTAssertTrue(([object accessibilityTraits] & UIAccessibilityTraitHeader) > 0);
 }
 
 - (void)testNodeWithImplicitScrollIsAnAccessibilityElementWhenItisHidden {
@@ -571,6 +624,64 @@ const float kFloatCompareEpsilon = 0.001;
   XCTAssertTrue([object.accessibilityIdentifier isEqualToString:@"identifier"]);
 }
 
+- (void)testFlutterSemanticsObjectHasLocale {
+  flutter::testing::MockAccessibilityBridge* mock = new flutter::testing::MockAccessibilityBridge();
+  mock->isVoiceOverRunningValue = true;
+  fml::WeakPtrFactory<flutter::AccessibilityBridgeIos> factory(mock);
+  fml::WeakPtr<flutter::AccessibilityBridgeIos> bridge = factory.GetWeakPtr();
+
+  flutter::SemanticsNode node;
+  node.locale = "es-MX";
+
+  FlutterSemanticsObject* object = [[FlutterSemanticsObject alloc] initWithBridge:bridge uid:0];
+  [object setSemanticsNode:&node];
+  XCTAssertTrue([object.accessibilityLanguage isEqualToString:@"es-MX"]);
+}
+
+- (void)testFlutterSemanticsObjectUseDefaultLocale {
+  flutter::testing::MockAccessibilityBridge* mock = new flutter::testing::MockAccessibilityBridge();
+  mock->isVoiceOverRunningValue = true;
+  fml::WeakPtrFactory<flutter::AccessibilityBridgeIos> factory(mock);
+  fml::WeakPtr<flutter::AccessibilityBridgeIos> bridge = factory.GetWeakPtr();
+
+  flutter::SemanticsNode node;
+  mock->mockedLocale = @"es-MX";
+
+  FlutterSemanticsObject* object = [[FlutterSemanticsObject alloc] initWithBridge:bridge uid:0];
+  [object setSemanticsNode:&node];
+  XCTAssertTrue([object.accessibilityLanguage isEqualToString:@"es-MX"]);
+}
+
+- (void)testFlutterSemanticsObjectPrioritizedSectionLocale {
+  flutter::testing::MockAccessibilityBridge* mock = new flutter::testing::MockAccessibilityBridge();
+  mock->isVoiceOverRunningValue = true;
+  fml::WeakPtrFactory<flutter::AccessibilityBridgeIos> factory(mock);
+  fml::WeakPtr<flutter::AccessibilityBridgeIos> bridge = factory.GetWeakPtr();
+
+  flutter::SemanticsNode node;
+  // Set both locales.
+  mock->mockedLocale = @"es-MX";
+  node.locale = "zh-TW";
+
+  FlutterSemanticsObject* object = [[FlutterSemanticsObject alloc] initWithBridge:bridge uid:0];
+  [object setSemanticsNode:&node];
+  // node.locale takes priority.
+  XCTAssertTrue([object.accessibilityLanguage isEqualToString:@"zh-TW"]);
+}
+
+- (void)testFlutterSemanticsObjectLocaleNil {
+  flutter::testing::MockAccessibilityBridge* mock = new flutter::testing::MockAccessibilityBridge();
+  mock->isVoiceOverRunningValue = true;
+  fml::WeakPtrFactory<flutter::AccessibilityBridgeIos> factory(mock);
+  fml::WeakPtr<flutter::AccessibilityBridgeIos> bridge = factory.GetWeakPtr();
+
+  flutter::SemanticsNode node;
+
+  FlutterSemanticsObject* object = [[FlutterSemanticsObject alloc] initWithBridge:bridge uid:0];
+  [object setSemanticsNode:&node];
+  XCTAssertTrue(object.accessibilityLanguage == nil);
+}
+
 - (void)testFlutterScrollableSemanticsObjectWithLabelValueHintIsNotHiddenWhenVoiceOverIsRunning {
   flutter::testing::MockAccessibilityBridge* mock = new flutter::testing::MockAccessibilityBridge();
   mock->isVoiceOverRunningValue = true;
@@ -877,9 +988,8 @@ const float kFloatCompareEpsilon = 0.001;
 
   // Handle initial setting of node with header.
   flutter::SemanticsNode node;
-  node.flags.hasToggledState = true;
-  node.flags.isToggled = true;
-  node.flags.isEnabled = true;
+  node.flags.isToggled = flutter::SemanticsTristate::kTrue;
+  node.flags.isEnabled = flutter::SemanticsTristate::kTrue;
   node.label = "foo";
   [object setSemanticsNode:&node];
   // Create ab real UISwitch to compare the FlutterSwitchSemanticsObject with.
@@ -891,9 +1001,8 @@ const float kFloatCompareEpsilon = 0.001;
 
   // Set the toggled to false;
   flutter::SemanticsNode update;
-  update.flags.hasToggledState = true;
-  update.flags.isToggled = false;
-  update.flags.isEnabled = true;
+  update.flags.isToggled = flutter::SemanticsTristate::kFalse;
+  update.flags.isEnabled = flutter::SemanticsTristate::kTrue;
 
   update.label = "foo";
   [object setSemanticsNode:&update];
@@ -913,9 +1022,8 @@ const float kFloatCompareEpsilon = 0.001;
   // Handle initial setting of node with header.
   flutter::SemanticsNode node;
   node.flags.isInMutuallyExclusiveGroup = true;
-  node.flags.hasCheckedState = true;
-  node.flags.hasEnabledState = true;
-  node.flags.isEnabled = true;
+  node.flags.isChecked = flutter::SemanticsCheckState::kFalse;
+  node.flags.isEnabled = flutter::SemanticsTristate::kTrue;
   node.label = "foo";
   [object setSemanticsNode:&node];
   XCTAssertTrue((object.accessibilityTraits & UIAccessibilityTraitButton) > 0);
@@ -931,8 +1039,7 @@ const float kFloatCompareEpsilon = 0.001;
 
   // Handle initial setting of node with header.
   flutter::SemanticsNode node;
-  node.flags.hasToggledState = true;
-  node.flags.isToggled = true;
+  node.flags.isToggled = flutter::SemanticsTristate::kTrue;
   node.label = "foo";
   [object setSemanticsNode:&node];
   // Create ab real UISwitch to compare the FlutterSwitchSemanticsObject with.

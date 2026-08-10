@@ -13,6 +13,33 @@ import 'package:flutter_tools/src/reporting/github_template.dart';
 import '../src/common.dart';
 import '../src/context.dart';
 
+const _kPluginsFile = '''
+{
+  "plugins": {
+    "ios": [
+      {
+        "name": "camera",
+        "path": "/fake/pub.dartlang.org/camera-0.5.7+2/"
+      },
+      {
+        "name": "device_info",
+        "path": "/fake/pub.dartlang.org/device_info-0.4.1+4/"
+      }
+    ],
+    "android": [
+      {
+        "name": "camera",
+        "path": "/fake/pub.dartlang.org/camera-0.5.7+2/"
+      },
+      {
+        "name": "device_info",
+        "path": "/fake/pub.dartlang.org/device_info-0.4.1+4/"
+      }
+    ]
+  }
+}
+''';
+
 void main() {
   late BufferLogger logger;
   late FileSystem fs;
@@ -86,7 +113,7 @@ void main() {
       });
 
       testWithoutContext('DevFSException', () {
-        final StackTrace stackTrace = StackTrace.fromString('''
+        final stackTrace = StackTrace.fromString('''
 #0      _File.open.<anonymous closure> (dart:io/file_impl.dart:366:9)
 #1      _rootRunUnary (dart:async/zone.dart:1141:38)''');
         expect(
@@ -140,13 +167,17 @@ void main() {
           '_Exception',
         );
       });
+
+      testWithoutContext('custom Exception', () {
+        expect(GitHubTemplateCreator.sanitizedCrashException(FakeException()), 'FakeException');
+      });
     });
 
     group('new issue template URL', () {
       late StackTrace stackTrace;
       late Error error;
-      const String command = 'flutter test';
-      const String doctorText = ' [✓] Flutter (Channel report';
+      const command = 'flutter test';
+      const doctorText = ' [✓] Flutter (Channel report';
 
       setUp(() async {
         stackTrace = StackTrace.fromString('trace');
@@ -156,7 +187,7 @@ void main() {
       testUsingContext(
         'shows GitHub issue URL',
         () async {
-          final GitHubTemplateCreator creator = GitHubTemplateCreator(
+          final creator = GitHubTemplateCreator(
             fileSystem: fs,
             logger: logger,
             flutterProjectFactory: FlutterProjectFactory(fileSystem: fs, logger: logger),
@@ -181,7 +212,7 @@ void main() {
       testUsingContext(
         'app metadata',
         () async {
-          final GitHubTemplateCreator creator = GitHubTemplateCreator(
+          final creator = GitHubTemplateCreator(
             fileSystem: fs,
             logger: logger,
             flutterProjectFactory: FlutterProjectFactory(fileSystem: fs, logger: logger),
@@ -199,11 +230,8 @@ flutter:
     iosBundleIdentifier: com.example.failing.ios
 ''');
 
-          final File pluginsFile = projectDirectory.childFile('.flutter-plugins');
-          pluginsFile.writeAsStringSync('''
-camera=/fake/pub.dartlang.org/camera-0.5.7+2/
-device_info=/fake/pub.dartlang.org/pub.dartlang.org/device_info-0.4.1+4/
-        ''');
+          final File pluginsFile = projectDirectory.childFile('.flutter-plugins-dependencies');
+          pluginsFile.writeAsStringSync(_kPluginsFile);
 
           final File metadataFile = projectDirectory.childFile('.metadata');
           metadataFile.writeAsStringSync('''
@@ -221,7 +249,7 @@ project_type: app
             doctorText,
           );
           final String? actualBody = Uri.parse(actualURL).queryParameters['body'];
-          const String expectedBody = '''
+          const expectedBody = '''
 ## Command
 ```sh
 flutter test
@@ -275,6 +303,11 @@ class FakeError extends Error {
 #0      _File.open.<anonymous closure> (dart:io/file_impl.dart:366:9)
 #1      _rootRunUnary (dart:async/zone.dart:1141:38)''');
 
+  @override
+  String toString() => 'PII to ignore';
+}
+
+class FakeException implements Exception {
   @override
   String toString() => 'PII to ignore';
 }

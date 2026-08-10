@@ -27,7 +27,9 @@ void main() {
 
   testWidgets('Icon opacity', (WidgetTester tester) async {
     await tester.pumpWidget(
-      Center(child: IconTheme(data: const IconThemeData(opacity: 0.5), child: ImageIcon(image))),
+      Center(
+        child: IconTheme(data: const IconThemeData(opacity: 0.5), child: ImageIcon(image)),
+      ),
     );
 
     expect(tester.widget<Image>(find.byType(Image)).color!.alpha, equals(128));
@@ -44,7 +46,9 @@ void main() {
 
   testWidgets('ImageIcon sizing - sized theme', (WidgetTester tester) async {
     await tester.pumpWidget(
-      const Center(child: IconTheme(data: IconThemeData(size: 36.0), child: ImageIcon(null))),
+      const Center(
+        child: IconTheme(data: IconThemeData(size: 36.0), child: ImageIcon(null)),
+      ),
     );
 
     final RenderBox renderObject = tester.renderObject(find.byType(ImageIcon));
@@ -64,7 +68,9 @@ void main() {
 
   testWidgets('ImageIcon sizing - sizeless theme, default size', (WidgetTester tester) async {
     await tester.pumpWidget(
-      const Center(child: IconTheme(data: IconThemeData(), child: ImageIcon(null))),
+      const Center(
+        child: IconTheme(data: IconThemeData(), child: ImageIcon(null)),
+      ),
     );
 
     final RenderBox renderObject = tester.renderObject(find.byType(ImageIcon));
@@ -77,7 +83,10 @@ void main() {
       const Directionality(
         textDirection: TextDirection.ltr,
         child: Center(
-          child: IconTheme(data: IconThemeData(), child: ImageIcon(null, semanticLabel: 'test')),
+          child: IconTheme(
+            data: IconThemeData(),
+            child: ImageIcon(null, semanticLabel: 'test'),
+          ),
         ),
       ),
     );
@@ -87,5 +96,60 @@ void main() {
       matchesSemantics(label: 'test', textDirection: TextDirection.ltr),
     );
     handle.dispose();
+  });
+
+  testWidgets('ImageIcon respects IconTheme color by default', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: IconTheme(
+          data: const IconThemeData(color: Color(0xFF0000FF)),
+          child: ImageIcon(image),
+        ),
+      ),
+    );
+
+    expect(tester.widget<Image>(find.byType(Image)).color, const Color(0xFF0000FF));
+    imageCache.clear();
+  });
+
+  testWidgets('ImageIcon ignores IconTheme color when useOriginalColors is true', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: IconTheme(
+          data: const IconThemeData(color: Color(0xFF0000FF)),
+          child: ImageIcon(image, useOriginalColors: true),
+        ),
+      ),
+    );
+
+    expect(tester.widget<Image>(find.byType(Image)).color, null);
+    imageCache.clear();
+  });
+
+  testWidgets(
+    'ImageIcon throws assertion error if color is provided and useOriginalColors is true',
+    (WidgetTester tester) async {
+      expect(
+        () => ImageIcon(image, color: const Color(0xFF0000FF), useOriginalColors: true),
+        throwsAssertionError,
+      );
+
+      imageCache.clear();
+    },
+  );
+
+  testWidgets('ImageIcon does not crash at zero area', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(child: SizedBox.shrink(child: ImageIcon(image))),
+      ),
+    );
+    expect(tester.getSize(find.byType(ImageIcon)), Size.zero);
+    imageCache.clear();
   });
 }

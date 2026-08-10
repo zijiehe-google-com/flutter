@@ -7,11 +7,16 @@ import '../utils.dart';
 import 'use_cases.dart';
 
 class TextButtonUseCase extends UseCase {
+  TextButtonUseCase();
+
   @override
   String get name => 'TextButton';
 
   @override
   String get route => '/text-button';
+
+  @override
+  List<Tag> get tags => <Tag>[Tag.batch1, Tag.core];
 
   @override
   Widget build(BuildContext context) => const MainWidget();
@@ -27,14 +32,12 @@ class MainWidget extends StatefulWidget {
 class MainWidgetState extends State<MainWidget> {
   String pageTitle = getUseCaseName(TextButtonUseCase());
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  static const String fieldLabel = 'City';
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Semantics(headingLevel: 1, child: Text('$pageTitle Demo')),
-      ),
+      appBar: AppBar(title: Semantics(headingLevel: 1, child: Text('$pageTitle Demo'))),
       body: Form(
         key: _formKey,
         child: Column(
@@ -48,6 +51,10 @@ class MainWidgetState extends State<MainWidget> {
                 }
                 return null;
               },
+              errorBuilder: (BuildContext context, String errorText) {
+                return Text(errorText, semanticsLabel: '$errorText in $fieldLabel');
+              },
+              decoration: const InputDecoration(labelText: fieldLabel),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),

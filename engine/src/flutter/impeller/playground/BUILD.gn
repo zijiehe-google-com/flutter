@@ -17,13 +17,16 @@ impeller_component("playground") {
     "switches.h",
     "widgets.cc",
     "widgets.h",
-
-    # Swiftshader is Vulkan backend specific but the utilities are not.
-    "backend/vulkan/swiftshader_utilities.cc",
-    "backend/vulkan/swiftshader_utilities.h",
   ]
 
-  deps = [ "../renderer/backend" ]
+  deps = [
+    "../entity",
+    "../renderer/backend",
+    "//flutter/impeller/testing:golden_digest_manager",
+    "//flutter/impeller/testing:screenshot",
+    "//flutter/impeller/typographer/backends/skia:typographer_skia_backend",
+    "//flutter/testing:test_swiftshader_utils",
+  ]
 
   if (impeller_enable_metal) {
     sources += [
@@ -71,6 +74,8 @@ impeller_component("playground") {
       "AppKit.framework",
       "QuartzCore.framework",
     ]
+
+    deps += [ "//flutter/impeller/testing:metal_screenshot" ]
   }
 }
 
@@ -86,6 +91,7 @@ impeller_component("playground_test") {
 
   public_deps = [
     ":playground",
+    "//flutter/impeller/testing:golden_digest_manager",
     "//flutter/testing:testing_lib",
   ]
 }

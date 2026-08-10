@@ -14,14 +14,18 @@ config("gles_config") {
 impeller_component("gles_unittests") {
   testonly = true
   sources = [
+    "blit_command_gles_unittests.cc",
     "buffer_bindings_gles_unittests.cc",
+    "command_buffer_gles_unittests.cc",
     "device_buffer_gles_unittests.cc",
+    "render_pass_gles_unittests.cc",
     "test/capabilities_unittests.cc",
     "test/formats_gles_unittests.cc",
     "test/gpu_tracer_gles_unittests.cc",
     "test/mock_gles.cc",
     "test/mock_gles.h",
     "test/mock_gles_unittests.cc",
+    "test/pipeline_compile_queue_gles_unittests.cc",
     "test/pipeline_library_gles_unittests.cc",
     "test/proc_table_gles_unittests.cc",
     "test/reactor_unittests.cc",
@@ -32,6 +36,7 @@ impeller_component("gles_unittests") {
   ]
   deps = [
     ":gles",
+    "//flutter/fml",
     "//flutter/impeller/playground:playground_test",
     "//flutter/testing:testing_lib",
   ]
@@ -66,6 +71,8 @@ impeller_component("gles") {
     "gpu_tracer_gles.h",
     "handle_gles.cc",
     "handle_gles.h",
+    "pipeline_compile_queue_gles.cc",
+    "pipeline_compile_queue_gles.h",
     "pipeline_gles.cc",
     "pipeline_gles.h",
     "pipeline_library_gles.cc",
@@ -107,6 +114,6 @@ impeller_component("gles") {
     "../../:renderer",
     "../../../shader_archive",
     "//flutter/fml",
-    "//flutter/third_party/abseil-cpp/absl/container:flat_hash_map",
+    "//third_party/abseil-cpp/absl/container:flat_hash_map",
   ]
 }

@@ -18,7 +18,7 @@
 #include "flutter/shell/platform/embedder/tests/embedder_unittests_util.h"
 #include "flutter/testing/testing.h"
 
-// CREATE_NATIVE_ENTRY is leaky by design
+// CREATE_FFI_LAMBDA is leaky by design
 // NOLINTBEGIN(clang-analyzer-core.StackAddressEscape)
 
 namespace flutter {
@@ -120,7 +120,7 @@ TEST_F(EmbedderTest, CanSwapOutVulkanCalls) {
       });
 
   EmbedderConfigBuilder builder(context);
-  builder.SetSurface(SkISize::Make(1024, 1024));
+  builder.SetSurface(DlISize(1024, 1024));
   auto engine = builder.LaunchEngine();
   ASSERT_TRUE(engine.is_valid());
   // Wait for the root isolate to launch.

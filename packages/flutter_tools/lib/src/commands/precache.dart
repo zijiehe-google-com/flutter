@@ -4,6 +4,7 @@
 
 import '../base/common.dart';
 import '../base/logger.dart';
+import '../base/os.dart';
 import '../base/platform.dart';
 import '../cache.dart';
 import '../features.dart';
@@ -67,6 +68,13 @@ class PrecacheCommand extends FlutterCommand {
       help: 'Precache artifacts required for any development platform.',
     );
     argParser.addFlag(
+      'informative',
+      defaultsTo: true,
+      help: 'Precache engine_stamp.json.',
+      negatable: false,
+      hide: !verboseHelp,
+    );
+    argParser.addFlag(
       'flutter_runner',
       help: 'Precache the flutter runner artifacts.',
       hide: !verboseHelp,
@@ -74,6 +82,12 @@ class PrecacheCommand extends FlutterCommand {
     argParser.addFlag(
       'use-unsigned-mac-binaries',
       help: 'Precache the unsigned macOS binaries when available.',
+      hide: !verboseHelp,
+    );
+    argParser.addOption(
+      'host-arch',
+      allowed: const <String>['x64', 'arm64'],
+      help: 'Override the architecture of host artifacts to precache.',
       hide: !verboseHelp,
     );
   }
@@ -84,13 +98,15 @@ class PrecacheCommand extends FlutterCommand {
   final FeatureFlags _featureFlags;
 
   @override
-  final String name = 'precache';
+  final name = 'precache';
 
   @override
-  final String description =
+  final description =
       "Populate the Flutter tool's cache of binary artifacts.\n\n"
       'If no explicit platform flags are provided, this command will download the artifacts '
-      'for all currently enabled platforms';
+      'for every platform enabled by the current host and Flutter configuration. '
+      'Use "flutter config --list" to see explicit platform settings; "(Not set)" uses the '
+      'default for the current host.';
 
   @override
   final String category = FlutterCommandCategory.sdk;
@@ -99,7 +115,7 @@ class PrecacheCommand extends FlutterCommand {
   bool get shouldUpdateCache => false;
 
   /// Some flags are umbrella names that expand to include multiple artifacts.
-  static const Map<String, List<String>> _expandedArtifacts = <String, List<String>>{
+  static const _expandedArtifacts = <String, List<String>>{
     'android': <String>['android_gen_snapshot', 'android_maven', 'android_internal_build'],
   };
 
@@ -117,7 +133,7 @@ class PrecacheCommand extends FlutterCommand {
   /// If an umbrella is chosen, its children will be included as well.
   Set<String> _explicitArtifactSelections() {
     final Map<String, String> umbrellaForArtifact = _umbrellaForArtifactMap();
-    final Set<String> selections = <String>{};
+    final selections = <String>{};
     bool explicitlySelected(String name) => boolArg(name) && argResults!.wasParsed(name);
     for (final DevelopmentArtifact artifact in DevelopmentArtifact.values) {
       final String? umbrellaName = umbrellaForArtifact[artifact.name];
@@ -135,7 +151,7 @@ class PrecacheCommand extends FlutterCommand {
       if (!argResults!.arguments.contains('--no-$umbrellaName')) {
         return;
       }
-      for (final String childArtifactName in childArtifactNames) {
+      for (final childArtifactName in childArtifactNames) {
         if (argResults!.arguments.contains('--$childArtifactName')) {
           throwToolExit('--$childArtifactName requires --$umbrellaName');
         }
@@ -162,6 +178,19 @@ class PrecacheCommand extends FlutterCommand {
     if (boolArg('use-unsigned-mac-binaries')) {
       _cache.useUnsignedMacBinaries = true;
     }
+    final String? hostArch = stringArg('host-arch');
+    if (hostArch != null) {
+      final HostPlatform? overridePlatform = HostPlatform.fromOsAndArch(
+        _platform.operatingSystem,
+        hostArch,
+      );
+      if (overridePlatform == null) {
+        throwToolExit(
+          'Unsupported host architecture "$hostArch" for OS "${_platform.operatingSystem}"',
+        );
+      }
+      _cache.osUtils.hostPlatformOverride = overridePlatform;
+    }
     final Set<String> explicitlyEnabled = _explicitArtifactSelections();
     _cache.platformOverrideArtifacts = explicitlyEnabled;
 
@@ -169,7 +198,7 @@ class PrecacheCommand extends FlutterCommand {
     // all artifacts that correspond to an enabled platform.
     final bool downloadDefaultArtifacts = explicitlyEnabled.isEmpty;
     final Map<String, String> umbrellaForArtifact = _umbrellaForArtifactMap();
-    final Set<DevelopmentArtifact> requiredArtifacts = <DevelopmentArtifact>{};
+    final requiredArtifacts = <DevelopmentArtifact>{};
     for (final DevelopmentArtifact artifact in DevelopmentArtifact.values) {
       if (artifact.feature != null && !_featureFlags.isEnabled(artifact.feature!)) {
         continue;

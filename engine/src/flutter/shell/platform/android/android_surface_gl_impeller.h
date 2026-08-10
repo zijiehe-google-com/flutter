@@ -34,7 +34,7 @@ class AndroidSurfaceGLImpeller final : public GPUSurfaceGLDelegate,
   void TeardownOnScreenContext() override;
 
   // |AndroidSurface|
-  bool OnScreenSurfaceResize(const SkISize& size) override;
+  bool OnScreenSurfaceResize(const DlISize& size) override;
 
   // |AndroidSurface|
   bool ResourceContextMakeCurrent() override;
@@ -63,7 +63,7 @@ class AndroidSurfaceGLImpeller final : public GPUSurfaceGLDelegate,
   SurfaceFrame::FramebufferInfo GLContextFramebufferInfo() const override;
 
   // |GPUSurfaceGLDelegate|
-  void GLContextSetDamageRegion(const std::optional<SkIRect>& region) override;
+  void GLContextSetDamageRegion(const std::optional<DlIRect>& region) override;
 
   // |GPUSurfaceGLDelegate|
   bool GLContextPresent(const GLPresentInfo& present_info) override;
@@ -81,6 +81,7 @@ class AndroidSurfaceGLImpeller final : public GPUSurfaceGLDelegate,
   fml::RefPtr<AndroidNativeWindow> native_window_;
 
   bool is_valid_ = false;
+  std::optional<bool> should_clear_context_between_frames_;
 
   bool OnGLContextMakeCurrent();
 

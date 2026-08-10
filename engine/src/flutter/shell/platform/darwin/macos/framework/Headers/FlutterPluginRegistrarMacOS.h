@@ -50,6 +50,19 @@ FLUTTER_DARWIN_EXPORT
 @property(nullable, readonly) NSView* view;
 
 /**
+ * The `NSViewController` that hosts |view|.
+ *
+ * The plugin typically should not store a strong reference to this view
+ * controller.
+ *
+ * This property is provided for backwards compatibility for apps that assume
+ * a single view, and will eventually be replaced by the multi-view API variant.
+ *
+ * This property is |nil| when |view| is |nil|.
+ */
+@property(nullable, readonly) NSViewController* viewController;
+
+/**
  * Registers |delegate| to receive handleMethodCall:result: callbacks for the given |channel|.
  */
 - (void)addMethodCallDelegate:(nonnull id<FlutterPlugin>)delegate
@@ -87,6 +100,16 @@ FLUTTER_DARWIN_EXPORT
  * @param value The value to be published.
  */
 - (void)publish:(nonnull NSObject*)value;
+
+/**
+ * Returns a value published by the specified plugin.
+ *
+ * @param pluginKey The unique key identifying the plugin.
+ * @return An object published by the plugin, if any. Will be `NSNull` if
+ *   nothing has been published. Will be `nil` if the plugin has not been
+ *   registered.
+ */
+- (nullable NSObject*)valuePublishedByPlugin:(nonnull NSString*)pluginKey;
 
 /**
  * Returns the file name for the given asset.

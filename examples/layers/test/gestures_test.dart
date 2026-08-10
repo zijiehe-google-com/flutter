@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../widgets/gestures.dart';
 
@@ -25,7 +25,7 @@ void main() {
     expect(getSwatch(), GestureDemoState.kSwatches[0]);
 
     // every tap change swatch
-    for (int i = 1; i < GestureDemoState.kSwatches.length; i++) {
+    for (var i = 1; i < GestureDemoState.kSwatches.length; i++) {
       await tap();
       expect(getSwatch(), GestureDemoState.kSwatches[i]);
     }

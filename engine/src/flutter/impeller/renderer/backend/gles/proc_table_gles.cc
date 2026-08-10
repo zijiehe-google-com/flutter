@@ -4,18 +4,19 @@
 
 #include "impeller/renderer/backend/gles/proc_table_gles.h"
 
+#include <format>
 #include <sstream>
 
+#include "GLES3/gl3.h"
 #include "impeller/base/allocation.h"
 #include "impeller/base/comparable.h"
-#include "impeller/base/strings.h"
 #include "impeller/base/validation.h"
 #include "impeller/renderer/backend/gles/capabilities_gles.h"
 #include "impeller/renderer/capabilities.h"
 
 namespace impeller {
 
-const char* GLErrorToString(GLenum value) {
+std::string_view GLErrorToString(GLenum value) {
   switch (value) {
     case GL_NO_ERROR:
       return "GL_NO_ERROR";
@@ -71,6 +72,20 @@ ProcTableGLES::Resolver WrappedResolver(
   };
 }
 
+// Resolves `gl_name` and installs it as `proc`'s implementation. Used to alias
+// extension entry points that share a core proc's signature under a different
+// name (e.g. the *NV-suffixed GL_NV_texture_array procs).
+template <typename Proc, typename Resolver, typename ErrorFn>
+static void BindProcAlias(Proc& proc,
+                          const Resolver& resolver,
+                          const ErrorFn& error_fn,
+                          const char* gl_name) {
+  if (auto fn_ptr = resolver(gl_name)) {
+    proc.function = reinterpret_cast<decltype(proc.function)>(fn_ptr);
+    proc.error_fn = error_fn;
+  }
+}
+
 ProcTableGLES::ProcTableGLES(  // NOLINT(google-readability-function-size)
     Resolver resolver) {
   // The reason this constructor has anywhere near enough code to tip off
@@ -89,7 +104,7 @@ ProcTableGLES::ProcTableGLES(  // NOLINT(google-readability-function-size)
   }
 
 #define IMPELLER_PROC(proc_ivar)                                \
-  if (auto fn_ptr = resolver(proc_ivar.name)) {                 \
+  if (auto fn_ptr = resolver(proc_ivar.name.data())) {          \
     proc_ivar.function =                                        \
         reinterpret_cast<decltype(proc_ivar.function)>(fn_ptr); \
     proc_ivar.error_fn = error_fn;                              \
@@ -115,14 +130,32 @@ ProcTableGLES::ProcTableGLES(  // NOLINT(google-readability-function-size)
 #undef IMPELLER_PROC
 
 #define IMPELLER_PROC(proc_ivar)                                \
-  if (auto fn_ptr = resolver(proc_ivar.name)) {                 \
+  if (auto fn_ptr = resolver(proc_ivar.name.data())) {          \
     proc_ivar.function =                                        \
         reinterpret_cast<decltype(proc_ivar.function)>(fn_ptr); \
     proc_ivar.error_fn = error_fn;                              \
   }
 
-  if (description_->GetGlVersion().IsAtLeast(Version(3))) {
+  const bool supports_gl3 = description_->GetGlVersion().IsAtLeast(Version(3));
+  if (supports_gl3) {
     FOR_EACH_IMPELLER_GLES3_PROC(IMPELLER_PROC);
+  }
+
+  // 2D array textures need the 3D texture entry points. They are core on
+  // GL/GLES 3.0, exposed on desktop GL 2.x through GL_EXT_texture_array (which
+  // uses the same entry-point names), and on OpenGL ES 2.0 through
+  // GL_NV_texture_array (which suffixes them with NV). The NV entry points
+  // share the core signatures, so they are resolved as aliases into the core
+  // procs and the rest of the backend can call them without branching.
+  if (supports_gl3 || description_->HasExtension("GL_EXT_texture_array")) {
+    FOR_EACH_IMPELLER_TEXTURE_ARRAY_PROC(IMPELLER_PROC);
+  } else if (description_->HasExtension("GL_NV_texture_array")) {
+    BindProcAlias(TexImage3D, resolver, error_fn, "glTexImage3DNV");
+    BindProcAlias(TexSubImage3D, resolver, error_fn, "glTexSubImage3DNV");
+    BindProcAlias(CompressedTexImage3D, resolver, error_fn,
+                  "glCompressedTexImage3DNV");
+    BindProcAlias(CompressedTexSubImage3D, resolver, error_fn,
+                  "glCompressedTexSubImage3DNV");
   }
 
   FOR_EACH_IMPELLER_EXT_PROC(IMPELLER_PROC);
@@ -139,6 +172,19 @@ ProcTableGLES::ProcTableGLES(  // NOLINT(google-readability-function-size)
 
   if (!description_->HasExtension("GL_EXT_discard_framebuffer")) {
     DiscardFramebufferEXT.Reset();
+  }
+
+  if (!description_->HasExtension("GL_ANGLE_framebuffer_blit")) {
+    BlitFramebufferANGLE.Reset();
+  }
+
+  if (!description_->HasExtension("GL_EXT_instanced_arrays")) {
+    VertexAttribDivisorEXT.Reset();
+  }
+
+  if (!description_->HasExtension("GL_EXT_draw_instanced")) {
+    DrawArraysInstancedEXT.Reset();
+    DrawElementsInstancedEXT.Reset();
   }
 
   capabilities_ = std::make_shared<CapabilitiesGLES>(*this);
@@ -276,8 +322,9 @@ std::string ProcTableGLES::DescribeCurrentFramebuffer() const {
     return "The default framebuffer (FBO0) was bound.";
   }
   if (IsFramebuffer(framebuffer) == GL_FALSE) {
-    return SPrintF("The framebuffer binding (%d) was not a valid framebuffer.",
-                   framebuffer);
+    return std::format(
+        "The framebuffer binding ({}) was not a valid framebuffer.",
+        framebuffer);
   }
 
   GLenum status = CheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -426,7 +473,7 @@ std::string ProcTableGLES::GetProgramInfoLogString(GLuint program) const {
 
   length = std::min<GLint>(length, 1024);
   Allocation allocation;
-  if (!allocation.Truncate(Bytes{length}, false)) {
+  if (!allocation.Truncate(Bytes(length), false)) {
     return "";
   }
   GetProgramInfoLog(program,  // program
@@ -440,5 +487,12 @@ std::string ProcTableGLES::GetProgramInfoLogString(GLuint program) const {
   return std::string{reinterpret_cast<const char*>(allocation.GetBuffer()),
                      static_cast<size_t>(length)};
 }
+
+GLenum ProcTableGLES::CheckFramebufferStatusDebug(GLenum target) const {
+#ifdef IMPELLER_DEBUG
+  return CheckFramebufferStatus(target);
+#endif
+  return GL_FRAMEBUFFER_COMPLETE;
+};
 
 }  // namespace impeller

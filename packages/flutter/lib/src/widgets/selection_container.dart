@@ -34,7 +34,7 @@ import 'framework.dart';
 /// This sample demonstrates how to create a [SelectionContainer] that only
 /// allows selecting everything or nothing with no partial selection.
 ///
-/// ** See code in examples/api/lib/material/selection_container/selection_container.0.dart **
+/// ** See code in examples/api/lib/widgets/selection_container/selection_container.0.dart **
 /// {@end-tool}
 ///
 /// See also:
@@ -60,7 +60,7 @@ class SelectionContainer extends StatefulWidget {
   /// This sample demonstrates how to disable selection for a Text under a
   /// SelectionArea.
   ///
-  /// ** See code in examples/api/lib/material/selection_container/selection_container_disabled.0.dart **
+  /// ** See code in examples/api/lib/widgets/selection_container/selection_container_disabled.0.dart **
   /// {@end-tool}
   const SelectionContainer.disabled({super.key, required this.child})
     : registrar = null,
@@ -90,8 +90,8 @@ class SelectionContainer extends StatefulWidget {
   /// the [BuildContext] or the immediate [SelectionContainer] is not
   /// enabled.
   static SelectionRegistrar? maybeOf(BuildContext context) {
-    final SelectionRegistrarScope? scope =
-        context.dependOnInheritedWidgetOfExactType<SelectionRegistrarScope>();
+    final SelectionRegistrarScope? scope = context
+        .dependOnInheritedWidgetOfExactType<SelectionRegistrarScope>();
     return scope?.registrar;
   }
 
@@ -303,7 +303,7 @@ abstract class SelectionContainerDelegate implements SelectionHandler, Selection
       _selectionContainerContext?.findRenderObject() != null,
       'getTransformTo cannot be called before SelectionContainer is laid out.',
     );
-    final RenderBox box = _selectionContainerContext!.findRenderObject()! as RenderBox;
+    final box = _selectionContainerContext!.findRenderObject()! as RenderBox;
     return box.getTransformTo(ancestor);
   }
 
@@ -317,7 +317,7 @@ abstract class SelectionContainerDelegate implements SelectionHandler, Selection
       _selectionContainerContext?.findRenderObject() != null,
       'The _selectionContainerContext must have a renderObject, such as after the first build has completed.',
     );
-    final RenderBox box = _selectionContainerContext!.findRenderObject()! as RenderBox;
+    final box = _selectionContainerContext!.findRenderObject()! as RenderBox;
     return box.hasSize;
   }
 
@@ -326,7 +326,7 @@ abstract class SelectionContainerDelegate implements SelectionHandler, Selection
   /// Can only be called after [SelectionContainer] is laid out.
   Size get containerSize {
     assert(hasSize, 'containerSize cannot be called before SelectionContainer is laid out.');
-    final RenderBox box = _selectionContainerContext!.findRenderObject()! as RenderBox;
+    final box = _selectionContainerContext!.findRenderObject()! as RenderBox;
     return box.size;
   }
 }

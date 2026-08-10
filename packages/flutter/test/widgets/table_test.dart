@@ -2,10 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'editable_text_tester.dart';
 import 'semantics_tester.dart';
+
+const Color _debugRowDecorationColor = Color(0xFF00FF00);
 
 class TestStatefulWidget extends StatefulWidget {
   const TestStatefulWidget({super.key});
@@ -73,8 +77,8 @@ void main() {
   });
 
   testWidgets('Table widget calculate depth', (WidgetTester tester) async {
-    final UniqueKey outerTable = UniqueKey();
-    final UniqueKey innerTable = UniqueKey();
+    final outerTable = UniqueKey();
+    final innerTable = UniqueKey();
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
@@ -107,17 +111,23 @@ void main() {
       key: GlobalKey(),
       children: const <TableRow>[
         TableRow(
-          decoration: BoxDecoration(color: Colors.yellow),
+          decoration: BoxDecoration(color: _debugRowDecorationColor),
           children: <Widget>[Placeholder()],
         ),
       ],
     );
     await tester.pumpWidget(
-      Directionality(textDirection: TextDirection.ltr, child: Center(child: table)),
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(child: table),
+      ),
     );
     // Move table to a different location to simulate detaching and re-attaching effect.
     await tester.pumpWidget(
-      Directionality(textDirection: TextDirection.ltr, child: Center(child: Center(child: table))),
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(child: Center(child: table)),
+      ),
     );
 
     expect(tester.takeException(), isNull);
@@ -299,7 +309,7 @@ void main() {
 
   testWidgets('Really small deficit double precision error', (WidgetTester tester) async {
     // Regression test for https://github.com/flutter/flutter/issues/27083
-    const SizedBox cell = SizedBox(width: 16, height: 16);
+    const cell = SizedBox(width: 16, height: 16);
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
@@ -315,7 +325,7 @@ void main() {
   });
 
   testWidgets('Calculating flex columns with small width deficit', (WidgetTester tester) async {
-    const SizedBox cell = SizedBox(width: 1, height: 1);
+    const cell = SizedBox(width: 1, height: 1);
     // If the error is present, pumpWidget() will fail due to an unsatisfied
     // assertion during the layout phase.
     await tester.pumpWidget(
@@ -478,7 +488,7 @@ void main() {
   });
 
   testWidgets('Table widget - moving test', (WidgetTester tester) async {
-    final List<BuildContext> contexts = <BuildContext>[];
+    final contexts = <BuildContext>[];
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
@@ -711,30 +721,30 @@ void main() {
       ),
     );
     await tester.pumpWidget(table);
-    final RenderObjectElement element = key0.currentContext! as RenderObjectElement;
+    final element = key0.currentContext! as RenderObjectElement;
     expect(element, hasAGoodToStringDeep);
     expect(
       element.toStringDeep(minLevel: DiagnosticLevel.info),
       equalsIgnoringHashCodes(
         'Table-[GlobalKey#00000](dependencies: [Directionality, MediaQuery], renderObject: RenderTable#00000)\n'
         '├Text("A", dependencies: [MediaQuery])\n'
-        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "A", dependencies: [Directionality], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
+        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "A", dependencies: [Directionality, MediaQuery], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
         '├Text("B", dependencies: [MediaQuery])\n'
-        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "B", dependencies: [Directionality], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
+        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "B", dependencies: [Directionality, MediaQuery], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
         '├Text("C", dependencies: [MediaQuery])\n'
-        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "C", dependencies: [Directionality], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
+        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "C", dependencies: [Directionality, MediaQuery], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
         '├Text("D", dependencies: [MediaQuery])\n'
-        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "D", dependencies: [Directionality], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
+        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "D", dependencies: [Directionality, MediaQuery], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
         '├Text("EEE", dependencies: [MediaQuery])\n'
-        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "EEE", dependencies: [Directionality], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
+        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "EEE", dependencies: [Directionality, MediaQuery], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
         '├Text("F", dependencies: [MediaQuery])\n'
-        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "F", dependencies: [Directionality], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
+        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "F", dependencies: [Directionality, MediaQuery], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
         '├Text("G", dependencies: [MediaQuery])\n'
-        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "G", dependencies: [Directionality], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
+        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "G", dependencies: [Directionality, MediaQuery], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
         '├Text("H", dependencies: [MediaQuery])\n'
-        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "H", dependencies: [Directionality], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
+        '│└RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "H", dependencies: [Directionality, MediaQuery], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n'
         '└Text("III", dependencies: [MediaQuery])\n'
-        ' └RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "III", dependencies: [Directionality], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n',
+        ' └RichText(softWrap: wrapping at box width, maxLines: unlimited, text: "III", dependencies: [Directionality, MediaQuery], renderObject: RenderParagraph#00000 relayoutBoundary=up1)\n',
       ),
     );
   });
@@ -850,7 +860,9 @@ void main() {
         textDirection: TextDirection.ltr,
         child: Table(
           children: <TableRow>[
-            TableRow(children: <Widget>[KeyedSubtree(key: key, child: const Text('Hello'))]),
+            TableRow(
+              children: <Widget>[KeyedSubtree(key: key, child: const Text('Hello'))],
+            ),
           ],
         ),
       );
@@ -869,7 +881,7 @@ void main() {
 
   testWidgets('TableRow with no children throws an error message', (WidgetTester tester) async {
     // Regression test for https://github.com/flutter/flutter/issues/119541.
-    String result = 'no exception';
+    var result = 'no exception';
 
     // Test TableRow with children.
     try {
@@ -953,25 +965,23 @@ void main() {
   });
 
   testWidgets('Table has correct roles in semantics', (WidgetTester tester) async {
-    final SemanticsTester semantics = SemanticsTester(tester);
+    final semantics = SemanticsTester(tester);
     await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Table(
-            children: const <TableRow>[
-              TableRow(
-                children: <Widget>[
-                  TableCell(child: Text('Data Cell 1')),
-                  TableCell(child: Text('Data Cell 2')),
-                ],
-              ),
-            ],
-          ),
+      TestWidgetsApp(
+        home: Table(
+          children: const <TableRow>[
+            TableRow(
+              children: <Widget>[
+                TableCell(child: Text('Data Cell 1')),
+                TableCell(child: Text('Data Cell 2')),
+              ],
+            ),
+          ],
         ),
       ),
     );
 
-    final TestSemantics expectedSemantics = TestSemantics.root(
+    final expectedSemantics = TestSemantics.root(
       children: <TestSemantics>[
         TestSemantics(
           textDirection: TextDirection.ltr,
@@ -979,25 +989,20 @@ void main() {
             TestSemantics(
               children: <TestSemantics>[
                 TestSemantics(
-                  flags: <SemanticsFlag>[SemanticsFlag.scopesRoute],
+                  role: SemanticsRole.table,
                   children: <TestSemantics>[
                     TestSemantics(
-                      role: SemanticsRole.table,
+                      role: SemanticsRole.row,
                       children: <TestSemantics>[
                         TestSemantics(
-                          role: SemanticsRole.row,
-                          children: <TestSemantics>[
-                            TestSemantics(
-                              label: 'Data Cell 1',
-                              textDirection: TextDirection.ltr,
-                              role: SemanticsRole.cell,
-                            ),
-                            TestSemantics(
-                              label: 'Data Cell 2',
-                              textDirection: TextDirection.ltr,
-                              role: SemanticsRole.cell,
-                            ),
-                          ],
+                          label: 'Data Cell 1',
+                          textDirection: TextDirection.ltr,
+                          role: SemanticsRole.cell,
+                        ),
+                        TestSemantics(
+                          label: 'Data Cell 2',
+                          textDirection: TextDirection.ltr,
+                          role: SemanticsRole.cell,
                         ),
                       ],
                     ),
@@ -1016,5 +1021,78 @@ void main() {
     );
 
     semantics.dispose();
+  });
+
+  testWidgets('Single-row Table does not crash when a cell child paints below the row bottom', (
+    WidgetTester tester,
+  ) async {
+    // Regression test for https://github.com/flutter/flutter/issues/177038.
+    final semantics = SemanticsTester(tester);
+
+    // OverflowBox lets its child exceed the cell's vertical bounds, so the
+    // child's semantic rect extends below the table.
+    await tester.pumpWidget(
+      TestWidgetsApp(
+        home: Table(
+          children: const <TableRow>[
+            TableRow(
+              children: <Widget>[
+                SizedBox(
+                  height: 20,
+                  child: OverflowBox(
+                    maxHeight: double.infinity,
+                    alignment: Alignment.topLeft,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        SizedBox(height: 10, child: Text('A')),
+                        SizedBox(height: 10, child: Text('B')),
+                        // This Text's semantic rect top will be >= row's
+                        // bottom (20).
+                        SizedBox(height: 10, child: Text('C')),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('Table reuse the semantics nodes for cell wrappers', (WidgetTester tester) async {
+    final focusNode = FocusNode();
+    addTearDown(focusNode.dispose);
+    await tester.pumpWidget(
+      TestWidgetsApp(
+        home: Table(
+          children: <TableRow>[
+            TableRow(children: <Widget>[TestTextField(focusNode: focusNode)]),
+          ],
+        ),
+      ),
+    );
+
+    final SemanticsNode textFieldSemanticsNode = find.semantics
+        .byFlag(SemanticsFlag.isTextField)
+        .evaluate()
+        .first;
+    final int? cellWrapperId = textFieldSemanticsNode.parent?.id;
+
+    focusNode.requestFocus();
+    await tester.pumpAndSettle();
+
+    final SemanticsNode textFieldSemanticsNodeNew = find.semantics
+        .byFlag(SemanticsFlag.isTextField)
+        .evaluate()
+        .first;
+
+    final int? cellWrapperIdAfterUIchanges = textFieldSemanticsNodeNew.parent?.id;
+    expect(cellWrapperIdAfterUIchanges, cellWrapperId);
   });
 }

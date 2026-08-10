@@ -66,7 +66,6 @@ class CommandLine final {
     bool operator==(const Option& other) const {
       return name == other.name && value == other.value;
     }
-    bool operator!=(const Option& other) const { return !operator==(other); }
 
     std::string name;
     std::string value;
@@ -103,7 +102,6 @@ class CommandLine final {
            options_ == other.options_ &&
            positional_args_ == other.positional_args_;
   }
-  bool operator!=(const CommandLine& other) const { return !operator==(other); }
 
   // Returns true if this command line has the option |name| (and if |index| is
   // non-null, sets |*index| to the index of the *last* occurrence of the given
@@ -227,6 +225,10 @@ inline CommandLine CommandLineFromIteratorsWithArgv0(const std::string& argv0,
 // Returns an empty optional if this is not supported on the host platform.
 //
 // This can be useful on platforms where argv may not be provided as UTF-8.
+#ifdef _WIN32
+CommandLine CommandLineFromWideArgv(int argc, const wchar_t* const* argv);
+#endif
+
 std::optional<CommandLine> CommandLineFromPlatform();
 
 // Builds a |CommandLine| from the usual argc/argv.

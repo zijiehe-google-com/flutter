@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 # See https://github.com/actions/labeler/blob/main/README.md for docs.
-# Use git ls-files '<pattern>' to see the list of matching files.
+# Use git ls-files ':(glob)<pattern>' to see the list of matching files.
 
 'a: accessibility':
   - changed-files:
@@ -43,14 +43,14 @@
 'a: text input':
   - changed-files:
     - all-globs-to-any-file:
-      - '**/*text*'
-      - '!**/*context*'
-      - '!**/*texture*'
+      - '**/*[tT]ext*'
+      - '!**/*[cC]ontext*'
+      - '!**/*[tT]exture*'
 
 'd: api docs':
   - changed-files:
     - any-glob-to-any-file:
-      - examples/api/**/*
+      - packages/flutter/examples/api/**/*
 
 'd: docs/':
   - changed-files:
@@ -61,6 +61,7 @@
   - changed-files:
     - any-glob-to-any-file:
       - examples/**/*
+      - packages/flutter/examples/**/*
 
 'e: embedder':
   - changed-files:
@@ -71,6 +72,12 @@
   - changed-files:
     - any-glob-to-any-file:
       - engine/src/flutter/impeller/**/*
+
+flutter-gpu:
+  - changed-files:
+    - any-glob-to-any-file:
+      - engine/src/flutter/lib/gpu/**/*
+      - engine/src/flutter/testing/dart/gpu_test*
 
 engine:
   - changed-files:
@@ -132,7 +139,6 @@ framework:
       - packages/flutter_localizations/**/*
       - packages/flutter_test/**/*
       - packages/integration_test/**/*
-      - examples/api/**/*
       - docs/about/**/*
       - docs/contributing/**/*
       - docs/libraries/**/*
@@ -152,7 +158,7 @@ platform-android:
     - any-glob-to-any-file:
       - docs/platform/android/**/*
       - engine/src/flutter/shell/platform/android/**/*
-      - packages/flutter_tools/*android*'
+      - packages/flutter_tools/*android*
       - packages/flutter_tools/gradle/**/*
 
 platform-ios:
@@ -171,12 +177,14 @@ platform-linux:
   - changed-files:
     - any-glob-to-any-file:
       - engine/src/flutter/shell/platform/linux/**/*
+      - packages/flutter_tools/lib/src/linux/**/*
 
 platform-macos:
   - changed-files:
     - any-glob-to-any-file:
       - engine/src/flutter/src/flutter/shell/platform/darwin/common/**/*
       - engine/src/flutter/shell/platform/darwin/macos/**/*
+      - packages/flutter_tools/lib/src/macos/**/*
 
 platform-web:
   - changed-files:
@@ -189,6 +197,7 @@ platform-windows:
   - changed-files:
     - any-glob-to-any-file:
       - engine/src/flutter/shell/platform/windows/**/*
+      - packages/flutter_tools/lib/src/windows/**/*
 
 'customer: gallery':
   - changed-files:
@@ -201,18 +210,19 @@ platform-windows:
       - '**/fix_data.yaml'
       - '**/*.expect'
       - '**/*test_fixes*'
-
-team:
+'c: contributor-productivity':
   - changed-files:
     - any-glob-to-any-file:
-      - docs/about/**/*
       - docs/contributing/**/*
-      - docs/postmortems/**/*
 
+# Keep this synced with CODEOWNERS.
 team-android:
   - changed-files:
     - any-glob-to-any-file:
       - docs/platform/android/**/*
+      - engine/src/flutter/shell/platform/android/**/*
+      - packages/flutter_tools/**/*android*
+      - packages/flutter_tools/**/*gradle*
 
 team-ecosystem:
   - changed-files:
@@ -224,10 +234,18 @@ team-engine:
     - any-glob-to-any-file:
       - docs/engine/**/*
 
+team-fluttergpu:
+  - changed-files:
+    - any-glob-to-any-file:
+      - engine/src/flutter/lib/gpu/**/*
+      - engine/src/flutter/testing/dart/gpu_test*
+      - docs/fluttergpu/**/*
+
 team-infra:
   - changed-files:
     - any-glob-to-any-file:
       - docs/infra/**/*
+      - docs/releases/**/*
 
 # Keep this synced with CODEOWNERS.
 team-ios:
@@ -235,16 +253,48 @@ team-ios:
     - any-glob-to-any-file:
       - engine/src/flutter/shell/platform/darwin/common/**/*
       - engine/src/flutter/shell/platform/darwin/ios/framework/**/*
+      - dev/integration_tests/*ios*/**/*
+      - dev/integration_tests/*macos*/**/*
+      - dev/integration_tests/*darwin*/**/*
       - packages/flutter_tools/**/ios/*
       - packages/flutter_tools/**/macos/*
       - packages/flutter_tools/**/*xcode*
+      - packages/flutter_tools/**/*darwin*
+      - packages/flutter_tools/**/*swift*
+      - packages/flutter_tools/**/*pod*
       - packages/flutter_tools/**/*ios*
       - packages/flutter_tools/**/*macos*
 
-team-release:
+# Keep this synced with CODEOWNERS.
+team-linux:
   - changed-files:
     - any-glob-to-any-file:
-      - docs/releases/**/*
+      - engine/src/flutter/shell/platform/linux/**/*
+      - packages/flutter_tools/**/linux/*
+      - packages/flutter_tools/**/*linux*
+
+# Keep this synced with CODEOWNERS.
+team-macos:
+  - changed-files:
+    - any-glob-to-any-file:
+      - engine/src/flutter/shell/platform/darwin/common/**/*
+      - engine/src/flutter/shell/platform/darwin/macos/**/*
+      - dev/integration_tests/*macos*/**/*
+      - dev/integration_tests/*darwin*/**/*
+      - packages/flutter_tools/**/macos/*
+      - packages/flutter_tools/**/*xcode*
+      - packages/flutter_tools/**/*darwin*
+      - packages/flutter_tools/**/*swift*
+      - packages/flutter_tools/**/*pod*
+      - packages/flutter_tools/**/*macos*
+
+# Keep this synced with CODEOWNERS.
+team-windows:
+  - changed-files:
+    - any-glob-to-any-file:
+      - engine/src/flutter/shell/platform/windows/**/*
+      - packages/flutter_tools/**/windows/*
+      - packages/flutter_tools/**/*windows*
 
 team-tool:
   - changed-files:
@@ -254,7 +304,11 @@ team-tool:
 team-web:
   - changed-files:
     - any-glob-to-any-file:
+      - dev/**/*web*
+      - dev/**/*web*/**/*
       - docs/platforms/web/**/*
+      - engine/src/flutter/lib/web_ui/**/*
+      - engine/src/flutter/web_sdk/**/*
 
 tool:
   - changed-files:

@@ -672,13 +672,16 @@ bool DartIsolate::LoadLibraries() {
   tonic::DartState::Scope scope(this);
 
   DartIO::InitForIsolate(may_insecurely_connect_to_all_domains_,
-                         domain_network_policy_);
+                         domain_network_policy_, GetAdvisoryScriptURI());
 
-  DartUI::InitForIsolate(GetIsolateGroupData().GetSettings());
+  const auto& settings = GetIsolateGroupData().GetSettings();
+
+  DartUI::InitForIsolate(settings);
 
   const bool is_service_isolate = Dart_IsServiceIsolate(isolate());
 
   DartRuntimeHooks::Install(IsRootIsolate() && !is_service_isolate,
+                            settings.profile_microtasks,
                             GetAdvisoryScriptURI());
 
   if (!is_service_isolate) {
@@ -1020,7 +1023,8 @@ Dart_Isolate DartIsolate::DartCreateAndStartServiceIsolate(
           settings.vm_service_host,            // server IP address
           settings.vm_service_port,            // server VM service port
           tonic::DartState::HandleLibraryTag,  // embedder library tag handler
-          false,  //  disable websocket origin check
+          settings
+              .disable_service_origin_check,  //  disable websocket origin check
           settings.disable_service_auth_codes,  // disable VM service auth codes
           settings.enable_service_port_fallback,  // enable fallback to port 0
                                                   // when bind fails.

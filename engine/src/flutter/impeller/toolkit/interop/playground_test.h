@@ -9,6 +9,7 @@
 
 #include "impeller/playground/playground_test.h"
 #include "impeller/toolkit/interop/context.h"
+#include "impeller/toolkit/interop/impeller.hpp"
 #include "impeller/toolkit/interop/surface.h"
 
 namespace impeller::interop::testing {
@@ -34,12 +35,23 @@ class PlaygroundTest : public ::impeller::PlaygroundTest {
 
   ScopedObject<Context> GetInteropContext();
 
+  hpp::Context GetHPPContext();
+
+  hpp::Texture OpenAssetAsHPPTexture(std::string asset_name);
+
   using InteropPlaygroundCallback =
       std::function<bool(const ScopedObject<Context>& context,
                          const ScopedObject<Surface>& surface)>;
   bool OpenPlaygroundHere(InteropPlaygroundCallback callback);
 
+  std::unique_ptr<hpp::Mapping> OpenAssetAsHPPMapping(
+      std::string asset_name) const;
+
  private:
+  struct UserData {
+    Playground::VKProcAddressResolver resolver;
+  };
+  mutable std::unique_ptr<UserData> user_data_;
   ScopedObject<Context> interop_context_;
 };
 

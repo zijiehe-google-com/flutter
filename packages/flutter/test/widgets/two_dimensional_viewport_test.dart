@@ -4,8 +4,8 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'two_dimensional_utils.dart';
@@ -19,19 +19,17 @@ void main() {
         addTearDown(() => delegate1.dispose());
         await tester.pumpWidget(
           simpleBuilderTest(
-            delegate:
-                delegate1 = TwoDimensionalChildBuilderDelegate(
-                  // Only build 1 child
-                  maxXIndex: 0,
-                  maxYIndex: 0,
-                  builder: (BuildContext context, ChildVicinity vicinity) {
-                    return SizedBox(
-                      height: 200,
-                      width: 200,
-                      child: Center(child: Text('C${vicinity.xIndex}:R${vicinity.yIndex}')),
-                    );
-                  },
-                ),
+            delegate: delegate1 = TwoDimensionalChildBuilderDelegate(
+              // Only build 1 child
+              maxXIndex: 0,
+              maxYIndex: 0,
+              builder: (BuildContext context, ChildVicinity vicinity) {
+                return SizedBox.square(
+                  dimension: 200,
+                  child: Center(child: Text('C${vicinity.xIndex}:R${vicinity.yIndex}')),
+                );
+              },
+            ),
           ),
         );
         await tester.pumpAndSettle();
@@ -52,20 +50,18 @@ void main() {
         addTearDown(() => delegate2.dispose());
         await tester.pumpWidget(
           simpleBuilderTest(
-            delegate:
-                delegate2 = TwoDimensionalChildBuilderDelegate(
-                  // Only build 1 child
-                  maxXIndex: 0,
-                  maxYIndex: 0,
-                  addRepaintBoundaries: false,
-                  builder: (BuildContext context, ChildVicinity vicinity) {
-                    return SizedBox(
-                      height: 200,
-                      width: 200,
-                      child: Center(child: Text('C${vicinity.xIndex}:R${vicinity.yIndex}')),
-                    );
-                  },
-                ),
+            delegate: delegate2 = TwoDimensionalChildBuilderDelegate(
+              // Only build 1 child
+              maxXIndex: 0,
+              maxYIndex: 0,
+              addRepaintBoundaries: false,
+              builder: (BuildContext context, ChildVicinity vicinity) {
+                return SizedBox.square(
+                  dimension: 200,
+                  child: Center(child: Text('C${vicinity.xIndex}:R${vicinity.yIndex}')),
+                );
+              },
+            ),
           ),
         );
         await tester.pumpAndSettle();
@@ -82,51 +78,39 @@ void main() {
         }
       }, variant: TargetPlatformVariant.all());
 
-      testWidgets(
-        'will return null from build for exceeding maxXIndex and maxYIndex',
-        (WidgetTester tester) async {
-          late BuildContext capturedContext;
-          final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
-            // Only build 1 child
-            maxXIndex: 0,
-            maxYIndex: 0,
-            addRepaintBoundaries: false,
-            builder: (BuildContext context, ChildVicinity vicinity) {
-              capturedContext = context;
-              return SizedBox(
-                height: 200,
-                width: 200,
-                child: Center(child: Text('C${vicinity.xIndex}:R${vicinity.yIndex}')),
-              );
-            },
-          );
-          addTearDown(delegate.dispose);
+      testWidgets('will return null from build for exceeding maxXIndex and maxYIndex', (
+        WidgetTester tester,
+      ) async {
+        late BuildContext capturedContext;
+        final delegate = TwoDimensionalChildBuilderDelegate(
+          // Only build 1 child
+          maxXIndex: 0,
+          maxYIndex: 0,
+          addRepaintBoundaries: false,
+          builder: (BuildContext context, ChildVicinity vicinity) {
+            capturedContext = context;
+            return SizedBox.square(
+              dimension: 200,
+              child: Center(child: Text('C${vicinity.xIndex}:R${vicinity.yIndex}')),
+            );
+          },
+        );
+        addTearDown(delegate.dispose);
 
-          await tester.pumpWidget(simpleBuilderTest(delegate: delegate));
-          await tester.pumpAndSettle();
-          // maxXIndex
-          expect(
-            delegate.build(capturedContext, const ChildVicinity(xIndex: 1, yIndex: 0)),
-            isNull,
-          );
+        await tester.pumpWidget(simpleBuilderTest(delegate: delegate));
+        await tester.pumpAndSettle();
+        // maxXIndex
+        expect(delegate.build(capturedContext, const ChildVicinity(xIndex: 1, yIndex: 0)), isNull);
 
-          // maxYIndex
-          expect(
-            delegate.build(capturedContext, const ChildVicinity(xIndex: 0, yIndex: 1)),
-            isNull,
-          );
+        // maxYIndex
+        expect(delegate.build(capturedContext, const ChildVicinity(xIndex: 0, yIndex: 1)), isNull);
 
-          // Both
-          expect(
-            delegate.build(capturedContext, const ChildVicinity(xIndex: 1, yIndex: 1)),
-            isNull,
-          );
-        },
-        variant: TargetPlatformVariant.all(),
-      );
+        // Both
+        expect(delegate.build(capturedContext, const ChildVicinity(xIndex: 1, yIndex: 1)), isNull);
+      }, variant: TargetPlatformVariant.all());
 
       test('maxXIndex and maxYIndex assertions', () {
-        final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+        final delegate = TwoDimensionalChildBuilderDelegate(
           maxXIndex: 0,
           maxYIndex: 0,
           builder: (BuildContext context, ChildVicinity vicinity) {
@@ -200,12 +184,12 @@ void main() {
       });
 
       testWidgets('throws an error when builder throws', (WidgetTester tester) async {
-        final List<Object> exceptions = <Object>[];
+        final exceptions = <Object>[];
         final FlutterExceptionHandler? oldHandler = FlutterError.onError;
         FlutterError.onError = (FlutterErrorDetails details) {
           exceptions.add(details.exception);
         };
-        final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+        final delegate = TwoDimensionalChildBuilderDelegate(
           // Only build 1 child
           maxXIndex: 0,
           maxYIndex: 0,
@@ -232,26 +216,24 @@ void main() {
       testWidgets('builder delegate supports automatic keep alive - default true', (
         WidgetTester tester,
       ) async {
-        const ChildVicinity firstCell = ChildVicinity(xIndex: 0, yIndex: 0);
-        final ScrollController verticalController = ScrollController();
+        const firstCell = ChildVicinity(xIndex: 0, yIndex: 0);
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final UniqueKey checkBoxKey = UniqueKey();
-        final TwoDimensionalChildBuilderDelegate builderDelegate =
-            TwoDimensionalChildBuilderDelegate(
-              maxXIndex: 5,
-              maxYIndex: 5,
-              builder: (BuildContext context, ChildVicinity vicinity) {
-                return SizedBox.square(
-                  dimension: 200,
-                  child: Center(
-                    child:
-                        vicinity == firstCell
-                            ? KeepAliveCheckBox(key: checkBoxKey)
-                            : Text('R${vicinity.xIndex}:C${vicinity.yIndex}'),
-                  ),
-                );
-              },
+        final checkBoxKey = UniqueKey();
+        final builderDelegate = TwoDimensionalChildBuilderDelegate(
+          maxXIndex: 5,
+          maxYIndex: 5,
+          builder: (BuildContext context, ChildVicinity vicinity) {
+            return SizedBox.square(
+              dimension: 200,
+              child: Center(
+                child: vicinity == firstCell
+                    ? KeepAliveCheckBox(key: checkBoxKey)
+                    : Text('R${vicinity.xIndex}:C${vicinity.yIndex}'),
+              ),
             );
+          },
+        );
         addTearDown(builderDelegate.dispose);
 
         await tester.pumpWidget(
@@ -306,32 +288,30 @@ void main() {
       testWidgets('Keep alive works with additional parent data widgets', (
         WidgetTester tester,
       ) async {
-        const ChildVicinity firstCell = ChildVicinity(xIndex: 0, yIndex: 0);
-        final ScrollController verticalController = ScrollController();
+        const firstCell = ChildVicinity(xIndex: 0, yIndex: 0);
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final UniqueKey checkBoxKey = UniqueKey();
-        final TwoDimensionalChildBuilderDelegate builderDelegate =
-            TwoDimensionalChildBuilderDelegate(
-              maxXIndex: 5,
-              maxYIndex: 5,
-              addRepaintBoundaries: false,
-              builder: (BuildContext context, ChildVicinity vicinity) {
-                // The delegate will add a KeepAlive ParentDataWidget, this add an
-                // additional ParentDataWidget.
-                return TestParentDataWidget(
-                  testValue: 20,
-                  child: SizedBox.square(
-                    dimension: 200,
-                    child: Center(
-                      child:
-                          vicinity == firstCell
-                              ? KeepAliveCheckBox(key: checkBoxKey)
-                              : Text('R${vicinity.xIndex}:C${vicinity.yIndex}'),
-                    ),
-                  ),
-                );
-              },
+        final checkBoxKey = UniqueKey();
+        final builderDelegate = TwoDimensionalChildBuilderDelegate(
+          maxXIndex: 5,
+          maxYIndex: 5,
+          addRepaintBoundaries: false,
+          builder: (BuildContext context, ChildVicinity vicinity) {
+            // The delegate will add a KeepAlive ParentDataWidget, this add an
+            // additional ParentDataWidget.
+            return TestParentDataWidget(
+              testValue: 20,
+              child: SizedBox.square(
+                dimension: 200,
+                child: Center(
+                  child: vicinity == firstCell
+                      ? KeepAliveCheckBox(key: checkBoxKey)
+                      : Text('R${vicinity.xIndex}:C${vicinity.yIndex}'),
+                ),
+              ),
             );
+          },
+        );
         addTearDown(builderDelegate.dispose);
 
         await tester.pumpWidget(
@@ -350,8 +330,7 @@ void main() {
           tester.state<KeepAliveCheckBoxState>(find.byKey(checkBoxKey)).wantKeepAlive,
           isFalse,
         );
-        RenderSimpleBuilderTableViewport viewport =
-            getViewport(tester, checkBoxKey) as RenderSimpleBuilderTableViewport;
+        var viewport = getViewport(tester, checkBoxKey) as RenderSimpleBuilderTableViewport;
         TestExtendedParentData parentData = viewport.parentDataOf(
           viewport.testGetChildFor(firstCell)!,
         );
@@ -411,27 +390,25 @@ void main() {
       testWidgets('builder delegate will not add automatic keep alives', (
         WidgetTester tester,
       ) async {
-        const ChildVicinity firstCell = ChildVicinity(xIndex: 0, yIndex: 0);
-        final ScrollController verticalController = ScrollController();
+        const firstCell = ChildVicinity(xIndex: 0, yIndex: 0);
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final UniqueKey checkBoxKey = UniqueKey();
-        final TwoDimensionalChildBuilderDelegate builderDelegate =
-            TwoDimensionalChildBuilderDelegate(
-              maxXIndex: 5,
-              maxYIndex: 5,
-              addAutomaticKeepAlives: false, // No keeping alive this time
-              builder: (BuildContext context, ChildVicinity vicinity) {
-                return SizedBox.square(
-                  dimension: 200,
-                  child: Center(
-                    child:
-                        vicinity == firstCell
-                            ? KeepAliveCheckBox(key: checkBoxKey)
-                            : Text('R${vicinity.xIndex}:C${vicinity.yIndex}'),
-                  ),
-                );
-              },
+        final checkBoxKey = UniqueKey();
+        final builderDelegate = TwoDimensionalChildBuilderDelegate(
+          maxXIndex: 5,
+          maxYIndex: 5,
+          addAutomaticKeepAlives: false, // No keeping alive this time
+          builder: (BuildContext context, ChildVicinity vicinity) {
+            return SizedBox.square(
+              dimension: 200,
+              child: Center(
+                child: vicinity == firstCell
+                    ? KeepAliveCheckBox(key: checkBoxKey)
+                    : Text('R${vicinity.xIndex}:C${vicinity.yIndex}'),
+              ),
             );
+          },
+        );
         addTearDown(builderDelegate.dispose);
 
         await tester.pumpWidget(
@@ -488,7 +465,7 @@ void main() {
 
     group('TwoDimensionalChildListDelegate', () {
       testWidgets('repaintBoundaries', (WidgetTester tester) async {
-        final List<List<Widget>> children = <List<Widget>>[];
+        final children = <List<Widget>>[];
         children.add(<Widget>[
           const SizedBox(height: 200, width: 200, child: Center(child: Text('R0:C0'))),
         ]);
@@ -497,39 +474,30 @@ void main() {
         addTearDown(() => delegate1.dispose());
         await tester.pumpWidget(
           simpleListTest(
-            delegate:
-                delegate1 = TwoDimensionalChildListDelegate(
-                  // Only builds 1 child
-                  children: children,
-                ),
+            delegate: delegate1 = TwoDimensionalChildListDelegate(
+              // Only builds 1 child
+              children: children,
+            ),
           ),
         );
         await tester.pumpAndSettle();
 
         // In the tests below the number of RepaintBoundary widgets depends on:
         // ModalRoute - builds 2
-        // GlowingOverscrollIndicator - builds 2
         // TwoDimensionalChildListDelegate - builds 1 unless addRepaintBoundaries is false
 
-        void expectModalRoute() {
-          expect(
-            ModalRoute.of(tester.element(find.byType(SimpleListTableViewport))),
-            isA<MaterialPageRoute<void>>(),
-          );
-        }
-
+        expect(
+          ModalRoute.of(tester.element(find.byType(SimpleListTableViewport))),
+          isA<PageRoute<void>>(),
+        );
         switch (defaultTargetPlatform) {
-          case TargetPlatform.fuchsia:
-            expectModalRoute();
-            expect(find.byType(GlowingOverscrollIndicator), findsNWidgets(2));
-            expect(find.byType(RepaintBoundary), findsNWidgets(7));
-
           case TargetPlatform.android:
+          case TargetPlatform.fuchsia:
+            expect(find.byType(RepaintBoundary), findsNWidgets(7));
           case TargetPlatform.iOS:
           case TargetPlatform.linux:
           case TargetPlatform.macOS:
           case TargetPlatform.windows:
-            expectModalRoute();
             expect(find.byType(RepaintBoundary), findsNWidgets(3));
         }
 
@@ -538,83 +506,78 @@ void main() {
         addTearDown(() => delegate2.dispose());
         await tester.pumpWidget(
           simpleListTest(
-            delegate:
-                delegate2 = TwoDimensionalChildListDelegate(
-                  // Different children triggers rebuild
-                  children: <List<Widget>>[
-                    <Widget>[Container()],
-                  ],
-                  addRepaintBoundaries: false,
-                ),
+            delegate: delegate2 = TwoDimensionalChildListDelegate(
+              // Different children triggers rebuild
+              children: <List<Widget>>[
+                <Widget>[Container()],
+              ],
+              addRepaintBoundaries: false,
+            ),
           ),
         );
         await tester.pumpAndSettle();
 
+        expect(
+          ModalRoute.of(tester.element(find.byType(SimpleListTableViewport))),
+          isA<PageRoute<void>>(),
+        );
         switch (defaultTargetPlatform) {
-          case TargetPlatform.fuchsia:
-            expectModalRoute();
-            expect(find.byType(GlowingOverscrollIndicator), findsNWidgets(2));
-            expect(find.byType(RepaintBoundary), findsNWidgets(6));
-
           case TargetPlatform.android:
+          case TargetPlatform.fuchsia:
+            expect(find.byType(RepaintBoundary), findsNWidgets(6));
           case TargetPlatform.iOS:
           case TargetPlatform.linux:
           case TargetPlatform.macOS:
           case TargetPlatform.windows:
-            expectModalRoute();
             expect(find.byType(RepaintBoundary), findsNWidgets(2));
         }
       }, variant: TargetPlatformVariant.all());
 
-      testWidgets(
-        'will return null for a ChildVicinity outside of list bounds',
-        (WidgetTester tester) async {
-          final List<List<Widget>> children = <List<Widget>>[];
-          children.add(<Widget>[
-            const SizedBox(height: 200, width: 200, child: Center(child: Text('R0:C0'))),
-          ]);
-          final TwoDimensionalChildListDelegate delegate = TwoDimensionalChildListDelegate(
-            // Only builds 1 child
-            children: children,
-          );
-          addTearDown(delegate.dispose);
-
-          // X index
-          expect(
-            delegate.build(_NullBuildContext(), const ChildVicinity(xIndex: 1, yIndex: 0)),
-            isNull,
-          );
-          // Y index
-          expect(
-            delegate.build(_NullBuildContext(), const ChildVicinity(xIndex: 0, yIndex: 1)),
-            isNull,
-          );
-
-          // Both
-          expect(
-            delegate.build(_NullBuildContext(), const ChildVicinity(xIndex: 1, yIndex: 1)),
-            isNull,
-          );
-        },
-        variant: TargetPlatformVariant.all(),
-      );
-
-      testWidgets('shouldRebuild', (WidgetTester tester) async {
-        final List<List<Widget>> children = <List<Widget>>[];
+      testWidgets('will return null for a ChildVicinity outside of list bounds', (
+        WidgetTester tester,
+      ) async {
+        final children = <List<Widget>>[];
         children.add(<Widget>[
           const SizedBox(height: 200, width: 200, child: Center(child: Text('R0:C0'))),
         ]);
-        final TwoDimensionalChildListDelegate delegate = TwoDimensionalChildListDelegate(
+        final delegate = TwoDimensionalChildListDelegate(
+          // Only builds 1 child
+          children: children,
+        );
+        addTearDown(delegate.dispose);
+
+        // X index
+        expect(
+          delegate.build(_NullBuildContext(), const ChildVicinity(xIndex: 1, yIndex: 0)),
+          isNull,
+        );
+        // Y index
+        expect(
+          delegate.build(_NullBuildContext(), const ChildVicinity(xIndex: 0, yIndex: 1)),
+          isNull,
+        );
+
+        // Both
+        expect(
+          delegate.build(_NullBuildContext(), const ChildVicinity(xIndex: 1, yIndex: 1)),
+          isNull,
+        );
+      }, variant: TargetPlatformVariant.all());
+
+      testWidgets('shouldRebuild', (WidgetTester tester) async {
+        final children = <List<Widget>>[];
+        children.add(<Widget>[
+          const SizedBox(height: 200, width: 200, child: Center(child: Text('R0:C0'))),
+        ]);
+        final delegate = TwoDimensionalChildListDelegate(
           // Only builds 1 child
           children: children,
         );
         addTearDown(delegate.dispose);
         expect(delegate.shouldRebuild(delegate), isFalse);
 
-        final List<List<Widget>> newChildren = <List<Widget>>[];
-        final TwoDimensionalChildListDelegate oldDelegate = TwoDimensionalChildListDelegate(
-          children: newChildren,
-        );
+        final newChildren = <List<Widget>>[];
+        final oldDelegate = TwoDimensionalChildListDelegate(children: newChildren);
         addTearDown(oldDelegate.dispose);
 
         expect(delegate.shouldRebuild(oldDelegate), isTrue);
@@ -624,15 +587,15 @@ void main() {
     testWidgets('list delegate supports automatic keep alive - default true', (
       WidgetTester tester,
     ) async {
-      final UniqueKey checkBoxKey = UniqueKey();
+      final checkBoxKey = UniqueKey();
       final Widget originCell = SizedBox.square(
         dimension: 200,
         child: Center(child: KeepAliveCheckBox(key: checkBoxKey)),
       );
       const Widget otherCell = SizedBox.square(dimension: 200);
-      final ScrollController verticalController = ScrollController();
+      final verticalController = ScrollController();
       addTearDown(verticalController.dispose);
-      final TwoDimensionalChildListDelegate listDelegate = TwoDimensionalChildListDelegate(
+      final listDelegate = TwoDimensionalChildListDelegate(
         children: <List<Widget>>[
           <Widget>[originCell, otherCell, otherCell, otherCell, otherCell],
           <Widget>[otherCell, otherCell, otherCell, otherCell, otherCell],
@@ -693,15 +656,15 @@ void main() {
       'Ensure KeepAlive widget is not held onto when it no longer should be kept alive offscreen',
       (WidgetTester tester) async {
         // Regression test for https://github.com/flutter/flutter/issues/138977
-        final UniqueKey checkBoxKey = UniqueKey();
+        final checkBoxKey = UniqueKey();
         final Widget originCell = KeepAliveOnlyWhenHovered(
           key: checkBoxKey,
           child: const SizedBox.square(dimension: 200),
         );
         const Widget otherCell = SizedBox.square(dimension: 200, child: Placeholder());
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final TwoDimensionalChildListDelegate listDelegate = TwoDimensionalChildListDelegate(
+        final listDelegate = TwoDimensionalChildListDelegate(
           children: <List<Widget>>[
             <Widget>[originCell, otherCell, otherCell, otherCell, otherCell],
             <Widget>[otherCell, otherCell, otherCell, otherCell, otherCell],
@@ -753,15 +716,15 @@ void main() {
     );
 
     testWidgets('list delegate will not add automatic keep alives', (WidgetTester tester) async {
-      final UniqueKey checkBoxKey = UniqueKey();
+      final checkBoxKey = UniqueKey();
       final Widget originCell = SizedBox.square(
         dimension: 200,
         child: Center(child: KeepAliveCheckBox(key: checkBoxKey)),
       );
       const Widget otherCell = SizedBox.square(dimension: 200);
-      final ScrollController verticalController = ScrollController();
+      final verticalController = ScrollController();
       addTearDown(verticalController.dispose);
-      final TwoDimensionalChildListDelegate listDelegate = TwoDimensionalChildListDelegate(
+      final listDelegate = TwoDimensionalChildListDelegate(
         addAutomaticKeepAlives: false,
         children: <List<Widget>>[
           <Widget>[originCell, otherCell, otherCell, otherCell, otherCell],
@@ -822,7 +785,7 @@ void main() {
   group('TwoDimensionalScrollable', () {
     testWidgets('.of, .maybeOf', (WidgetTester tester) async {
       late BuildContext capturedContext;
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 0,
         maxYIndex: 0,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -850,7 +813,7 @@ void main() {
       await tester.pumpAndSettle();
       final dynamic exception = tester.takeException();
       expect(exception, isFlutterError);
-      final FlutterError error = exception as FlutterError;
+      final error = exception as FlutterError;
       expect(
         error.toString(),
         contains(
@@ -864,7 +827,7 @@ void main() {
 
     testWidgets('horizontal and vertical getters', (WidgetTester tester) async {
       late BuildContext capturedContext;
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 0,
         maxYIndex: 0,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -882,95 +845,94 @@ void main() {
       expect(scrollable.horizontalScrollable.position.pixels, 0.0);
     }, variant: TargetPlatformVariant.all());
 
-    testWidgets(
-      'creates fallback ScrollControllers if not provided by ScrollableDetails',
-      (WidgetTester tester) async {
-        late BuildContext capturedContext;
-        final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
-          maxXIndex: 0,
-          maxYIndex: 0,
-          builder: (BuildContext context, ChildVicinity vicinity) {
-            capturedContext = context;
-            return const SizedBox.square(dimension: 200);
-          },
-        );
-        addTearDown(delegate.dispose);
+    testWidgets('creates fallback ScrollControllers if not provided by ScrollableDetails', (
+      WidgetTester tester,
+    ) async {
+      late BuildContext capturedContext;
+      final delegate = TwoDimensionalChildBuilderDelegate(
+        maxXIndex: 0,
+        maxYIndex: 0,
+        builder: (BuildContext context, ChildVicinity vicinity) {
+          capturedContext = context;
+          return const SizedBox.square(dimension: 200);
+        },
+      );
+      addTearDown(delegate.dispose);
 
-        await tester.pumpWidget(simpleBuilderTest(delegate: delegate));
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(simpleBuilderTest(delegate: delegate));
+      await tester.pumpAndSettle();
 
-        // Vertical
-        final ScrollableState vertical = Scrollable.of(capturedContext, axis: Axis.vertical);
-        expect(vertical.widget.controller, isNotNull);
-        // Horizontal
-        final ScrollableState horizontal = Scrollable.of(capturedContext, axis: Axis.horizontal);
-        expect(horizontal.widget.controller, isNotNull);
-      },
-      variant: TargetPlatformVariant.all(),
-    );
+      // Vertical
+      final ScrollableState vertical = Scrollable.of(capturedContext, axis: Axis.vertical);
+      expect(vertical.widget.controller, isNotNull);
+      // Horizontal
+      final ScrollableState horizontal = Scrollable.of(capturedContext, axis: Axis.horizontal);
+      expect(horizontal.widget.controller, isNotNull);
+    }, variant: TargetPlatformVariant.all());
 
-    testWidgets(
-      'asserts the axis directions do not conflict with one another',
-      (WidgetTester tester) async {
-        final List<Object> exceptions = <Object>[];
-        final FlutterExceptionHandler? oldHandler = FlutterError.onError;
-        FlutterError.onError = (FlutterErrorDetails details) {
-          exceptions.add(details.exception);
-        };
-        // Horizontal mismatch
-        await tester.pumpWidget(
-          TwoDimensionalScrollable(
-            horizontalDetails: const ScrollableDetails.horizontal(),
-            verticalDetails: const ScrollableDetails.horizontal(),
-            viewportBuilder: (
-              BuildContext context,
-              ViewportOffset verticalPosition,
-              ViewportOffset horizontalPosition,
-            ) {
-              return Container();
-            },
-          ),
-        );
+    testWidgets('asserts the axis directions do not conflict with one another', (
+      WidgetTester tester,
+    ) async {
+      final exceptions = <Object>[];
+      final FlutterExceptionHandler? oldHandler = FlutterError.onError;
+      FlutterError.onError = (FlutterErrorDetails details) {
+        exceptions.add(details.exception);
+      };
+      // Horizontal mismatch
+      await tester.pumpWidget(
+        TwoDimensionalScrollable(
+          horizontalDetails: const ScrollableDetails.horizontal(),
+          verticalDetails: const ScrollableDetails.horizontal(),
+          viewportBuilder:
+              (
+                BuildContext context,
+                ViewportOffset verticalPosition,
+                ViewportOffset horizontalPosition,
+              ) {
+                return Container();
+              },
+        ),
+      );
 
-        // Vertical mismatch
-        await tester.pumpWidget(
-          TwoDimensionalScrollable(
-            horizontalDetails: const ScrollableDetails.vertical(),
-            verticalDetails: const ScrollableDetails.vertical(),
-            viewportBuilder: (
-              BuildContext context,
-              ViewportOffset verticalPosition,
-              ViewportOffset horizontalPosition,
-            ) {
-              return Container();
-            },
-          ),
-        );
+      // Vertical mismatch
+      await tester.pumpWidget(
+        TwoDimensionalScrollable(
+          horizontalDetails: const ScrollableDetails.vertical(),
+          verticalDetails: const ScrollableDetails.vertical(),
+          viewportBuilder:
+              (
+                BuildContext context,
+                ViewportOffset verticalPosition,
+                ViewportOffset horizontalPosition,
+              ) {
+                return Container();
+              },
+        ),
+      );
 
-        // Both
-        await tester.pumpWidget(
-          TwoDimensionalScrollable(
-            horizontalDetails: const ScrollableDetails.vertical(),
-            verticalDetails: const ScrollableDetails.horizontal(),
-            viewportBuilder: (
-              BuildContext context,
-              ViewportOffset verticalPosition,
-              ViewportOffset horizontalPosition,
-            ) {
-              return Container();
-            },
-          ),
-        );
+      // Both
+      await tester.pumpWidget(
+        TwoDimensionalScrollable(
+          horizontalDetails: const ScrollableDetails.vertical(),
+          verticalDetails: const ScrollableDetails.horizontal(),
+          viewportBuilder:
+              (
+                BuildContext context,
+                ViewportOffset verticalPosition,
+                ViewportOffset horizontalPosition,
+              ) {
+                return Container();
+              },
+        ),
+      );
 
-        expect(exceptions.length, 3);
-        for (final Object exception in exceptions) {
-          expect(exception, isAssertionError);
-          expect((exception as AssertionError).message, contains('are not Axis'));
-        }
-        FlutterError.onError = oldHandler;
-      },
-      variant: TargetPlatformVariant.all(),
-    );
+      expect(exceptions.length, 3);
+      for (final exception in exceptions) {
+        expect(exception, isAssertionError);
+        expect((exception as AssertionError).message, contains('are not Axis'));
+      }
+      FlutterError.onError = oldHandler;
+    }, variant: TargetPlatformVariant.all());
 
     testWidgets('correctly sets restorationIds', (WidgetTester tester) async {
       late BuildContext capturedContext;
@@ -979,12 +941,12 @@ void main() {
         WidgetsApp(
           color: const Color(0xFFFFFFFF),
           restorationScopeId: 'Test ID',
-          builder:
-              (BuildContext context, Widget? child) => TwoDimensionalScrollable(
-                restorationId: 'Custom Restoration ID',
-                horizontalDetails: const ScrollableDetails.horizontal(),
-                verticalDetails: const ScrollableDetails.vertical(),
-                viewportBuilder: (
+          builder: (BuildContext context, Widget? child) => TwoDimensionalScrollable(
+            restorationId: 'Custom Restoration ID',
+            horizontalDetails: const ScrollableDetails.horizontal(),
+            verticalDetails: const ScrollableDetails.vertical(),
+            viewportBuilder:
+                (
                   BuildContext context,
                   ViewportOffset verticalPosition,
                   ViewportOffset horizontalPosition,
@@ -999,7 +961,7 @@ void main() {
                     ),
                   );
                 },
-              ),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -1019,21 +981,22 @@ void main() {
         TwoDimensionalScrollable(
           horizontalDetails: const ScrollableDetails.horizontal(),
           verticalDetails: const ScrollableDetails.vertical(),
-          viewportBuilder: (
-            BuildContext context,
-            ViewportOffset verticalPosition,
-            ViewportOffset horizontalPosition,
-          ) {
-            return SizedBox.square(
-              dimension: 200,
-              child: Builder(
-                builder: (BuildContext context) {
-                  capturedContext = context;
-                  return Container();
-                },
-              ),
-            );
-          },
+          viewportBuilder:
+              (
+                BuildContext context,
+                ViewportOffset verticalPosition,
+                ViewportOffset horizontalPosition,
+              ) {
+                return SizedBox.square(
+                  dimension: 200,
+                  child: Builder(
+                    builder: (BuildContext context) {
+                      capturedContext = context;
+                      return Container();
+                    },
+                  ),
+                );
+              },
         ),
       );
       await tester.pumpAndSettle();
@@ -1054,12 +1017,12 @@ void main() {
         WidgetsApp(
           color: const Color(0xFFFFFFFF),
           restorationScopeId: 'Test ID',
-          builder:
-              (BuildContext context, Widget? child) => TwoDimensionalScrollable(
-                restorationId: 'Custom Restoration ID',
-                horizontalDetails: const ScrollableDetails.horizontal(),
-                verticalDetails: const ScrollableDetails.vertical(),
-                viewportBuilder: (
+          builder: (BuildContext context, Widget? child) => TwoDimensionalScrollable(
+            restorationId: 'Custom Restoration ID',
+            horizontalDetails: const ScrollableDetails.horizontal(),
+            verticalDetails: const ScrollableDetails.vertical(),
+            viewportBuilder:
+                (
                   BuildContext context,
                   ViewportOffset verticalPosition,
                   ViewportOffset horizontalPosition,
@@ -1073,7 +1036,7 @@ void main() {
                     mainAxis: Axis.vertical,
                   );
                 },
-              ),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -1081,149 +1044,149 @@ void main() {
       await restoreScrollAndVerify(tester);
     }, variant: TargetPlatformVariant.all());
 
-    testWidgets(
-      'Inner Scrollables receive the correct details from TwoDimensionalScrollable',
-      (WidgetTester tester) async {
-        // Default
-        late BuildContext capturedContext;
-        await tester.pumpWidget(
-          TwoDimensionalScrollable(
-            horizontalDetails: const ScrollableDetails.horizontal(),
-            verticalDetails: const ScrollableDetails.vertical(),
-            viewportBuilder: (
-              BuildContext context,
-              ViewportOffset verticalPosition,
-              ViewportOffset horizontalPosition,
-            ) {
-              return SizedBox.square(
-                dimension: 200,
-                child: Builder(
-                  builder: (BuildContext context) {
-                    capturedContext = context;
-                    return Container();
-                  },
-                ),
-              );
-            },
+    testWidgets('Inner Scrollables receive the correct details from TwoDimensionalScrollable', (
+      WidgetTester tester,
+    ) async {
+      // Default
+      late BuildContext capturedContext;
+      await tester.pumpWidget(
+        TwoDimensionalScrollable(
+          horizontalDetails: const ScrollableDetails.horizontal(),
+          verticalDetails: const ScrollableDetails.vertical(),
+          viewportBuilder:
+              (
+                BuildContext context,
+                ViewportOffset verticalPosition,
+                ViewportOffset horizontalPosition,
+              ) {
+                return SizedBox.square(
+                  dimension: 200,
+                  child: Builder(
+                    builder: (BuildContext context) {
+                      capturedContext = context;
+                      return Container();
+                    },
+                  ),
+                );
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Vertical
+      ScrollableState vertical = Scrollable.of(capturedContext, axis: Axis.vertical);
+      expect(vertical.widget.key, isNotNull);
+      expect(vertical.widget.axisDirection, AxisDirection.down);
+      expect(vertical.widget.controller, isNotNull);
+      expect(vertical.widget.physics, isNull);
+      expect(vertical.widget.clipBehavior, Clip.hardEdge);
+      expect(vertical.widget.incrementCalculator, isNull);
+      expect(vertical.widget.excludeFromSemantics, isFalse);
+      expect(vertical.widget.restorationId, 'OuterVerticalTwoDimensionalScrollable');
+      expect(vertical.widget.dragStartBehavior, DragStartBehavior.start);
+
+      // Horizontal
+      ScrollableState horizontal = Scrollable.of(capturedContext, axis: Axis.horizontal);
+      expect(horizontal.widget.key, isNotNull);
+      expect(horizontal.widget.axisDirection, AxisDirection.right);
+      expect(horizontal.widget.controller, isNotNull);
+      expect(horizontal.widget.physics, isNull);
+      expect(horizontal.widget.clipBehavior, Clip.hardEdge);
+      expect(horizontal.widget.incrementCalculator, isNull);
+      expect(horizontal.widget.excludeFromSemantics, isFalse);
+      expect(horizontal.widget.restorationId, 'InnerHorizontalTwoDimensionalScrollable');
+      expect(horizontal.widget.dragStartBehavior, DragStartBehavior.start);
+
+      // Customized
+      final horizontalController = ScrollController();
+      addTearDown(horizontalController.dispose);
+      final verticalController = ScrollController();
+      addTearDown(verticalController.dispose);
+      double calculator(_) => 0.0;
+      await tester.pumpWidget(
+        TwoDimensionalScrollable(
+          incrementCalculator: calculator,
+          excludeFromSemantics: true,
+          dragStartBehavior: DragStartBehavior.down,
+          horizontalDetails: ScrollableDetails.horizontal(
+            reverse: true,
+            controller: horizontalController,
+            physics: const ClampingScrollPhysics(),
+            decorationClipBehavior: Clip.antiAlias,
           ),
-        );
-        await tester.pumpAndSettle();
-
-        // Vertical
-        ScrollableState vertical = Scrollable.of(capturedContext, axis: Axis.vertical);
-        expect(vertical.widget.key, isNotNull);
-        expect(vertical.widget.axisDirection, AxisDirection.down);
-        expect(vertical.widget.controller, isNotNull);
-        expect(vertical.widget.physics, isNull);
-        expect(vertical.widget.clipBehavior, Clip.hardEdge);
-        expect(vertical.widget.incrementCalculator, isNull);
-        expect(vertical.widget.excludeFromSemantics, isFalse);
-        expect(vertical.widget.restorationId, 'OuterVerticalTwoDimensionalScrollable');
-        expect(vertical.widget.dragStartBehavior, DragStartBehavior.start);
-
-        // Horizontal
-        ScrollableState horizontal = Scrollable.of(capturedContext, axis: Axis.horizontal);
-        expect(horizontal.widget.key, isNotNull);
-        expect(horizontal.widget.axisDirection, AxisDirection.right);
-        expect(horizontal.widget.controller, isNotNull);
-        expect(horizontal.widget.physics, isNull);
-        expect(horizontal.widget.clipBehavior, Clip.hardEdge);
-        expect(horizontal.widget.incrementCalculator, isNull);
-        expect(horizontal.widget.excludeFromSemantics, isFalse);
-        expect(horizontal.widget.restorationId, 'InnerHorizontalTwoDimensionalScrollable');
-        expect(horizontal.widget.dragStartBehavior, DragStartBehavior.start);
-
-        // Customized
-        final ScrollController horizontalController = ScrollController();
-        addTearDown(horizontalController.dispose);
-        final ScrollController verticalController = ScrollController();
-        addTearDown(verticalController.dispose);
-        double calculator(_) => 0.0;
-        await tester.pumpWidget(
-          TwoDimensionalScrollable(
-            incrementCalculator: calculator,
-            excludeFromSemantics: true,
-            dragStartBehavior: DragStartBehavior.down,
-            horizontalDetails: ScrollableDetails.horizontal(
-              reverse: true,
-              controller: horizontalController,
-              physics: const ClampingScrollPhysics(),
-              decorationClipBehavior: Clip.antiAlias,
-            ),
-            verticalDetails: ScrollableDetails.vertical(
-              reverse: true,
-              controller: verticalController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              decorationClipBehavior: Clip.antiAliasWithSaveLayer,
-            ),
-            viewportBuilder: (
-              BuildContext context,
-              ViewportOffset verticalPosition,
-              ViewportOffset horizontalPosition,
-            ) {
-              return SizedBox.square(
-                dimension: 200,
-                child: Builder(
-                  builder: (BuildContext context) {
-                    capturedContext = context;
-                    return Container();
-                  },
-                ),
-              );
-            },
+          verticalDetails: ScrollableDetails.vertical(
+            reverse: true,
+            controller: verticalController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            decorationClipBehavior: Clip.antiAliasWithSaveLayer,
           ),
-        );
-        await tester.pumpAndSettle();
+          viewportBuilder:
+              (
+                BuildContext context,
+                ViewportOffset verticalPosition,
+                ViewportOffset horizontalPosition,
+              ) {
+                return SizedBox.square(
+                  dimension: 200,
+                  child: Builder(
+                    builder: (BuildContext context) {
+                      capturedContext = context;
+                      return Container();
+                    },
+                  ),
+                );
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
 
-        // Vertical
-        vertical = Scrollable.of(capturedContext, axis: Axis.vertical);
-        expect(vertical.widget.key, isNotNull);
-        expect(vertical.widget.axisDirection, AxisDirection.up);
-        expect(vertical.widget.controller, verticalController);
-        expect(vertical.widget.physics, const AlwaysScrollableScrollPhysics());
-        expect(vertical.widget.clipBehavior, Clip.antiAliasWithSaveLayer);
-        expect(
-          vertical.widget.incrementCalculator!(
-            ScrollIncrementDetails(
-              type: ScrollIncrementType.line,
-              metrics: verticalController.position,
-            ),
+      // Vertical
+      vertical = Scrollable.of(capturedContext, axis: Axis.vertical);
+      expect(vertical.widget.key, isNotNull);
+      expect(vertical.widget.axisDirection, AxisDirection.up);
+      expect(vertical.widget.controller, verticalController);
+      expect(vertical.widget.physics, const AlwaysScrollableScrollPhysics());
+      expect(vertical.widget.clipBehavior, Clip.antiAliasWithSaveLayer);
+      expect(
+        vertical.widget.incrementCalculator!(
+          ScrollIncrementDetails(
+            type: ScrollIncrementType.line,
+            metrics: verticalController.position,
           ),
-          0.0,
-        );
-        expect(vertical.widget.excludeFromSemantics, isTrue);
-        expect(vertical.widget.restorationId, 'OuterVerticalTwoDimensionalScrollable');
-        expect(vertical.widget.dragStartBehavior, DragStartBehavior.down);
+        ),
+        0.0,
+      );
+      expect(vertical.widget.excludeFromSemantics, isTrue);
+      expect(vertical.widget.restorationId, 'OuterVerticalTwoDimensionalScrollable');
+      expect(vertical.widget.dragStartBehavior, DragStartBehavior.down);
 
-        // Horizontal
-        horizontal = Scrollable.of(capturedContext, axis: Axis.horizontal);
-        expect(horizontal.widget.key, isNotNull);
-        expect(horizontal.widget.axisDirection, AxisDirection.left);
-        expect(horizontal.widget.controller, horizontalController);
-        expect(horizontal.widget.physics, const ClampingScrollPhysics());
-        expect(horizontal.widget.clipBehavior, Clip.antiAlias);
-        expect(
-          horizontal.widget.incrementCalculator!(
-            ScrollIncrementDetails(
-              type: ScrollIncrementType.line,
-              metrics: horizontalController.position,
-            ),
+      // Horizontal
+      horizontal = Scrollable.of(capturedContext, axis: Axis.horizontal);
+      expect(horizontal.widget.key, isNotNull);
+      expect(horizontal.widget.axisDirection, AxisDirection.left);
+      expect(horizontal.widget.controller, horizontalController);
+      expect(horizontal.widget.physics, const ClampingScrollPhysics());
+      expect(horizontal.widget.clipBehavior, Clip.antiAlias);
+      expect(
+        horizontal.widget.incrementCalculator!(
+          ScrollIncrementDetails(
+            type: ScrollIncrementType.line,
+            metrics: horizontalController.position,
           ),
-          0.0,
-        );
-        expect(horizontal.widget.excludeFromSemantics, isTrue);
-        expect(horizontal.widget.restorationId, 'InnerHorizontalTwoDimensionalScrollable');
-        expect(horizontal.widget.dragStartBehavior, DragStartBehavior.down);
-      },
-      variant: TargetPlatformVariant.all(),
-    );
+        ),
+        0.0,
+      );
+      expect(horizontal.widget.excludeFromSemantics, isTrue);
+      expect(horizontal.widget.restorationId, 'InnerHorizontalTwoDimensionalScrollable');
+      expect(horizontal.widget.dragStartBehavior, DragStartBehavior.down);
+    }, variant: TargetPlatformVariant.all());
 
     group('DiagonalDragBehavior', () {
       testWidgets('none (default)', (WidgetTester tester) async {
         // Vertical and horizontal axes are locked.
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         await tester.pumpWidget(
           Directionality(
@@ -1278,9 +1241,9 @@ void main() {
       testWidgets('weightedEvent', (WidgetTester tester) async {
         // For weighted event, the winning axis is locked for the duration of
         // the gesture.
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         await tester.pumpWidget(
           Directionality(
@@ -1408,9 +1371,9 @@ void main() {
         // differential for the gesture exceeds kTouchSlop. So it can lock, and
         // remain locked, if the user maintains a generally straight gesture,
         // otherwise it will unlock and re-evaluate.
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         await tester.pumpWidget(
           Directionality(
@@ -1468,9 +1431,9 @@ void main() {
 
       testWidgets('free', (WidgetTester tester) async {
         // For free, anything goes.
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         await tester.pumpWidget(
           Directionality(
@@ -1515,15 +1478,35 @@ void main() {
         await tester.pumpAndSettle();
       });
     });
+
+    testWidgets('TwoDimensionalScrollable does not crash at zero area', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: SizedBox.shrink(
+              child: TwoDimensionalScrollable(
+                horizontalDetails: const ScrollableDetails.horizontal(),
+                verticalDetails: const ScrollableDetails.vertical(),
+                viewportBuilder: (_, _, _) => const Placeholder(),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(tester.getSize(find.byType(TwoDimensionalScrollable)), Size.zero);
+    });
   });
 
   testWidgets('TwoDimensionalViewport asserts against axes mismatch', (WidgetTester tester) async {
     // Horizontal mismatch
     expect(
       () {
-        final ViewportOffset verticalOffset = ViewportOffset.fixed(0.0);
+        final verticalOffset = ViewportOffset.fixed(0.0);
         addTearDown(verticalOffset.dispose);
-        final ViewportOffset horizontalOffset = ViewportOffset.fixed(0.0);
+        final horizontalOffset = ViewportOffset.fixed(0.0);
         addTearDown(horizontalOffset.dispose);
 
         SimpleBuilderTableViewport(
@@ -1547,9 +1530,9 @@ void main() {
     // Vertical mismatch
     expect(
       () {
-        final ViewportOffset verticalOffset = ViewportOffset.fixed(0.0);
+        final verticalOffset = ViewportOffset.fixed(0.0);
         addTearDown(verticalOffset.dispose);
-        final ViewportOffset horizontalOffset = ViewportOffset.fixed(0.0);
+        final horizontalOffset = ViewportOffset.fixed(0.0);
         addTearDown(horizontalOffset.dispose);
 
         SimpleBuilderTableViewport(
@@ -1573,9 +1556,9 @@ void main() {
     // Both
     expect(
       () {
-        final ViewportOffset verticalOffset = ViewportOffset.fixed(0.0);
+        final verticalOffset = ViewportOffset.fixed(0.0);
         addTearDown(verticalOffset.dispose);
-        final ViewportOffset horizontalOffset = ViewportOffset.fixed(0.0);
+        final horizontalOffset = ViewportOffset.fixed(0.0);
         addTearDown(horizontalOffset.dispose);
 
         SimpleBuilderTableViewport(
@@ -1599,7 +1582,7 @@ void main() {
 
   test('TwoDimensionalViewportParentData', () {
     // Default vicinity is invalid
-    final TwoDimensionalViewportParentData parentData = TwoDimensionalViewportParentData();
+    final parentData = TwoDimensionalViewportParentData();
     expect(parentData.vicinity, ChildVicinity.invalid);
 
     // toString
@@ -1615,10 +1598,10 @@ void main() {
   });
 
   test('ChildVicinity comparable', () {
-    const ChildVicinity baseVicinity = ChildVicinity(xIndex: 0, yIndex: 0);
-    const ChildVicinity sameXVicinity = ChildVicinity(xIndex: 0, yIndex: 2);
-    const ChildVicinity sameYVicinity = ChildVicinity(xIndex: 3, yIndex: 0);
-    const ChildVicinity sameNothingVicinity = ChildVicinity(xIndex: 20, yIndex: 30);
+    const baseVicinity = ChildVicinity(xIndex: 0, yIndex: 0);
+    const sameXVicinity = ChildVicinity(xIndex: 0, yIndex: 2);
+    const sameYVicinity = ChildVicinity(xIndex: 3, yIndex: 0);
+    const sameNothingVicinity = ChildVicinity(xIndex: 20, yIndex: 30);
     // ==
     expect(baseVicinity == baseVicinity, isTrue);
     expect(baseVicinity == sameXVicinity, isFalse);
@@ -1643,9 +1626,9 @@ void main() {
       // Horizontal mismatch
       expect(
         () {
-          final ViewportOffset verticalOffset = ViewportOffset.fixed(0.0);
+          final verticalOffset = ViewportOffset.fixed(0.0);
           addTearDown(verticalOffset.dispose);
-          final ViewportOffset horizontalOffset = ViewportOffset.fixed(0.0);
+          final horizontalOffset = ViewportOffset.fixed(0.0);
           addTearDown(horizontalOffset.dispose);
 
           RenderSimpleBuilderTableViewport(
@@ -1670,9 +1653,9 @@ void main() {
       // Vertical mismatch
       expect(
         () {
-          final ViewportOffset verticalOffset = ViewportOffset.fixed(0.0);
+          final verticalOffset = ViewportOffset.fixed(0.0);
           addTearDown(verticalOffset.dispose);
-          final ViewportOffset horizontalOffset = ViewportOffset.fixed(0.0);
+          final horizontalOffset = ViewportOffset.fixed(0.0);
           addTearDown(horizontalOffset.dispose);
 
           RenderSimpleBuilderTableViewport(
@@ -1697,9 +1680,9 @@ void main() {
       // Both
       expect(
         () {
-          final ViewportOffset verticalOffset = ViewportOffset.fixed(0.0);
+          final verticalOffset = ViewportOffset.fixed(0.0);
           addTearDown(verticalOffset.dispose);
-          final ViewportOffset horizontalOffset = ViewportOffset.fixed(0.0);
+          final horizontalOffset = ViewportOffset.fixed(0.0);
           addTearDown(horizontalOffset.dispose);
 
           RenderSimpleBuilderTableViewport(
@@ -1723,8 +1706,8 @@ void main() {
     });
 
     testWidgets('getters', (WidgetTester tester) async {
-      final UniqueKey childKey = UniqueKey();
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final childKey = UniqueKey();
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 0,
         maxYIndex: 0,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -1732,12 +1715,12 @@ void main() {
         },
       );
       addTearDown(delegate.dispose);
-      final ViewportOffset verticalOffset = ViewportOffset.fixed(10.0);
+      final verticalOffset = ViewportOffset.fixed(10.0);
       addTearDown(verticalOffset.dispose);
-      final ViewportOffset horizontalOffset = ViewportOffset.fixed(20.0);
+      final horizontalOffset = ViewportOffset.fixed(20.0);
       addTearDown(horizontalOffset.dispose);
 
-      final RenderSimpleBuilderTableViewport renderViewport = RenderSimpleBuilderTableViewport(
+      final renderViewport = RenderSimpleBuilderTableViewport(
         verticalOffset: verticalOffset,
         verticalAxisDirection: AxisDirection.down,
         horizontalOffset: horizontalOffset,
@@ -1780,8 +1763,8 @@ void main() {
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('Children are organized according to mainAxis', (WidgetTester tester) async {
-      final Map<ChildVicinity, UniqueKey> childKeys = <ChildVicinity, UniqueKey>{};
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final childKeys = <ChildVicinity, UniqueKey>{};
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -1844,8 +1827,8 @@ void main() {
     testWidgets('sets up parent data', (WidgetTester tester) async {
       // Also tests computeAbsolutePaintOffsetFor & computeChildPaintExtent
       // Regression test for https://github.com/flutter/flutter/issues/128723
-      final Map<ChildVicinity, UniqueKey> childKeys = <ChildVicinity, UniqueKey>{};
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final childKeys = <ChildVicinity, UniqueKey>{};
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -1952,9 +1935,9 @@ void main() {
       expect(childParentData.layoutOffset, const Offset(1000.0, 1000.0));
 
       // Change the scroll positions to test partially visible.
-      final ScrollController verticalController = ScrollController();
+      final verticalController = ScrollController();
       addTearDown(verticalController.dispose);
-      final ScrollController horizontalController = ScrollController();
+      final horizontalController = ScrollController();
       addTearDown(horizontalController.dispose);
       await tester.pumpWidget(
         simpleBuilderTest(
@@ -1978,8 +1961,8 @@ void main() {
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('debugDescribeChildren', (WidgetTester tester) async {
-      final Map<ChildVicinity, UniqueKey> childKeys = <ChildVicinity, UniqueKey>{};
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final childKeys = <ChildVicinity, UniqueKey>{};
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -1999,14 +1982,44 @@ void main() {
         result.first.toString(),
         equalsIgnoringHashCodes('(xIndex: 0, yIndex: 0): RenderRepaintBoundary#00000'),
       );
-      expect(
-        result.last.toString(),
-        equalsIgnoringHashCodes('(xIndex: 4, yIndex: 3): RenderRepaintBoundary#00000 NEEDS-PAINT'),
+    });
+
+    testWidgets('use cacheExtentStyle', (WidgetTester tester) async {
+      final childKeys = <ChildVicinity, UniqueKey>{};
+      final delegate = TwoDimensionalChildBuilderDelegate(
+        maxXIndex: 5,
+        maxYIndex: 5,
+        builder: (BuildContext context, ChildVicinity vicinity) {
+          childKeys[vicinity] = childKeys[vicinity] ?? UniqueKey();
+          return SizedBox.square(key: childKeys[vicinity], dimension: 200);
+        },
       );
+      addTearDown(delegate.dispose);
+
+      await tester.pumpWidget(
+        simpleBuilderTest(
+          delegate: delegate,
+          cacheExtent: 1.0,
+          cacheExtentStyle: CacheExtentStyle.viewport,
+          useCacheExtent: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final RenderTwoDimensionalViewport viewport = getViewport(tester, childKeys.values.first);
+      // The viewport is 800x600. The children are 200x200.
+      // Without cache extent, it should show 4x3 = 12 children, but with the
+      // trailing edge calculation it is 5x4 = 20.
+      // With cacheExtent: 1.0 and cacheExtentStyle: CacheExtentStyle.viewport,
+      // The visible area will be from -800 to 800 + 800 = 1600 horizontally,
+      // and -600 to 600 + 600 = 1200 vertically.
+      // So, it should lay out children from (0,0) to (5,5).
+      // This is a total of 6 * 6 = 36 children.
+      expect(viewport.debugDescribeChildren().length, 36);
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('asserts that both axes are bounded', (WidgetTester tester) async {
-      final List<Object> exceptions = <Object>[];
+      final exceptions = <Object>[];
       final FlutterExceptionHandler? oldHandler = FlutterError.onError;
       FlutterError.onError = (FlutterErrorDetails details) {
         exceptions.add(details.exception);
@@ -2015,9 +2028,8 @@ void main() {
       await tester.pumpWidget(
         WidgetsApp(
           color: const Color(0xFFFFFFFF),
-          builder:
-              (BuildContext context, Widget? child) =>
-                  Column(children: <Widget>[SimpleBuilderTableView(delegate: builderDelegate)]),
+          builder: (BuildContext context, Widget? child) =>
+              Column(children: <Widget>[SimpleBuilderTableView(delegate: builderDelegate)]),
         ),
       );
       await tester.pumpAndSettle();
@@ -2033,9 +2045,8 @@ void main() {
       await tester.pumpWidget(
         WidgetsApp(
           color: const Color(0xFFFFFFFF),
-          builder:
-              (BuildContext context, Widget? child) =>
-                  Row(children: <Widget>[SimpleBuilderTableView(delegate: builderDelegate)]),
+          builder: (BuildContext context, Widget? child) =>
+              Row(children: <Widget>[SimpleBuilderTableView(delegate: builderDelegate)]),
         ),
       );
       await tester.pumpAndSettle();
@@ -2045,8 +2056,8 @@ void main() {
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('computeDryLayout asserts axes are bounded', (WidgetTester tester) async {
-      final UniqueKey childKey = UniqueKey();
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final childKey = UniqueKey();
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 0,
         maxYIndex: 0,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -2073,8 +2084,8 @@ void main() {
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('correctly resizes dimensions', (WidgetTester tester) async {
-      final UniqueKey childKey = UniqueKey();
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final childKey = UniqueKey();
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 0,
         maxYIndex: 0,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -2089,17 +2100,16 @@ void main() {
       expect(viewport.viewportDimension, const Size(800.0, 600.0));
       tester.view.physicalSize = const Size(300.0, 300.0);
       tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(simpleBuilderTest(delegate: delegate));
       await tester.pumpAndSettle();
       viewport = getViewport(tester, childKey);
       expect(viewport.viewportDimension, const Size(300.0, 300.0));
-      tester.view.resetPhysicalSize();
-      tester.view.resetDevicePixelRatio();
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('Rebuilds when delegate changes', (WidgetTester tester) async {
-      final UniqueKey firstChildKey = UniqueKey();
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final firstChildKey = UniqueKey();
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 0,
         maxYIndex: 0,
         addRepaintBoundaries: false,
@@ -2113,8 +2123,8 @@ void main() {
       RenderTwoDimensionalViewport viewport = getViewport(tester, firstChildKey);
       expect(viewport.firstChild, tester.renderObject<RenderBox>(find.byKey(firstChildKey)));
       // New delegate
-      final UniqueKey newChildKey = UniqueKey();
-      final TwoDimensionalChildBuilderDelegate newDelegate = TwoDimensionalChildBuilderDelegate(
+      final newChildKey = UniqueKey();
+      final newDelegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 0,
         maxYIndex: 0,
         addRepaintBoundaries: false,
@@ -2138,9 +2148,9 @@ void main() {
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('hitTestChildren', (WidgetTester tester) async {
-      final List<ChildVicinity> taps = <ChildVicinity>[];
-      final Map<ChildVicinity, UniqueKey> childKeys = <ChildVicinity, UniqueKey>{};
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final taps = <ChildVicinity>[];
+      final childKeys = <ChildVicinity, UniqueKey>{};
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 19,
         maxYIndex: 19,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -2148,11 +2158,13 @@ void main() {
           return SizedBox.square(
             dimension: 200,
             child: Center(
-              child: FloatingActionButton(
+              child: GestureDetector(
                 key: childKeys[vicinity],
-                onPressed: () {
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
                   taps.add(vicinity);
                 },
+                child: const SizedBox.square(dimension: 56),
               ),
             ),
           );
@@ -2212,8 +2224,8 @@ void main() {
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('getChildFor', (WidgetTester tester) async {
-      final Map<ChildVicinity, UniqueKey> childKeys = <ChildVicinity, UniqueKey>{};
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final childKeys = <ChildVicinity, UniqueKey>{};
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -2226,7 +2238,7 @@ void main() {
       await tester.pumpWidget(simpleBuilderTest(delegate: delegate));
       await tester.pumpAndSettle();
 
-      final RenderSimpleBuilderTableViewport viewport =
+      final viewport =
           getViewport(tester, childKeys.values.first) as RenderSimpleBuilderTableViewport;
       // returns child
       expect(viewport.testGetChildFor(const ChildVicinity(xIndex: 0, yIndex: 0)), isNotNull);
@@ -2239,42 +2251,40 @@ void main() {
       expect(viewport.testGetChildFor(const ChildVicinity(xIndex: 10, yIndex: 10)), isNull);
     }, variant: TargetPlatformVariant.all());
 
-    testWidgets(
-      'asserts vicinity is valid when children are asked to build',
-      (WidgetTester tester) async {
-        final Map<ChildVicinity, UniqueKey> childKeys = <ChildVicinity, UniqueKey>{};
-        final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
-          maxXIndex: 5,
-          maxYIndex: 5,
-          builder: (BuildContext context, ChildVicinity vicinity) {
-            childKeys[vicinity] = childKeys[vicinity] ?? UniqueKey();
-            return SizedBox.square(key: childKeys[vicinity], dimension: 200);
-          },
-        );
-        addTearDown(delegate.dispose);
+    testWidgets('asserts vicinity is valid when children are asked to build', (
+      WidgetTester tester,
+    ) async {
+      final childKeys = <ChildVicinity, UniqueKey>{};
+      final delegate = TwoDimensionalChildBuilderDelegate(
+        maxXIndex: 5,
+        maxYIndex: 5,
+        builder: (BuildContext context, ChildVicinity vicinity) {
+          childKeys[vicinity] = childKeys[vicinity] ?? UniqueKey();
+          return SizedBox.square(key: childKeys[vicinity], dimension: 200);
+        },
+      );
+      addTearDown(delegate.dispose);
 
-        await tester.pumpWidget(simpleBuilderTest(delegate: delegate));
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(simpleBuilderTest(delegate: delegate));
+      await tester.pumpAndSettle();
 
-        final RenderTwoDimensionalViewport viewport = getViewport(tester, childKeys.values.first);
-        expect(
-          () {
-            viewport.buildOrObtainChildFor(ChildVicinity.invalid);
-          },
-          throwsA(
-            isA<AssertionError>().having(
-              (AssertionError error) => error.toString(),
-              'description',
-              contains('ChildVicinity.invalid'),
-            ),
+      final RenderTwoDimensionalViewport viewport = getViewport(tester, childKeys.values.first);
+      expect(
+        () {
+          viewport.buildOrObtainChildFor(ChildVicinity.invalid);
+        },
+        throwsA(
+          isA<AssertionError>().having(
+            (AssertionError error) => error.toString(),
+            'description',
+            contains('ChildVicinity.invalid'),
           ),
-        );
-      },
-      variant: TargetPlatformVariant.all(),
-    );
+        ),
+      );
+    }, variant: TargetPlatformVariant.all());
 
     testWidgets('asserts that content dimensions have been applied', (WidgetTester tester) async {
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -2290,15 +2300,15 @@ void main() {
           applyDimensions: false,
         ),
       );
-      final FlutterError error = tester.takeException() as FlutterError;
+      final error = tester.takeException() as FlutterError;
       expect(error.message, contains('was not given content dimensions'));
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('will not rebuild a child if it can be reused', (WidgetTester tester) async {
-      final List<ChildVicinity> builtChildren = <ChildVicinity>[];
-      final ScrollController controller = ScrollController();
+      final builtChildren = <ChildVicinity>[];
+      final controller = ScrollController();
       addTearDown(controller.dispose);
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -2329,7 +2339,7 @@ void main() {
     testWidgets('asserts the layoutOffset has been set by the subclass', (
       WidgetTester tester,
     ) async {
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -2346,39 +2356,37 @@ void main() {
           setLayoutOffset: false,
         ),
       );
-      final AssertionError error = tester.takeException() as AssertionError;
+      final error = tester.takeException() as AssertionError;
       expect(error.message, contains('was not provided a layoutOffset'));
     }, variant: TargetPlatformVariant.all());
 
-    testWidgets(
-      'asserts the children have a size after layoutChildSequence',
-      (WidgetTester tester) async {
-        final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
-          maxXIndex: 5,
-          maxYIndex: 5,
-          builder: (BuildContext context, ChildVicinity vicinity) {
-            return const SizedBox.square(dimension: 200);
-          },
-        );
-        addTearDown(delegate.dispose);
+    testWidgets('asserts the children have a size after layoutChildSequence', (
+      WidgetTester tester,
+    ) async {
+      final delegate = TwoDimensionalChildBuilderDelegate(
+        maxXIndex: 5,
+        maxYIndex: 5,
+        builder: (BuildContext context, ChildVicinity vicinity) {
+          return const SizedBox.square(dimension: 200);
+        },
+      );
+      addTearDown(delegate.dispose);
 
-        await tester.pumpWidget(
-          simpleBuilderTest(
-            delegate: delegate,
-            // Will cause the test implementation to not actually layout the
-            // children it asked for.
-            forgetToLayoutChild: true,
-          ),
-        );
-        final AssertionError error = tester.takeException() as AssertionError;
-        expect(error.toString(), contains('child.hasSize'));
-      },
-      variant: TargetPlatformVariant.all(),
-    );
+      await tester.pumpWidget(
+        simpleBuilderTest(
+          delegate: delegate,
+          // Will cause the test implementation to not actually layout the
+          // children it asked for.
+          forgetToLayoutChild: true,
+        ),
+      );
+      final error = tester.takeException() as AssertionError;
+      expect(error.toString(), contains('child.hasSize'));
+    }, variant: TargetPlatformVariant.all());
 
     testWidgets('does not support intrinsics', (WidgetTester tester) async {
-      final Map<ChildVicinity, UniqueKey> childKeys = <ChildVicinity, UniqueKey>{};
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final childKeys = <ChildVicinity, UniqueKey>{};
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         builder: (BuildContext context, ChildVicinity vicinity) {
@@ -2450,8 +2458,9 @@ void main() {
       testWidgets('getOffsetToReveal', (WidgetTester tester) async {
         await tester.pumpWidget(simpleBuilderTest(useCacheExtent: true));
 
-        RenderAbstractViewport viewport =
-            tester.allRenderObjects.whereType<RenderAbstractViewport>().first;
+        RenderAbstractViewport viewport = tester.allRenderObjects
+            .whereType<RenderAbstractViewport>()
+            .first;
         final RevealedOffset verticalOffset = viewport.getOffsetToReveal(
           tester.renderObject(findKey(const ChildVicinity(xIndex: 5, yIndex: 5))),
           1.0,
@@ -2830,7 +2839,7 @@ void main() {
     });
 
     testWidgets('Does not throw when no child is laid out', (WidgetTester tester) async {
-      final TwoDimensionalChildBuilderDelegate delegate = TwoDimensionalChildBuilderDelegate(
+      final delegate = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 50,
         maxYIndex: 50,
         addAutomaticKeepAlives: false,
@@ -2848,76 +2857,24 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets(
-      'correctly reorders children and wont throw assertion failure',
-      (WidgetTester tester) async {
-        final TwoDimensionalChildBuilderDelegate delegate1 = TwoDimensionalChildBuilderDelegate(
-          maxXIndex: 5,
-          maxYIndex: 5,
-          addAutomaticKeepAlives: false,
-          addRepaintBoundaries: false,
-          builder: (BuildContext context, ChildVicinity vicinity) {
-            final ValueKey<int>? key = switch (vicinity) {
-              ChildVicinity(xIndex: 1, yIndex: 1) => const ValueKey<int>(1),
-              ChildVicinity(xIndex: 1, yIndex: 2) => const ValueKey<int>(2),
-              _ => null,
-            };
-            return SizedBox.square(key: key, dimension: 200);
-          },
-        );
-        final TwoDimensionalChildBuilderDelegate delegate2 = TwoDimensionalChildBuilderDelegate(
-          maxXIndex: 5,
-          maxYIndex: 5,
-          addAutomaticKeepAlives: false,
-          addRepaintBoundaries: false,
-          builder: (BuildContext context, ChildVicinity vicinity) {
-            ValueKey<int>? key;
-            if (vicinity == const ChildVicinity(xIndex: 0, yIndex: 0)) {
-              key = const ValueKey<int>(1);
-            } else if (vicinity == const ChildVicinity(xIndex: 1, yIndex: 1)) {
-              key = const ValueKey<int>(2);
-            }
-            return SizedBox.square(key: key, dimension: 200);
-          },
-        );
-        addTearDown(delegate1.dispose);
-        addTearDown(delegate2.dispose);
-
-        await tester.pumpWidget(simpleBuilderTest(delegate: delegate1));
-        expect(
-          tester.getRect(find.byKey(const ValueKey<int>(1))),
-          const Rect.fromLTWH(200.0, 200.0, 200.0, 200.0),
-        );
-        await tester.pumpWidget(simpleBuilderTest(delegate: delegate2));
-        expect(
-          tester.getRect(find.byKey(const ValueKey<int>(1))),
-          const Rect.fromLTWH(0.0, 0.0, 200.0, 200.0),
-        );
-        await tester.pumpWidget(simpleBuilderTest(delegate: delegate1));
-        expect(
-          tester.getRect(find.byKey(const ValueKey<int>(1))),
-          const Rect.fromLTWH(200.0, 200.0, 200.0, 200.0),
-        );
-      },
-      variant: TargetPlatformVariant.all(),
-    );
-
-    testWidgets('state is preserved after reordering', (WidgetTester tester) async {
-      final TwoDimensionalChildBuilderDelegate delegate1 = TwoDimensionalChildBuilderDelegate(
+    testWidgets('correctly reorders children and wont throw assertion failure', (
+      WidgetTester tester,
+    ) async {
+      final delegate1 = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: false,
         builder: (BuildContext context, ChildVicinity vicinity) {
           final ValueKey<int>? key = switch (vicinity) {
-            ChildVicinity(xIndex: 0, yIndex: 0) => const ValueKey<int>(1),
-            ChildVicinity(xIndex: 1, yIndex: 1) => const ValueKey<int>(2),
+            ChildVicinity(xIndex: 1, yIndex: 1) => const ValueKey<int>(1),
+            ChildVicinity(xIndex: 1, yIndex: 2) => const ValueKey<int>(2),
             _ => null,
           };
-          return Checkbox(key: key, value: false, onChanged: (_) {});
+          return SizedBox.square(key: key, dimension: 200);
         },
       );
-      final TwoDimensionalChildBuilderDelegate delegate2 = TwoDimensionalChildBuilderDelegate(
+      final delegate2 = TwoDimensionalChildBuilderDelegate(
         maxXIndex: 5,
         maxYIndex: 5,
         addAutomaticKeepAlives: false,
@@ -2929,7 +2886,57 @@ void main() {
           } else if (vicinity == const ChildVicinity(xIndex: 1, yIndex: 1)) {
             key = const ValueKey<int>(2);
           }
-          return Checkbox(key: key, value: false, onChanged: (_) {});
+          return SizedBox.square(key: key, dimension: 200);
+        },
+      );
+      addTearDown(delegate1.dispose);
+      addTearDown(delegate2.dispose);
+
+      await tester.pumpWidget(simpleBuilderTest(delegate: delegate1));
+      expect(
+        tester.getRect(find.byKey(const ValueKey<int>(1))),
+        const Rect.fromLTWH(200.0, 200.0, 200.0, 200.0),
+      );
+      await tester.pumpWidget(simpleBuilderTest(delegate: delegate2));
+      expect(
+        tester.getRect(find.byKey(const ValueKey<int>(1))),
+        const Rect.fromLTWH(0.0, 0.0, 200.0, 200.0),
+      );
+      await tester.pumpWidget(simpleBuilderTest(delegate: delegate1));
+      expect(
+        tester.getRect(find.byKey(const ValueKey<int>(1))),
+        const Rect.fromLTWH(200.0, 200.0, 200.0, 200.0),
+      );
+    }, variant: TargetPlatformVariant.all());
+
+    testWidgets('state is preserved after reordering', (WidgetTester tester) async {
+      final delegate1 = TwoDimensionalChildBuilderDelegate(
+        maxXIndex: 5,
+        maxYIndex: 5,
+        addAutomaticKeepAlives: false,
+        addRepaintBoundaries: false,
+        builder: (BuildContext context, ChildVicinity vicinity) {
+          final ValueKey<int>? key = switch (vicinity) {
+            ChildVicinity(xIndex: 0, yIndex: 0) => const ValueKey<int>(1),
+            ChildVicinity(xIndex: 1, yIndex: 1) => const ValueKey<int>(2),
+            _ => null,
+          };
+          return _TestToggleable(key: key);
+        },
+      );
+      final delegate2 = TwoDimensionalChildBuilderDelegate(
+        maxXIndex: 5,
+        maxYIndex: 5,
+        addAutomaticKeepAlives: false,
+        addRepaintBoundaries: false,
+        builder: (BuildContext context, ChildVicinity vicinity) {
+          ValueKey<int>? key;
+          if (vicinity == const ChildVicinity(xIndex: 0, yIndex: 0)) {
+            key = const ValueKey<int>(1);
+          } else if (vicinity == const ChildVicinity(xIndex: 1, yIndex: 1)) {
+            key = const ValueKey<int>(2);
+          }
+          return _TestToggleable(key: key);
         },
       );
       addTearDown(delegate1.dispose);
@@ -2944,7 +2951,138 @@ void main() {
       await tester.pumpWidget(simpleBuilderTest(delegate: delegate1));
       expect(tester.state(find.byKey(const ValueKey<int>(2))), stateBeforeReordering);
     }, variant: TargetPlatformVariant.all());
+
+    testWidgets('Child sorting and layout logic remain consistent', (WidgetTester tester) async {
+      // Verify that sorting rules are unchanged after removing nested loops:
+      // - Main axis vertical → Row-major order (y-index first, then x-index).
+      // - Main axis horizontal → Column-major order (x-index first, then y-index).
+      final childKeys = <ChildVicinity, UniqueKey>{};
+
+      // Configure grid dimensions: create a dense grid of child widgets to simulate the original nested loop scenario.
+      const maxXCount = 5; // Total number of columns (x-axis).
+      const maxYCount = 10; // Total number of rows (y-axis).
+
+      // Create delegate to build child widgets with fixed size (200x200).
+      final delegate = TwoDimensionalChildBuilderDelegate(
+        maxXIndex: maxXCount - 1,
+        maxYIndex: maxYCount - 1,
+        builder: (BuildContext context, ChildVicinity vicinity) {
+          childKeys[vicinity] = childKeys[vicinity] ?? UniqueKey();
+          return SizedBox.square(key: childKeys[vicinity], dimension: 200);
+        },
+      );
+
+      // Set viewport size to fit all children exactly (no overflow, no partial visibility).
+      tester.view.physicalSize = Size(200 * maxXCount.toDouble(), 200 * maxYCount.toDouble());
+      tester.view.devicePixelRatio = 1.0;
+      // Clean up resources after test: dispose delegate and reset viewport settings.
+      addTearDown(() {
+        delegate.dispose();
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      // 1. Test with main axis set to vertical (default behavior).
+      await tester.pumpWidget(simpleBuilderTest(delegate: delegate));
+      await tester.pumpAndSettle();
+      RenderTwoDimensionalViewport viewport = getViewport(tester, childKeys.values.first);
+      final verticalOrder = <ChildVicinity>[];
+      RenderBox? child = viewport.firstChild;
+
+      // Traverse all children in the viewport's paint order.
+      while (child != null) {
+        final ParentData? parentData = child.parentData;
+        if (parentData is TwoDimensionalViewportParentData) {
+          verticalOrder.add(parentData.vicinity);
+        }
+        child = viewport.childAfter(child);
+      }
+
+      // Verify row-major order for vertical main axis.
+      for (var y = 0; y < maxYCount; y++) {
+        for (var x = 0; x < maxXCount; x++) {
+          final expectedVicinity = ChildVicinity(xIndex: x, yIndex: y);
+          final int expectedListIndex = y * maxXCount + x;
+          expect(
+            verticalOrder[expectedListIndex],
+            expectedVicinity,
+            reason:
+                'Vertical main axis: Expected vicinity $expectedVicinity at index $expectedListIndex, '
+                'got ${verticalOrder[expectedListIndex]}',
+          );
+        }
+      }
+
+      // 2. Test with main axis set to horizontal.
+      await tester.pumpWidget(simpleBuilderTest(delegate: delegate, mainAxis: Axis.horizontal));
+      await tester.pumpAndSettle();
+      viewport = getViewport(tester, childKeys.values.first);
+      final horizontalOrder = <ChildVicinity>[];
+      child = viewport.firstChild;
+
+      // Traverse all children in the viewport's paint order.
+      while (child != null) {
+        final ParentData? parentData = child.parentData;
+        if (parentData is TwoDimensionalViewportParentData) {
+          horizontalOrder.add(parentData.vicinity);
+        }
+        child = viewport.childAfter(child);
+      }
+
+      // Verify column-major order for horizontal main axis.
+      for (var x = 0; x < maxXCount; x++) {
+        for (var y = 0; y < maxYCount; y++) {
+          final expectedVicinity = ChildVicinity(xIndex: x, yIndex: y);
+          // Calculate expected index in the horizontalOrder list (column * rows + row)
+          final int expectedListIndex = x * maxYCount + y;
+          expect(
+            horizontalOrder[expectedListIndex],
+            expectedVicinity,
+            reason:
+                'Horizontal main axis: Expected vicinity $expectedVicinity at index $expectedListIndex, '
+                'got ${horizontalOrder[expectedListIndex]}',
+          );
+        }
+      }
+    }, variant: TargetPlatformVariant.all());
   });
+}
+
+class _TestToggleable extends StatefulWidget {
+  const _TestToggleable({super.key});
+
+  @override
+  State<_TestToggleable> createState() => _TestToggleableState();
+}
+
+class _TestToggleableState extends State<_TestToggleable>
+    with TickerProviderStateMixin, ToggleableStateMixin {
+  final _NoOpToggleablePainter _painter = _NoOpToggleablePainter();
+
+  @override
+  ValueChanged<bool?>? get onChanged => null;
+
+  @override
+  bool get tristate => false;
+
+  @override
+  bool? get value => false;
+
+  @override
+  void dispose() {
+    _painter.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return buildToggleable(size: const Size(200, 200), painter: _painter..position = position);
+  }
+}
+
+class _NoOpToggleablePainter extends ToggleablePainter {
+  @override
+  void paint(Canvas canvas, Size size) {}
 }
 
 class _TestVicinity extends ChildVicinity {

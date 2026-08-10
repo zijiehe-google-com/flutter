@@ -11,6 +11,7 @@
 #include "impeller/entity/contents/content_context.h"
 #include "impeller/entity/entity.h"
 #include "impeller/entity/texture_downsample.frag.h"
+#include "impeller/entity/texture_downsample_bounded.frag.h"
 #include "impeller/entity/texture_fill.frag.h"
 #include "impeller/entity/texture_fill.vert.h"
 #include "impeller/geometry/color.h"
@@ -147,6 +148,15 @@ Rect MakeReferenceUVs(const Rect& reference, const Rect& rect) {
   return result.Scale(1.0f / Vector2(reference.GetSize()));
 }
 
+Quad MakeReferenceUVs(const Rect& reference, const Quad& target_quad) {
+  Matrix transform =
+      Matrix::MakeScale(Vector3(1.0f / reference.GetWidth(),
+                                1.0f / reference.GetHeight(), 1.0f)) *
+      Matrix::MakeTranslation(
+          Vector3(-reference.GetLeft(), -reference.GetTop(), 0));
+  return transform.Transform(target_quad);
+}
+
 Quad CalculateSnapshotUVs(
     const Snapshot& input_snapshot,
     const std::optional<Rect>& source_expanded_coverage_hint) {
@@ -197,12 +207,68 @@ Scalar FloorToDivisible(Scalar val, Scalar divisor) {
   }
 }
 
+// Precomputes the line equation parameters for a quadrilateral's bounds.
+//
+// This function takes an array of 4 vertices and returns an array of 4
+// Vector4s. Each Vector4 represents the line equation (Ax + By + C = 0) for one
+// edge of the quadrilateral.
+//
+// - Vector4.x stores 'A' (the x-component of the normal)
+// - Vector4.y stores 'B' (the y-component of the normal)
+// - Vector4.z stores 'C' (the distance/offset)
+// - Vector4.w is padding.
+//
+// Packing the data this way allows calculating signed distance from the point
+// to the line in GLSL with a single dot product: dot(vec3(point.xy, 1.0),
+// lineParams). The signed distances from the point to all four edges can be
+// used to determine whether the point is inside the quadrilateral.
+//
+// The `bounds` contains the 4 vertices of the quadrilateral, ordered as
+// [Top-Left, Top-Right, Bottom-Left, Bottom-Right] (a "Z-order" layout,
+// conforming to the return format of Rect::GetPoints()).
+Matrix PrecomputeQuadLineParameters(const Quad& bounds) {
+  auto computeLine = [](const Point& p0, const Point& p1) -> Vector4 {
+    // We are deriving the 2D line equation Ax + By + C = 0.
+
+    // The normal vector N = (A, B) is perpendicular to the line's
+    // direction vector V = p1 - p0 = (p1.x - p0.x, p1.y - p0.y)
+    // A 2D perpendicular (normal) is found by swapping V's components
+    // and negating one: N = (-(p1.y - p0.y), p1.x - p0.x)
+    // This is equivalent to the 2D components of the 3D cross product
+    // between the Z-axis (0,0,1) and V: (0,0,1) X (V.x, V.y, 0).
+    Scalar A = p0.y - p1.y;  // -(p1.y - p0.y)
+    Scalar B = p1.x - p0.x;
+
+    // The constant C is solved by ensuring the line passes through p0:
+    // A*p0.x + B*p0.y + C = 0
+    Scalar C = -(A * p0.x + B * p0.y);
+    return Vector4(A, B, C, 0.0);
+  };
+
+  const Point& topLeft = bounds[0];
+  const Point& topRight = bounds[1];
+  const Point& botLeft = bounds[2];
+  const Point& botRight = bounds[3];
+
+  Matrix result;
+  result.vec[0] = computeLine(topLeft, topRight);   // Top
+  result.vec[1] = computeLine(topRight, botRight);  // Right
+  result.vec[2] = computeLine(botRight, botLeft);   // Bottom
+  result.vec[3] = computeLine(botLeft, topLeft);    // Left
+  return result;
+}
+
 struct DownsamplePassArgs {
   /// The output size of the down-sampling pass.
   ISize subpass_size;
   /// The UVs that will be used for drawing to the down-sampling pass.
   /// This effectively is chopping out a region of the input.
   Quad uvs;
+  /// The bounds used for the downsampling pass of a bounded blur, in the same
+  /// UV space as the texture input of the downsampling pass.
+  ///
+  /// During downsampling, out-of-bound pixels are treated as transparent.
+  std::optional<Quad> uv_bounds;
   /// The effective scalar of the down-sample pass.
   /// This isn't usually exactly as we'd calculate because it has to be rounded
   /// to integer boundaries for generating the texture for the output.
@@ -220,6 +286,7 @@ DownsamplePassArgs CalculateDownsamplePassArgs(
     Vector2 padding,
     const Snapshot& input_snapshot,
     const std::optional<Rect>& source_expanded_coverage_hint,
+    const std::optional<Quad>& source_bounds,
     const std::shared_ptr<FilterInput>& input,
     const Entity& snapshot_entity) {
   Scalar desired_scalar =
@@ -274,9 +341,15 @@ DownsamplePassArgs CalculateDownsamplePassArgs(
     FML_DCHECK(effective_scalar == downsample_scalar);
 
     Quad uvs = CalculateSnapshotUVs(input_snapshot, aligned_coverage_hint);
+    std::optional<Quad> uv_bounds;
+    if (source_bounds.has_value()) {
+      uv_bounds = MakeReferenceUVs(input_snapshot.GetCoverage().value(),
+                                   source_bounds.value());
+    }
     return {
         .subpass_size = subpass_size,
         .uvs = uvs,
+        .uv_bounds = uv_bounds,
         .effective_scalar = effective_scalar,
         .transform = Matrix::MakeTranslation(
             {aligned_coverage_hint.GetX(), aligned_coverage_hint.GetY(), 0})};
@@ -309,9 +382,17 @@ DownsamplePassArgs CalculateDownsamplePassArgs(
         Vector2(subpass_size) / source_rect_padded.GetSize();
     Quad uvs = GaussianBlurFilterContents::CalculateUVs(
         input, snapshot_entity, source_rect_padded, input_snapshot_size);
+    std::optional<Quad> uv_bounds;
+    if (source_bounds.has_value()) {
+      uv_bounds = MakeReferenceUVs(
+          source_rect,
+          input_snapshot.transform.Invert().Transform(source_bounds.value()));
+    }
+
     return {
         .subpass_size = subpass_size,
         .uvs = uvs,
+        .uv_bounds = uv_bounds,
         .effective_scalar = effective_scalar,
         .transform = input_snapshot.transform *
                      Matrix::MakeTranslation(-divisible_padding),
@@ -332,12 +413,18 @@ fml::StatusOr<RenderTarget> MakeDownsampleSubpass(
 
   // If the texture already had mip levels generated, then we can use the
   // original downsample shader.
-  if (pass_args.effective_scalar.x >= 0.5f ||
-      (!input_texture->NeedsMipmapGeneration() &&
-       input_texture->GetTextureDescriptor().mip_count > 1)) {
+  //
+  // Bounded blur must not use existing mip levels, since bounded blurs need to
+  // treat out-of-bounds pixels as transparent.
+  bool may_reuse_mipmap =
+      !pass_args.uv_bounds.has_value() &&
+      (pass_args.effective_scalar.x >= 0.5f ||
+       (!input_texture->NeedsMipmapGeneration() &&
+        input_texture->GetTextureDescriptor().mip_count > 1));
+  if (may_reuse_mipmap) {
     ContentContext::SubpassCallback subpass_callback =
         [&](const ContentContext& renderer, RenderPass& pass) {
-          HostBuffer& host_buffer = renderer.GetTransientsBuffer();
+          HostBuffer& data_host_buffer = renderer.GetTransientsDataBuffer();
 
           pass.SetCommandLabel("Gaussian blur downsample");
           auto pipeline_options = OptionsFromPass(pass);
@@ -346,8 +433,6 @@ fml::StatusOr<RenderTarget> MakeDownsampleSubpass(
 
           TextureFillVertexShader::FrameInfo frame_info;
           frame_info.mvp = Matrix::MakeOrthographic(ISize(1, 1));
-          frame_info.texture_sampler_y_coord_scale =
-              input_texture->GetYCoordScale();
 
           TextureFillFragmentShader::FragInfo frag_info;
           frag_info.alpha = 1.0;
@@ -359,16 +444,16 @@ fml::StatusOr<RenderTarget> MakeDownsampleSubpass(
               VS::PerVertexData{Point(0, 1), uvs[2]},
               VS::PerVertexData{Point(1, 1), uvs[3]},
           };
-          pass.SetVertexBuffer(CreateVertexBuffer(vertices, host_buffer));
+          pass.SetVertexBuffer(CreateVertexBuffer(vertices, data_host_buffer));
 
           SamplerDescriptor linear_sampler_descriptor = sampler_descriptor;
           SetTileMode(&linear_sampler_descriptor, renderer, tile_mode);
           linear_sampler_descriptor.mag_filter = MinMagFilter::kLinear;
           linear_sampler_descriptor.min_filter = MinMagFilter::kLinear;
           TextureFillVertexShader::BindFrameInfo(
-              pass, host_buffer.EmplaceUniform(frame_info));
+              pass, data_host_buffer.EmplaceUniform(frame_info));
           TextureFillFragmentShader::BindFragInfo(
-              pass, host_buffer.EmplaceUniform(frag_info));
+              pass, data_host_buffer.EmplaceUniform(frag_info));
           TextureFillFragmentShader::BindTextureSampler(
               pass, input_texture,
               renderer.GetContext()->GetSamplerLibrary()->GetSampler(
@@ -393,30 +478,40 @@ fml::StatusOr<RenderTarget> MakeDownsampleSubpass(
     }
     ContentContext::SubpassCallback subpass_callback =
         [&](const ContentContext& renderer, RenderPass& pass) {
-          HostBuffer& host_buffer = renderer.GetTransientsBuffer();
+          HostBuffer& data_host_buffer = renderer.GetTransientsDataBuffer();
 
           pass.SetCommandLabel("Gaussian blur downsample");
           auto pipeline_options = OptionsFromPass(pass);
           pipeline_options.primitive_type = PrimitiveType::kTriangleStrip;
-#ifdef IMPELLER_ENABLE_OPENGLES
-          // The GLES backend conditionally supports decal tile mode, while
-          // decal is always supported for Vulkan and Metal.
-          if (renderer.GetDeviceCapabilities()
-                  .SupportsDecalSamplerAddressMode() ||
-              tile_mode != Entity::TileMode::kDecal) {
-            pass.SetPipeline(renderer.GetDownsamplePipeline(pipeline_options));
-          } else {
+          if (pass_args.uv_bounds.has_value()) {
             pass.SetPipeline(
-                renderer.GetDownsampleTextureGlesPipeline(pipeline_options));
-          }
+                renderer.GetDownsampleBoundedPipeline(pipeline_options));
+
+            TextureDownsampleBoundedFragmentShader::BoundInfo bound_info;
+            bound_info.quad_line_params =
+                PrecomputeQuadLineParameters(pass_args.uv_bounds.value());
+            TextureDownsampleBoundedFragmentShader::BindBoundInfo(
+                pass, data_host_buffer.EmplaceUniform(bound_info));
+          } else {
+#ifdef IMPELLER_ENABLE_OPENGLES
+            // The GLES backend conditionally supports decal tile mode, while
+            // decal is always supported for Vulkan and Metal.
+            if (renderer.GetDeviceCapabilities()
+                    .SupportsDecalSamplerAddressMode() ||
+                tile_mode != Entity::TileMode::kDecal) {
+              pass.SetPipeline(
+                  renderer.GetDownsamplePipeline(pipeline_options));
+            } else {
+              pass.SetPipeline(
+                  renderer.GetDownsampleTextureGlesPipeline(pipeline_options));
+            }
 #else
-          pass.SetPipeline(renderer.GetDownsamplePipeline(pipeline_options));
+            pass.SetPipeline(renderer.GetDownsamplePipeline(pipeline_options));
 #endif  // IMPELLER_ENABLE_OPENGLES
+          }
 
           TextureFillVertexShader::FrameInfo frame_info;
           frame_info.mvp = Matrix::MakeOrthographic(ISize(1, 1));
-          frame_info.texture_sampler_y_coord_scale =
-              input_texture->GetYCoordScale();
 
           TextureDownsampleFragmentShader::FragInfo frag_info;
           frag_info.edge = edge;
@@ -430,16 +525,16 @@ fml::StatusOr<RenderTarget> MakeDownsampleSubpass(
               VS::PerVertexData{Point(0, 1), uvs[2]},
               VS::PerVertexData{Point(1, 1), uvs[3]},
           };
-          pass.SetVertexBuffer(CreateVertexBuffer(vertices, host_buffer));
+          pass.SetVertexBuffer(CreateVertexBuffer(vertices, data_host_buffer));
 
           SamplerDescriptor linear_sampler_descriptor = sampler_descriptor;
           SetTileMode(&linear_sampler_descriptor, renderer, tile_mode);
           linear_sampler_descriptor.mag_filter = MinMagFilter::kLinear;
           linear_sampler_descriptor.min_filter = MinMagFilter::kLinear;
           TextureFillVertexShader::BindFrameInfo(
-              pass, host_buffer.EmplaceUniform(frame_info));
+              pass, data_host_buffer.EmplaceUniform(frame_info));
           TextureDownsampleFragmentShader::BindFragInfo(
-              pass, host_buffer.EmplaceUniform(frag_info));
+              pass, data_host_buffer.EmplaceUniform(frag_info));
           TextureDownsampleFragmentShader::BindTextureSampler(
               pass, input_texture,
               renderer.GetContext()->GetSamplerLibrary()->GetSampler(
@@ -459,7 +554,6 @@ fml::StatusOr<RenderTarget> MakeBlurSubpass(
     const std::shared_ptr<CommandBuffer>& command_buffer,
     const RenderTarget& input_pass,
     const SamplerDescriptor& sampler_descriptor,
-    Entity::TileMode tile_mode,
     const BlurParameters& blur_info,
     std::optional<RenderTarget> destination_target,
     const Quad& blur_uvs) {
@@ -478,15 +572,22 @@ fml::StatusOr<RenderTarget> MakeBlurSubpass(
   ContentContext::SubpassCallback subpass_callback =
       [&](const ContentContext& renderer, RenderPass& pass) {
         GaussianBlurVertexShader::FrameInfo frame_info;
-        frame_info.mvp = Matrix::MakeOrthographic(ISize(1, 1)),
-        frame_info.texture_sampler_y_coord_scale =
-            input_texture->GetYCoordScale();
+        frame_info.mvp = Matrix::MakeOrthographic(ISize(1, 1));
 
-        HostBuffer& host_buffer = renderer.GetTransientsBuffer();
+        HostBuffer& data_host_buffer = renderer.GetTransientsDataBuffer();
 
         ContentContextOptions options = OptionsFromPass(pass);
         options.primitive_type = PrimitiveType::kTriangleStrip;
         pass.SetPipeline(renderer.GetGaussianBlurPipeline(options));
+
+        KernelSamples kernel_info = GenerateBlurInfo(blur_info);
+        LerpHackResult lerped_kernel = LerpHackKernelSamples(kernel_info);
+
+        GaussianBlurFragmentShader::FragInfo frag_info;
+        frag_info.unpremultiply = blur_info.apply_unpremultiply;
+        frag_info.sample_count = lerped_kernel.sample_count;
+        GaussianBlurFragmentShader::BindFragInfo(
+            pass, data_host_buffer.EmplaceUniform(frag_info));
 
         std::array<VS::PerVertexData, 4> vertices = {
             VS::PerVertexData{blur_uvs[0], blur_uvs[0]},
@@ -494,7 +595,7 @@ fml::StatusOr<RenderTarget> MakeBlurSubpass(
             VS::PerVertexData{blur_uvs[2], blur_uvs[2]},
             VS::PerVertexData{blur_uvs[3], blur_uvs[3]},
         };
-        pass.SetVertexBuffer(CreateVertexBuffer(vertices, host_buffer));
+        pass.SetVertexBuffer(CreateVertexBuffer(vertices, data_host_buffer));
 
         SamplerDescriptor linear_sampler_descriptor = sampler_descriptor;
         linear_sampler_descriptor.mag_filter = MinMagFilter::kLinear;
@@ -504,10 +605,10 @@ fml::StatusOr<RenderTarget> MakeBlurSubpass(
             renderer.GetContext()->GetSamplerLibrary()->GetSampler(
                 linear_sampler_descriptor));
         GaussianBlurVertexShader::BindFrameInfo(
-            pass, host_buffer.EmplaceUniform(frame_info));
+            pass, data_host_buffer.EmplaceUniform(frame_info));
         GaussianBlurFragmentShader::BindKernelSamples(
-            pass, host_buffer.EmplaceUniform(
-                      LerpHackKernelSamples(GenerateBlurInfo(blur_info))));
+            pass,
+            data_host_buffer.EmplaceUniform(lerped_kernel.kernel_samples));
         return pass.Draw().ok();
       };
   if (destination_target.has_value()) {
@@ -632,14 +733,19 @@ GaussianBlurFilterContents::GaussianBlurFilterContents(
     Scalar sigma_x,
     Scalar sigma_y,
     Entity::TileMode tile_mode,
+    std::optional<Rect> bounds,
     BlurStyle mask_blur_style,
     const Geometry* mask_geometry)
     : sigma_(sigma_x, sigma_y),
       tile_mode_(tile_mode),
+      bounds_(bounds),
       mask_blur_style_(mask_blur_style),
       mask_geometry_(mask_geometry) {
   // This is supposed to be enforced at a higher level.
-  FML_DCHECK(mask_blur_style == BlurStyle::kNormal || mask_geometry);
+  FML_DCHECK(mask_blur_style == BlurStyle::kNormal ||
+             mask_blur_style == BlurStyle::kSolid ||
+             // mask_geometry is used for Inner and Outer modes only
+             mask_geometry);
 }
 
 // This value was extracted from Skia, see:
@@ -679,7 +785,8 @@ std::optional<Rect> GaussianBlurFilterContents::GetFilterSourceCoverage(
   Vector2 blur_radius = {CalculateBlurRadius(scaled_sigma.x),
                          CalculateBlurRadius(scaled_sigma.y)};
   Vector3 blur_radii =
-      effect_transform.Basis() * Vector3{blur_radius.x, blur_radius.y, 0.0};
+      (effect_transform.Basis() * Vector3{blur_radius.x, blur_radius.y, 0.0})
+          .Abs();
   return output_limit.Expand(Point(blur_radii.x, blur_radii.y));
 }
 
@@ -700,14 +807,6 @@ std::optional<Rect> GaussianBlurFilterContents::GetFilterCoverage(
       Point(blur_info.local_padding.x, blur_info.local_padding.y));
 }
 
-// A brief overview how this works:
-// 1) Snapshot the filter input.
-// 2) Perform downsample pass. This also inserts the gutter around the input
-//    snapshot since the blur can render outside the bounds of the snapshot.
-// 3) Perform 1D horizontal blur pass.
-// 4) Perform 1D vertical blur pass.
-// 5) Apply the blur style to the blur result. This may just mask the output or
-//    draw the original snapshot over the result.
 std::optional<Entity> GaussianBlurFilterContents::RenderFilter(
     const FilterInput::Vector& inputs,
     const ContentContext& renderer,
@@ -737,15 +836,19 @@ std::optional<Entity> GaussianBlurFilterContents::RenderFilter(
   std::optional<Rect> source_expanded_coverage_hint;
   if (expanded_coverage_hint.has_value()) {
     source_expanded_coverage_hint = expanded_coverage_hint->TransformBounds(
-        Matrix::MakeTranslation(blur_info.source_space_offset) *
-        Matrix::MakeScale(blur_info.source_space_scalar) *
-        entity.GetTransform().Invert());
+        snapshot_entity.GetTransform() * entity.GetTransform().Invert());
   }
 
   std::optional<Snapshot> input_snapshot = GetSnapshot(
       inputs[0], renderer, snapshot_entity, source_expanded_coverage_hint);
   if (!input_snapshot.has_value()) {
     return std::nullopt;
+  }
+
+  std::optional<Quad> source_bounds;
+  if (bounds_.has_value()) {
+    Matrix transform = snapshot_entity.GetTransform() * effect_transform;
+    source_bounds = bounds_->GetTransformedPoints(transform);
   }
 
   if (blur_info.scaled_sigma.x < kEhCloseEnough &&
@@ -775,7 +878,7 @@ std::optional<Entity> GaussianBlurFilterContents::RenderFilter(
 
   DownsamplePassArgs downsample_pass_args = CalculateDownsamplePassArgs(
       blur_info.scaled_sigma, blur_info.padding, input_snapshot.value(),
-      source_expanded_coverage_hint, inputs[0], snapshot_entity);
+      source_expanded_coverage_hint, source_bounds, inputs[0], snapshot_entity);
 
   fml::StatusOr<RenderTarget> pass1_out = MakeDownsampleSubpass(
       renderer, command_buffer_1, input_snapshot->texture,
@@ -798,7 +901,7 @@ std::optional<Entity> GaussianBlurFilterContents::RenderFilter(
 
   fml::StatusOr<RenderTarget> pass2_out = MakeBlurSubpass(
       renderer, command_buffer_2, /*input_pass=*/pass1_out.value(),
-      input_snapshot->sampler_descriptor, tile_mode_,
+      input_snapshot->sampler_descriptor,
       BlurParameters{
           .blur_uv_offset = Point(0.0, pass1_pixel_size.y),
           .blur_sigma = blur_info.scaled_sigma.y *
@@ -806,6 +909,7 @@ std::optional<Entity> GaussianBlurFilterContents::RenderFilter(
           .blur_radius = ScaleBlurRadius(
               blur_info.blur_radius.y, downsample_pass_args.effective_scalar.y),
           .step_size = 1,
+          .apply_unpremultiply = false,
       },
       /*destination_target=*/std::nullopt, blur_uvs);
 
@@ -827,7 +931,7 @@ std::optional<Entity> GaussianBlurFilterContents::RenderFilter(
 
   fml::StatusOr<RenderTarget> pass3_out = MakeBlurSubpass(
       renderer, command_buffer_3, /*input_pass=*/pass2_out.value(),
-      input_snapshot->sampler_descriptor, tile_mode_,
+      input_snapshot->sampler_descriptor,
       BlurParameters{
           .blur_uv_offset = Point(pass1_pixel_size.x, 0.0),
           .blur_sigma = blur_info.scaled_sigma.x *
@@ -835,6 +939,7 @@ std::optional<Entity> GaussianBlurFilterContents::RenderFilter(
           .blur_radius = ScaleBlurRadius(
               blur_info.blur_radius.x, downsample_pass_args.effective_scalar.x),
           .step_size = 1,
+          .apply_unpremultiply = bounds_.has_value(),
       },
       pass3_destination, blur_uvs);
 
@@ -870,7 +975,8 @@ std::optional<Entity> GaussianBlurFilterContents::RenderFilter(
                    downsample_pass_args.transform *  //
                    Matrix::MakeScale(1 / downsample_pass_args.effective_scalar),
                .sampler_descriptor = sampler_desc,
-               .opacity = input_snapshot->opacity},
+               .opacity = input_snapshot->opacity,
+               .needs_rasterization_for_runtime_effects = true},
       entity.GetBlendMode());
 
   return ApplyBlurStyle(mask_blur_style_, entity, inputs[0],
@@ -914,10 +1020,10 @@ KernelSamples GenerateBlurInfo(BlurParameters parameters) {
   result.sample_count =
       ((2 * parameters.blur_radius) / parameters.step_size) + 1;
 
-  // Chop off the last samples if the radius >= 3 where they account for < 1.56%
-  // of the result.
+  // Chop off the last samples if the radius >= 16 where they can account for
+  // < 1.56% of the result.
   int x_offset = 0;
-  if (parameters.blur_radius >= 3) {
+  if (parameters.blur_radius >= 16) {
     result.sample_count -= 2;
     x_offset = 1;
   }
@@ -956,33 +1062,36 @@ KernelSamples GenerateBlurInfo(BlurParameters parameters) {
 
 // This works by shrinking the kernel size by 2 and relying on lerp to read
 // between the samples.
-GaussianBlurPipeline::FragmentShader::KernelSamples LerpHackKernelSamples(
-    KernelSamples parameters) {
-  GaussianBlurPipeline::FragmentShader::KernelSamples result = {};
+LerpHackResult LerpHackKernelSamples(const KernelSamples& parameters) {
+  LerpHackResult result = {};
   result.sample_count = ((parameters.sample_count - 1) / 2) + 1;
   int32_t middle = result.sample_count / 2;
   int32_t j = 0;
   FML_DCHECK(result.sample_count <= kGaussianBlurMaxKernelSize);
-  static_assert(sizeof(result.sample_data) ==
+  static_assert(sizeof(result.kernel_samples.sample_data) ==
                 sizeof(std::array<Vector4, kGaussianBlurMaxKernelSize>));
 
   for (int i = 0; i < result.sample_count; i++) {
     if (i == middle) {
-      result.sample_data[i].x = parameters.samples[j].uv_offset.x;
-      result.sample_data[i].y = parameters.samples[j].uv_offset.y;
-      result.sample_data[i].z = parameters.samples[j].coefficient;
+      result.kernel_samples.sample_data[i].x =
+          parameters.samples[j].uv_offset.x;
+      result.kernel_samples.sample_data[i].y =
+          parameters.samples[j].uv_offset.y;
+      result.kernel_samples.sample_data[i].z =
+          parameters.samples[j].coefficient;
       j++;
     } else {
       KernelSample left = parameters.samples[j];
       KernelSample right = parameters.samples[j + 1];
 
-      result.sample_data[i].z = left.coefficient + right.coefficient;
+      result.kernel_samples.sample_data[i].z =
+          left.coefficient + right.coefficient;
 
       Point uv = (left.uv_offset * left.coefficient +
                   right.uv_offset * right.coefficient) /
                  (left.coefficient + right.coefficient);
-      result.sample_data[i].x = uv.x;
-      result.sample_data[i].y = uv.y;
+      result.kernel_samples.sample_data[i].x = uv.x;
+      result.kernel_samples.sample_data[i].y = uv.y;
       j += 2;
     }
   }

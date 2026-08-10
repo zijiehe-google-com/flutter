@@ -12,9 +12,10 @@
 namespace impeller {
 
 /// @brief An implementation of the [RenderTargetAllocator] that caches all
-///        allocated texture data for one frame.
+///        allocated texture data for at least one frame.
 ///
-///        Any textures unused after a frame are immediately discarded.
+///        Any textures unused after [keep_alive_frame_count] frames are
+///        discarded.
 class RenderTargetCache : public RenderTargetAllocator {
  public:
   explicit RenderTargetCache(std::shared_ptr<Allocator> allocator,
@@ -44,8 +45,8 @@ class RenderTargetCache : public RenderTargetAllocator {
       std::optional<RenderTarget::AttachmentConfig> stencil_attachment_config =
           RenderTarget::kDefaultStencilAttachmentConfig,
       const std::shared_ptr<Texture>& existing_color_texture = nullptr,
-      const std::shared_ptr<Texture>& existing_depth_stencil_texture =
-          nullptr) override;
+      const std::shared_ptr<Texture>& existing_depth_stencil_texture = nullptr,
+      std::optional<PixelFormat> target_pixel_format = std::nullopt) override;
 
   RenderTarget CreateOffscreenMSAA(
       const Context& context,
@@ -58,8 +59,8 @@ class RenderTargetCache : public RenderTargetAllocator {
           RenderTarget::kDefaultStencilAttachmentConfig,
       const std::shared_ptr<Texture>& existing_color_msaa_texture = nullptr,
       const std::shared_ptr<Texture>& existing_color_resolve_texture = nullptr,
-      const std::shared_ptr<Texture>& existing_depth_stencil_texture =
-          nullptr) override;
+      const std::shared_ptr<Texture>& existing_depth_stencil_texture = nullptr,
+      std::optional<PixelFormat> target_pixel_format = std::nullopt) override;
 
   // visible for testing.
   size_t CachedTextureCount() const;

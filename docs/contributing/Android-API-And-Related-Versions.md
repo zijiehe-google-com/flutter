@@ -88,14 +88,14 @@ dependencies {
 ```
 // OK
 dependencies {
-    // Testing backwards compatability of feature XYZ
+    // Testing backwards compatibility of feature XYZ
     classpath "com.android.tools.build:gradle:7.5.2"
 }
 ```
 
 ### gradle
 
-Gradle versions are the least likley to break across minor version updates.
+Gradle versions are the least likely to break across minor version updates.
 
 - In new code the "gradle" version should be the version set in flutter templates or newer.
 - In older code any gradle version that works with the other version constraints is ok.
@@ -109,7 +109,7 @@ distributionUrl=https\://services.gradle.org/distributions/gradle-8.12.1-bin.zip
 
 ### Kotlin
 
-Changing kotlin versions is most likley to have an issue with another dependency and not the code under test.
+Changing kotlin versions is most likely to have an issue with another dependency and not the code under test.
 
 - "kotlin" version should be the version set in flutter templates or newer.
 - If the version is intentionally different there should be a comment explaining why.
@@ -129,19 +129,19 @@ classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
 - jvmTarget should use JavaVersion.<SOMEVERSION>.toString() or there should be a comment explaining why.
 
 ```
-// Ok
+// Correct configuration
 compileOptions {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
 kotlinOptions {
-    jvmTarget = JavaVersion.VERSION_11.toString()
+    jvmTarget = JavaVersion.VERSION_17.toString()
 }
 ```
 
 ```
-// Not ok
+// Not ok, kotlinOptions uses a string.
 compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
@@ -153,7 +153,7 @@ kotlinOptions {
 ```
 
 ```
-// Not ok
+// Not ok, different versions of java
 compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11

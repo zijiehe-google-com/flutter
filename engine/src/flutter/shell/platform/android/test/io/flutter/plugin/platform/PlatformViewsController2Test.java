@@ -4,7 +4,6 @@
 
 package io.flutter.plugin.platform;
 
-import static io.flutter.embedding.engine.systemchannels.PlatformViewsChannel2.PlatformViewTouch;
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -12,12 +11,17 @@ import static org.mockito.Mockito.*;
 import android.app.Presentation;
 import android.content.Context;
 import android.content.res.AssetManager;
+import android.graphics.SurfaceTexture;
+import android.media.Image;
 import android.util.SparseArray;
+import android.view.AttachedSurfaceControl;
 import android.view.MotionEvent;
 import android.view.Surface;
+import android.view.SurfaceControl;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import androidx.annotation.NonNull;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import io.flutter.embedding.android.FlutterImageView;
@@ -31,8 +35,8 @@ import io.flutter.embedding.engine.mutatorsstack.FlutterMutatorView;
 import io.flutter.embedding.engine.renderer.FlutterRenderer;
 import io.flutter.embedding.engine.systemchannels.AccessibilityChannel;
 import io.flutter.embedding.engine.systemchannels.MouseCursorChannel;
-import io.flutter.embedding.engine.systemchannels.PlatformViewsChannel2;
-import io.flutter.embedding.engine.systemchannels.PlatformViewsChannel2.PlatformViewTouch;
+import io.flutter.embedding.engine.systemchannels.PlatformViewCreationRequest;
+import io.flutter.embedding.engine.systemchannels.PlatformViewTouch;
 import io.flutter.embedding.engine.systemchannels.ScribeChannel;
 import io.flutter.embedding.engine.systemchannels.SettingsChannel;
 import io.flutter.embedding.engine.systemchannels.TextInputChannel;
@@ -40,6 +44,7 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.StandardMessageCodec;
 import io.flutter.plugin.common.StandardMethodCodec;
 import io.flutter.plugin.localization.LocalizationPlugin;
+import io.flutter.view.TextureRegistry;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -114,9 +119,10 @@ public class PlatformViewsController2Test {
 
     // Create the platform view.
     int viewId = 0;
-    final PlatformViewsChannel2.PlatformViewCreationRequest request =
-        new PlatformViewsChannel2.PlatformViewCreationRequest(
-            viewId, CountingPlatformView.VIEW_TYPE_ID, 128, 128, View.LAYOUT_DIRECTION_LTR, null);
+
+    final PlatformViewCreationRequest request =
+        PlatformViewCreationRequest.createHCPPRequest(
+            viewId, CountingPlatformView.VIEW_TYPE_ID, View.LAYOUT_DIRECTION_LTR, null);
     PlatformView pView = PlatformViewsController2.createFlutterPlatformView(request);
     assertTrue(pView instanceof CountingPlatformView);
     CountingPlatformView cpv = (CountingPlatformView) pView;
@@ -148,9 +154,9 @@ public class PlatformViewsController2Test {
 
     // Create the platform view.
     int viewId = 0;
-    final PlatformViewsChannel2.PlatformViewCreationRequest request =
-        new PlatformViewsChannel2.PlatformViewCreationRequest(
-            viewId, CountingPlatformView.VIEW_TYPE_ID, 128, 128, View.LAYOUT_DIRECTION_LTR, null);
+    final PlatformViewCreationRequest request =
+        PlatformViewCreationRequest.createHCPPRequest(
+            viewId, CountingPlatformView.VIEW_TYPE_ID, View.LAYOUT_DIRECTION_LTR, null);
 
     PlatformView pView = PlatformViewsController2.createFlutterPlatformView(request);
     assertTrue(pView instanceof CountingPlatformView);
@@ -360,7 +366,7 @@ public class PlatformViewsController2Test {
 
     // Simulate create call from the framework.
     createPlatformView(jni, PlatformViewsController2, platformViewId, "testType");
-    assertEquals(ShadowFlutterJNI.getResponses().size(), 1);
+    assertEquals(1, ShadowFlutterJNI.getResponses().size());
 
     assertFalse(PlatformViewsController2.initializePlatformViewIfNeeded(platformViewId));
   }
@@ -386,7 +392,7 @@ public class PlatformViewsController2Test {
 
     // Simulate create call from the framework.
     createPlatformView(jni, PlatformViewsController2, platformViewId, "testType");
-    assertEquals(ShadowFlutterJNI.getResponses().size(), 1);
+    assertEquals(1, ShadowFlutterJNI.getResponses().size());
 
     assertFalse(PlatformViewsController2.initializePlatformViewIfNeeded(platformViewId));
   }
@@ -415,7 +421,7 @@ public class PlatformViewsController2Test {
 
     // Simulate create call from the framework.
     createPlatformView(jni, PlatformViewsController2, platformViewId, "testType");
-    assertEquals(ShadowFlutterJNI.getResponses().size(), 1);
+    assertEquals(1, ShadowFlutterJNI.getResponses().size());
 
     // Simulate set direction call from the framework.
     setLayoutDirection(jni, PlatformViewsController2, platformViewId, 1);
@@ -424,7 +430,7 @@ public class PlatformViewsController2Test {
     // The limit value of reply message will be equal to 2 if the layout direction is set
     // successfully, otherwise it will be much more than 2 due to the reply message contains
     // an error message wrapped with exception detail information.
-    assertEquals(ShadowFlutterJNI.getResponses().get(0).limit(), 2);
+    assertEquals(2, ShadowFlutterJNI.getResponses().get(0).limit());
   }
 
   @Test
@@ -500,6 +506,51 @@ public class PlatformViewsController2Test {
     // Simulate dispose call from the framework.
     disposePlatformView(jni, PlatformViewsController2, platformViewId);
     verify(platformView, times(1)).dispose();
+  }
+
+  // Class member variable
+  private SurfaceControl.Transaction mCapturedTx;
+
+  @Test
+  @Config(shadows = {ShadowFlutterJNI.class, ShadowPlatformTaskQueue.class})
+  public void showOverlaySurfaceDefersTransactionUntilEndFrame() {
+
+    PlatformViewsController2 controller =
+        new PlatformViewsController2() {
+          @Override
+          public SurfaceControl.Transaction createTransaction() {
+            // Call super to ensure the real transaction is added to the private
+            // 'pendingTransactions' list
+            SurfaceControl.Transaction realTx = super.createTransaction();
+            // Spy on it so we can verify calls like 'apply()'
+            mCapturedTx = spy(realTx);
+            return mCapturedTx;
+          }
+        };
+
+    PlatformViewRegistryImpl registry = new PlatformViewRegistryImpl();
+    controller.setRegistry(registry);
+
+    // Mocks
+    FlutterView mockFlutterView = mock(FlutterView.class);
+    AttachedSurfaceControl mockAttachedSurfaceControl = mock(AttachedSurfaceControl.class);
+
+    when(mockFlutterView.getRootSurfaceControl()).thenReturn(mockAttachedSurfaceControl);
+    when(mockAttachedSurfaceControl.buildReparentTransaction(any()))
+        .thenReturn(new SurfaceControl.Transaction());
+
+    controller.attachToView(mockFlutterView);
+    controller.createOverlaySurface();
+
+    controller.showOverlaySurface();
+    assertNotNull("Transaction should have been created", mCapturedTx);
+    verify(mCapturedTx, never()).apply();
+
+    controller.swapTransactions();
+    controller.onEndFrame();
+
+    verify(mockAttachedSurfaceControl, times(1))
+        .applyTransactionOnDraw(any(SurfaceControl.Transaction.class));
   }
 
   private static ByteBuffer encodeMethodCall(MethodCall call) {
@@ -594,11 +645,109 @@ public class PlatformViewsController2Test {
       FlutterJNI jni, PlatformViewsController2 PlatformViewsController2, FlutterView flutterView) {
     final DartExecutor executor = new DartExecutor(jni, mock(AssetManager.class));
     executor.onAttachedToJNI();
+    final TextureRegistry registry =
+        spy(
+            new TextureRegistry() {
+              public void TextureRegistry() {}
+
+              @NonNull
+              @Override
+              public SurfaceTextureEntry createSurfaceTexture() {
+                return registerSurfaceTexture(mock(SurfaceTexture.class));
+              }
+
+              @NonNull
+              @Override
+              public SurfaceTextureEntry registerSurfaceTexture(
+                  @NonNull SurfaceTexture surfaceTexture) {
+                return new SurfaceTextureEntry() {
+                  @NonNull
+                  @Override
+                  public SurfaceTexture surfaceTexture() {
+                    return mock(SurfaceTexture.class);
+                  }
+
+                  @Override
+                  public long id() {
+                    return 0;
+                  }
+
+                  @Override
+                  public void release() {}
+                };
+              }
+
+              @NonNull
+              @Override
+              public ImageTextureEntry createImageTexture() {
+                return new ImageTextureEntry() {
+                  @Override
+                  public long id() {
+                    return 0;
+                  }
+
+                  @Override
+                  public void release() {}
+
+                  @Override
+                  public void pushImage(Image image) {}
+                };
+              }
+
+              @NonNull
+              @Override
+              public SurfaceProducer createSurfaceProducer(SurfaceLifecycle lifecycle) {
+                return new SurfaceProducer() {
+                  @Override
+                  public void setCallback(SurfaceProducer.Callback cb) {}
+
+                  @Override
+                  public long id() {
+                    return 0;
+                  }
+
+                  @Override
+                  public void release() {}
+
+                  @Override
+                  public int getWidth() {
+                    return 0;
+                  }
+
+                  @Override
+                  public int getHeight() {
+                    return 0;
+                  }
+
+                  @Override
+                  public void setSize(int width, int height) {}
+
+                  @Override
+                  public Surface getSurface() {
+                    return null;
+                  }
+
+                  @Override
+                  public Surface getForcedNewSurface() {
+                    return null;
+                  }
+
+                  @Override
+                  public boolean handlesCropAndRotation() {
+                    return false;
+                  }
+
+                  public void scheduleFrame() {}
+                };
+              }
+            });
 
     final Context context = ApplicationProvider.getApplicationContext();
-    PlatformViewsController2.attach(context, executor);
 
     PlatformViewsController oldController = new PlatformViewsController();
+
+    PlatformViewsControllerDelegator platformViewsControllerDelegator =
+        new PlatformViewsControllerDelegator(oldController, PlatformViewsController2);
 
     final FlutterEngine engine = mock(FlutterEngine.class);
     when(engine.getRenderer()).thenReturn(new FlutterRenderer(jni));
@@ -608,12 +757,14 @@ public class PlatformViewsController2Test {
     when(engine.getScribeChannel()).thenReturn(mock(ScribeChannel.class));
     when(engine.getPlatformViewsController2()).thenReturn(PlatformViewsController2);
     when(engine.getPlatformViewsController()).thenReturn(oldController);
+    when(engine.getPlatformViewsControllerDelegator()).thenReturn(platformViewsControllerDelegator);
     when(engine.getLocalizationPlugin()).thenReturn(mock(LocalizationPlugin.class));
     when(engine.getAccessibilityChannel()).thenReturn(mock(AccessibilityChannel.class));
     when(engine.getDartExecutor()).thenReturn(executor);
 
     flutterView.attachToFlutterEngine(engine);
     PlatformViewsController2.attachToView(flutterView);
+    platformViewsControllerDelegator.attach(context, registry, executor);
   }
 
   /**

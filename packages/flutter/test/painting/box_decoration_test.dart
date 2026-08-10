@@ -2,23 +2,93 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:ui' show lerpDouble;
+
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+class _TestBoxBorder extends BoxBorder {
+  const _TestBoxBorder(this.width);
+
+  final double width;
+
+  @override
+  BorderSide get bottom => BorderSide(width: width);
+
+  @override
+  EdgeInsetsGeometry get dimensions => EdgeInsets.all(width);
+
+  @override
+  bool get isUniform => true;
+
+  @override
+  BorderSide get top => BorderSide(width: width);
+
+  @override
+  void paint(
+    Canvas canvas,
+    Rect rect, {
+    TextDirection? textDirection,
+    BoxShape shape = BoxShape.rectangle,
+    BorderRadius? borderRadius,
+  }) {}
+
+  @override
+  ShapeBorder? lerpFrom(ShapeBorder? a, double t) {
+    if (a is _TestBoxBorder) {
+      return _TestBoxBorder(lerpDouble(a.width, width, t)!);
+    }
+    return super.lerpFrom(a, t);
+  }
+
+  @override
+  ShapeBorder? lerpTo(ShapeBorder? b, double t) {
+    if (b is _TestBoxBorder) {
+      return _TestBoxBorder(lerpDouble(width, b.width, t)!);
+    }
+    return super.lerpTo(b, t);
+  }
+
+  @override
+  ShapeBorder scale(double t) => _TestBoxBorder(width * t);
+
+  @override
+  bool operator ==(Object other) => other is _TestBoxBorder && other.width == width;
+
+  @override
+  int get hashCode => width.hashCode;
+}
 
 void main() {
   test('BoxDecoration.lerp identical a,b', () {
     expect(BoxDecoration.lerp(null, null, 0), null);
-    const BoxDecoration decoration = BoxDecoration();
+    const decoration = BoxDecoration();
     expect(identical(BoxDecoration.lerp(decoration, decoration, 0.5), decoration), true);
   });
 
+  test('BoxDecoration.lerp supports custom BoxBorder subclasses', () {
+    final BoxDecoration? decoration = BoxDecoration.lerp(
+      const BoxDecoration(border: _TestBoxBorder(2.0)),
+      const BoxDecoration(border: _TestBoxBorder(6.0)),
+      0.25,
+    );
+
+    expect(decoration!.border, const _TestBoxBorder(3.0));
+  });
+
+  test('BoxDecoration.scale supports custom BoxBorder subclasses', () {
+    final BoxDecoration decoration = const BoxDecoration(border: _TestBoxBorder(8.0)).scale(0.25);
+
+    expect(decoration.border, const _TestBoxBorder(2.0));
+  });
+
   test('BoxDecoration with BorderRadiusDirectional', () {
-    const BoxDecoration decoration = BoxDecoration(
+    const decoration = BoxDecoration(
       color: Color(0xFF000000),
       borderRadius: BorderRadiusDirectional.only(topStart: Radius.circular(100.0)),
     );
     final BoxPainter painter = decoration.createBoxPainter();
-    const Size size = Size(1000.0, 1000.0);
+    const size = Size(1000.0, 1000.0);
     expect(
       (Canvas canvas) {
         painter.paint(
@@ -62,7 +132,7 @@ void main() {
   });
 
   test('BoxDecoration with LinearGradient using AlignmentDirectional', () {
-    const BoxDecoration decoration = BoxDecoration(
+    const decoration = BoxDecoration(
       color: Color(0xFF000000),
       gradient: LinearGradient(
         begin: AlignmentDirectional.centerStart,
@@ -71,7 +141,7 @@ void main() {
       ),
     );
     final BoxPainter painter = decoration.createBoxPainter();
-    const Size size = Size(1000.0, 1000.0);
+    const size = Size(1000.0, 1000.0);
     expect((Canvas canvas) {
       painter.paint(
         canvas,
@@ -83,8 +153,8 @@ void main() {
 
   test('BoxDecoration.getClipPath with borderRadius', () {
     const double radius = 10;
-    final BoxDecoration decoration = BoxDecoration(borderRadius: BorderRadius.circular(radius));
-    const Rect rect = Rect.fromLTWH(0.0, 0.0, 100.0, 20.0);
+    const decoration = BoxDecoration(borderRadius: BorderRadius.all(Radius.circular(radius)));
+    const rect = Rect.fromLTWH(0.0, 0.0, 100.0, 20.0);
     final Path clipPath = decoration.getClipPath(rect, TextDirection.ltr);
     final Matcher isLookLikeExpectedPath = isPathThat(
       includes: const <Offset>[Offset(30.0, 10.0), Offset(50.0, 10.0)],
@@ -94,8 +164,8 @@ void main() {
   });
 
   test('BoxDecoration.getClipPath with shape BoxShape.circle', () {
-    const BoxDecoration decoration = BoxDecoration(shape: BoxShape.circle);
-    const Rect rect = Rect.fromLTWH(0.0, 0.0, 100.0, 20.0);
+    const decoration = BoxDecoration(shape: BoxShape.circle);
+    const rect = Rect.fromLTWH(0.0, 0.0, 100.0, 20.0);
     final Path clipPath = decoration.getClipPath(rect, TextDirection.ltr);
     final Matcher isLookLikeExpectedPath = isPathThat(
       includes: const <Offset>[Offset(50.0, 0.0), Offset(40.0, 10.0)],
@@ -104,16 +174,20 @@ void main() {
     expect(clipPath, isLookLikeExpectedPath);
   });
 
+  test('BoxDecoration.hitTest with shape BoxShape.circle', () {
+    const decoration = BoxDecoration(shape: BoxShape.circle);
+    const size = Size(100.0, 20.0);
+
+    expect(decoration.hitTest(size, const Offset(50.0, 0.0)), isTrue);
+    expect(decoration.hitTest(size, const Offset(40.0, 10.0)), isTrue);
+    expect(decoration.hitTest(size, const Offset(40.0, 0.0)), isFalse);
+    expect(decoration.hitTest(size, const Offset(10.0, 10.0)), isFalse);
+  });
+
   test('BoxDecorations with different blendModes are not equal', () {
     // Regression test for https://github.com/flutter/flutter/issues/100754.
-    const BoxDecoration one = BoxDecoration(
-      color: Color(0x00000000),
-      backgroundBlendMode: BlendMode.color,
-    );
-    const BoxDecoration two = BoxDecoration(
-      color: Color(0x00000000),
-      backgroundBlendMode: BlendMode.difference,
-    );
+    const one = BoxDecoration(color: Color(0x00000000), backgroundBlendMode: BlendMode.color);
+    const two = BoxDecoration(color: Color(0x00000000), backgroundBlendMode: BlendMode.difference);
     expect(one == two, isFalse);
   });
 }

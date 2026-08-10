@@ -23,14 +23,14 @@ android {
     compileSdk = flutter.compileSdkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     sourceSets {
         applicationVariants.all { variant ->
-            main.assets.srcDirs += "${project.layout.buildDirectory}/intermediates/flutter/${variant.name}/deferred_assets"
-            main.jniLibs.srcDirs += "${project.layout.buildDirectory}/intermediates/flutter/${variant.name}/deferred_libs"
+            main.assets.srcDirs += project.layout.buildDirectory.dir("intermediates/flutter/${variant.name}/deferred_assets")
+            main.jniLibs.srcDirs += project.layout.buildDirectory.dir("intermediates/flutter/${variant.name}/deferred_libs")
         }
     }
 

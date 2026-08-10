@@ -39,6 +39,7 @@
 #include "flutter/shell/common/rasterizer.h"
 #include "flutter/shell/common/resource_cache_limit_calculator.h"
 #include "flutter/shell/common/shell_io_manager.h"
+#include "flutter/shell/geometry/geometry.h"
 #include "impeller/core/runtime_types.h"
 #include "impeller/renderer/context.h"
 #include "impeller/runtime_stage/runtime_stage.h"
@@ -279,6 +280,19 @@ class Shell final : public PlatformView::Delegate,
   ///
   fml::WeakPtr<ShellIOManager> GetIOManager();
 
+  //----------------------------------------------------------------------------
+  /// @brief      The IO thread can be used for background tasks, including
+  ///             tasks that perform graphics operations using the resource
+  ///             context. But the IO thread will lose the resource context
+  ///             during shutdown of the Shell. Tasks that require the IO
+  ///             manager or the resource context must not run after that
+  ///             phase of shutdown.
+  ///
+  /// @return     A BasicTaskRunner that posts tasks to the IO thread but stops
+  ///             running tasks after the Shell shuts down the IO manager.
+  ///
+  std::shared_ptr<fml::BasicTaskRunner> GetShutdownSafeIOTaskRunner();
+
   // Embedders should call this under low memory conditions to free up
   // internal caches used.
   //
@@ -337,6 +351,21 @@ class Shell final : public PlatformView::Delegate,
   ///             GPU or UI thread, 'kDeadlineExceeded' if there is a timeout.
   ///
   fml::Status WaitForFirstFrame(fml::TimeDelta timeout);
+
+  //----------------------------------------------------------------------------
+  /// @brief      Unblocks any call to WaitForFirstFrame(), causing it to
+  ///             immediately return 'kAborted' instead of blocking for the
+  ///             full timeout.
+  ///
+  ///             Embedders that pass a reference to the Shell to a thread they
+  ///             do not otherwise synchronize with the shell's destruction
+  ///             must call this, and wait for that thread to finish with the
+  ///             shell, before destroying it. This method only prevents
+  ///             WaitForFirstFrame() from blocking; it does not by itself
+  ///             make it safe to destroy the Shell out from under a caller
+  ///             that has not yet returned from WaitForFirstFrame().
+  ///
+  void CancelWaitForFirstFrame();
 
   //----------------------------------------------------------------------------
   /// @brief      Used by embedders to reload the system fonts in
@@ -479,6 +508,9 @@ class Shell final : public PlatformView::Delegate,
   fml::WeakPtr<PlatformView>
       weak_platform_view_;  // to be shared across threads
 
+  std::promise<fml::WeakPtr<ShellIOManager>> weak_io_manager_promise_;
+  std::shared_ptr<fml::BasicTaskRunner> shutdown_safe_io_task_runner_;
+
   std::unordered_map<std::string_view,  // method
                      std::pair<fml::RefPtr<fml::TaskRunner>,
                                ServiceProtocolHandler>  // task-runner/function
@@ -490,7 +522,19 @@ class Shell final : public PlatformView::Delegate,
   uint64_t next_pointer_flow_id_ = 0;
 
   bool first_frame_rasterized_ = false;
+
+  // True if a first frame has not yet been rendered.
+  //
+  // This is read and written lock-free on the raster thread, and read under
+  // waiting_for_first_frame_mutex_ in WaitForFirstFrame.
   std::atomic<bool> waiting_for_first_frame_ = true;
+
+  // True when WaitForFirstFrame has been cancelled because the shell is
+  // shutting down and waiting threads should be unblocked.
+  //
+  // Guarded by waiting_for_first_frame_mutex_.
+  bool wait_for_first_frame_cancelled_ = false;
+
   std::mutex waiting_for_first_frame_mutex_;
   std::condition_variable waiting_for_first_frame_condition_;
 
@@ -511,13 +555,13 @@ class Shell final : public PlatformView::Delegate,
   /// any of the threads.
   std::unique_ptr<DisplayManager> display_manager_;
 
-  // protects expected_frame_size_ which is set on platform thread and read on
-  // raster thread
+  // Protects expected_frame_constraints_ which is set on platform thread and
+  // read on raster thread.
   std::mutex resize_mutex_;
 
-  // used to discard wrong size layer tree produced during interactive
-  // resizing
-  std::unordered_map<int64_t, SkISize> expected_frame_sizes_;
+  // Used to discard wrong size layer tree produced during interactive
+  // resizing.
+  std::unordered_map<int64_t, BoxConstraints> expected_frame_constraints_;
 
   // Used to communicate the right frame bounds via service protocol.
   double device_pixel_ratio_ = 0.0;
@@ -607,6 +651,10 @@ class Shell final : public PlatformView::Delegate,
   void OnPlatformViewDispatchPointerDataPacket(
       std::unique_ptr<PointerDataPacket> packet) override;
 
+  HitTestResponse OnPlatformViewHitTest(
+      int64_t view_id,
+      const flutter::PointData offset) override;
+
   // |PlatformView::Delegate|
   void OnPlatformViewDispatchSemanticsAction(int64_t view_id,
                                              int32_t node_id,
@@ -634,6 +682,10 @@ class Shell final : public PlatformView::Delegate,
 
   // |PlatformView::Delegate|
   const Settings& OnPlatformViewGetSettings() const override;
+
+  // |PlatformView::Delegate|
+  std::shared_ptr<fml::BasicTaskRunner>
+  OnPlatformViewGetShutdownSafeIOTaskRunner() const override;
 
   // |PlatformView::Delegate|
   void LoadDartDeferredLibrary(
@@ -673,6 +725,12 @@ class Shell final : public PlatformView::Delegate,
       int64_t view_id,
       SemanticsNodeUpdates update,
       CustomAccessibilityActionUpdates actions) override;
+
+  // |Engine::Delegate|
+  void OnEngineSetApplicationLocale(std::string locale) override;
+
+  // |Engine::Delegate|
+  void OnEngineSetSemanticsTreeEnabled(bool enabled) override;
 
   // |Engine::Delegate|
   void OnEngineHandlePlatformMessage(
@@ -791,6 +849,11 @@ class Shell final : public PlatformView::Delegate,
       const ServiceProtocol::Handler::ServiceProtocolMap& params,
       rapidjson::Document* response);
 
+  // Service protocol handler
+  bool OnServiceProtocolGetPipelineUsage(
+      const ServiceProtocol::Handler::ServiceProtocolMap& params,
+      rapidjson::Document* response);
+
   // Send a system font change notification.
   void SendFontChangeNotification();
 
@@ -801,7 +864,7 @@ class Shell final : public PlatformView::Delegate,
   // directory.
   std::unique_ptr<DirectoryAssetBundle> RestoreOriginalAssetResolver();
 
-  SkISize ExpectedFrameSize(int64_t view_id);
+  BoxConstraints ExpectedFrameConstraints(int64_t view_id);
 
   // For accessing the Shell via the raster thread, necessary for various
   // rasterizer callbacks.

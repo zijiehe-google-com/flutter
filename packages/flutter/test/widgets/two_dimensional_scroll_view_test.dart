@@ -3,16 +3,17 @@
 // found in the LICENSE file.
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/src/gestures/monodrag.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'editable_text_tester.dart';
 import 'two_dimensional_utils.dart';
 
 Widget? _testChildBuilder(BuildContext context, ChildVicinity vicinity) {
-  return SizedBox(
-    height: 200,
-    width: 200,
+  return SizedBox.square(
+    dimension: 200.0,
     child: Center(child: Text('C${vicinity.xIndex}:R${vicinity.yIndex}')),
   );
 }
@@ -22,7 +23,7 @@ void main() {
     testWidgets(
       'asserts the axis directions do not conflict with one another',
       (WidgetTester tester) async {
-        final List<Object> exceptions = <Object>[];
+        final exceptions = <Object>[];
         final FlutterExceptionHandler? oldHandler = FlutterError.onError;
         FlutterError.onError = (FlutterErrorDetails details) {
           exceptions.add(details.exception);
@@ -31,7 +32,7 @@ void main() {
         late final TwoDimensionalChildBuilderDelegate delegate1;
         addTearDown(() => delegate1.dispose());
         await tester.pumpWidget(
-          MaterialApp(
+          TestWidgetsApp(
             home: SimpleBuilderTableView(
               delegate: delegate1 = TwoDimensionalChildBuilderDelegate(builder: (_, _) => null),
               horizontalDetails: const ScrollableDetails.vertical(),
@@ -44,7 +45,7 @@ void main() {
         late final TwoDimensionalChildBuilderDelegate delegate2;
         addTearDown(() => delegate2.dispose());
         await tester.pumpWidget(
-          MaterialApp(
+          TestWidgetsApp(
             home: SimpleBuilderTableView(
               delegate: delegate2 = TwoDimensionalChildBuilderDelegate(builder: (_, _) => null),
               verticalDetails: const ScrollableDetails.horizontal(),
@@ -57,7 +58,7 @@ void main() {
         late final TwoDimensionalChildBuilderDelegate delegate3;
         addTearDown(() => delegate3.dispose());
         await tester.pumpWidget(
-          MaterialApp(
+          TestWidgetsApp(
             home: SimpleBuilderTableView(
               delegate: delegate3 = TwoDimensionalChildBuilderDelegate(builder: (_, _) => null),
               verticalDetails: const ScrollableDetails.horizontal(),
@@ -68,7 +69,7 @@ void main() {
 
         FlutterError.onError = oldHandler;
         expect(exceptions.length, 3);
-        for (final Object exception in exceptions) {
+        for (final exception in exceptions) {
           expect(exception, isAssertionError);
           expect((exception as AssertionError).message, contains('are not Axis'));
         }
@@ -79,24 +80,23 @@ void main() {
     testWidgets(
       'ScrollableDetails.controller can set initial scroll positions, modify within bounds',
       (WidgetTester tester) async {
-        final ScrollController verticalController = ScrollController(initialScrollOffset: 100);
+        final verticalController = ScrollController(initialScrollOffset: 100);
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController(initialScrollOffset: 50);
+        final horizontalController = ScrollController(initialScrollOffset: 50);
         addTearDown(horizontalController.dispose);
         late final TwoDimensionalChildBuilderDelegate delegate;
         addTearDown(() => delegate.dispose());
 
         await tester.pumpWidget(
-          MaterialApp(
+          TestWidgetsApp(
             home: SimpleBuilderTableView(
               verticalDetails: ScrollableDetails.vertical(controller: verticalController),
               horizontalDetails: ScrollableDetails.horizontal(controller: horizontalController),
-              delegate:
-                  delegate = TwoDimensionalChildBuilderDelegate(
-                    builder: _testChildBuilder,
-                    maxXIndex: 99,
-                    maxYIndex: 99,
-                  ),
+              delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                builder: _testChildBuilder,
+                maxXIndex: 99,
+                maxYIndex: 99,
+              ),
             ),
           ),
         );
@@ -135,37 +135,34 @@ void main() {
           Axis mainAxis = Axis.vertical,
           bool addControllerConflict = false,
         }) {
-          final ScrollController verticalController = ScrollController();
+          final verticalController = ScrollController();
           addTearDown(verticalController.dispose);
-          final ScrollController horizontalController = ScrollController();
+          final horizontalController = ScrollController();
           addTearDown(horizontalController.dispose);
           late final TwoDimensionalChildBuilderDelegate delegate;
           addTearDown(() => delegate.dispose());
 
-          return MaterialApp(
+          return TestWidgetsApp(
             home: PrimaryScrollController(
               controller: controller,
               child: SimpleBuilderTableView(
                 mainAxis: mainAxis,
                 primary: explicitPrimary,
                 verticalDetails: ScrollableDetails.vertical(
-                  controller:
-                      addControllerConflict && mainAxis == Axis.vertical
-                          ? verticalController
-                          : null,
+                  controller: addControllerConflict && mainAxis == Axis.vertical
+                      ? verticalController
+                      : null,
                 ),
                 horizontalDetails: ScrollableDetails.horizontal(
-                  controller:
-                      addControllerConflict && mainAxis == Axis.horizontal
-                          ? horizontalController
-                          : null,
+                  controller: addControllerConflict && mainAxis == Axis.horizontal
+                      ? horizontalController
+                      : null,
                 ),
-                delegate:
-                    delegate = TwoDimensionalChildBuilderDelegate(
-                      builder: _testChildBuilder,
-                      maxXIndex: 99,
-                      maxYIndex: 99,
-                    ),
+                delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                  builder: _testChildBuilder,
+                  maxXIndex: 99,
+                  maxYIndex: 99,
+                ),
               ),
             ),
           );
@@ -282,7 +279,7 @@ void main() {
         }
 
         // Assertions
-        final List<Object> exceptions = <Object>[];
+        final exceptions = <Object>[];
         final FlutterExceptionHandler? oldHandler = FlutterError.onError;
         FlutterError.onError = (FlutterErrorDetails details) {
           exceptions.add(details.exception);
@@ -332,15 +329,14 @@ void main() {
         late final TwoDimensionalChildBuilderDelegate delegate1;
         addTearDown(() => delegate1.dispose());
         await tester.pumpWidget(
-          MaterialApp(
+          TestWidgetsApp(
             home: SimpleBuilderTableView(
-              delegate:
-                  delegate1 = TwoDimensionalChildBuilderDelegate(
-                    builder: (BuildContext context, ChildVicinity vicinity) {
-                      capturedContext = context;
-                      return Text(vicinity.toString());
-                    },
-                  ),
+              delegate: delegate1 = TwoDimensionalChildBuilderDelegate(
+                builder: (BuildContext context, ChildVicinity vicinity) {
+                  capturedContext = context;
+                  return Text(vicinity.toString());
+                },
+              ),
             ),
           ),
         );
@@ -355,7 +351,7 @@ void main() {
         late final TwoDimensionalChildBuilderDelegate delegate2;
         addTearDown(() => delegate2.dispose());
         await tester.pumpWidget(
-          MaterialApp(
+          TestWidgetsApp(
             home: SimpleBuilderTableView(
               verticalDetails: const ScrollableDetails.vertical(reverse: true),
               horizontalDetails: const ScrollableDetails.horizontal(reverse: true),
@@ -378,12 +374,12 @@ void main() {
     testWidgets(
       'TwoDimensionalScrollable with hitTestBehavior.translucent lets widgets underneath catch the hit',
       (WidgetTester tester) async {
-        bool tapped = false;
+        var tapped = false;
         final Key key = UniqueKey();
         late final TwoDimensionalChildBuilderDelegate delegate;
         addTearDown(() => delegate.dispose());
         await tester.pumpWidget(
-          MaterialApp(
+          TestWidgetsApp(
             home: Stack(
               children: <Widget>[
                 Positioned.fill(
@@ -395,12 +391,11 @@ void main() {
                 ),
                 SimpleBuilderTableView(
                   hitTestBehavior: HitTestBehavior.translucent,
-                  delegate:
-                      delegate = TwoDimensionalChildBuilderDelegate(
-                        builder: (BuildContext context, ChildVicinity vicinity) {
-                          return const SizedBox(width: 50, height: 50);
-                        },
-                      ),
+                  delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                    builder: (BuildContext context, ChildVicinity vicinity) {
+                      return const SizedBox(width: 50, height: 50);
+                    },
+                  ),
                 ),
               ],
             ),
@@ -415,10 +410,10 @@ void main() {
 
     testWidgets('Interrupt fling with tap stops scrolling', (WidgetTester tester) async {
       // Regression test for https://github.com/flutter/flutter/issues/133529
-      final List<String> log = <String>[];
-      final ScrollController verticalController = ScrollController();
+      final log = <String>[];
+      final verticalController = ScrollController();
       addTearDown(verticalController.dispose);
-      final ScrollController horizontalController = ScrollController();
+      final horizontalController = ScrollController();
       addTearDown(horizontalController.dispose);
       late final TwoDimensionalChildBuilderDelegate delegate;
       addTearDown(() => delegate.dispose());
@@ -430,19 +425,18 @@ void main() {
             verticalDetails: ScrollableDetails.vertical(controller: verticalController),
             horizontalDetails: ScrollableDetails.horizontal(controller: horizontalController),
             diagonalDragBehavior: DiagonalDragBehavior.free,
-            delegate:
-                delegate = TwoDimensionalChildBuilderDelegate(
-                  maxXIndex: 100,
-                  maxYIndex: 100,
-                  builder: (BuildContext context, ChildVicinity vicinity) {
-                    return GestureDetector(
-                      onTapUp: (TapUpDetails details) {
-                        log.add('Tapped: $vicinity');
-                      },
-                      child: Text('$vicinity'),
-                    );
+            delegate: delegate = TwoDimensionalChildBuilderDelegate(
+              maxXIndex: 100,
+              maxYIndex: 100,
+              builder: (BuildContext context, ChildVicinity vicinity) {
+                return GestureDetector(
+                  onTapUp: (TapUpDetails details) {
+                    log.add('Tapped: $vicinity');
                   },
-                ),
+                  child: Text('$vicinity'),
+                );
+              },
+            ),
           ),
         ),
       );
@@ -561,10 +555,10 @@ void main() {
 
     testWidgets('Fling, wait to stop and tap', (WidgetTester tester) async {
       // Regression test for https://github.com/flutter/flutter/issues/133529
-      final List<String> log = <String>[];
-      final ScrollController verticalController = ScrollController();
+      final log = <String>[];
+      final verticalController = ScrollController();
       addTearDown(verticalController.dispose);
-      final ScrollController horizontalController = ScrollController();
+      final horizontalController = ScrollController();
       addTearDown(horizontalController.dispose);
       late final TwoDimensionalChildBuilderDelegate delegate;
       addTearDown(() => delegate.dispose());
@@ -576,19 +570,18 @@ void main() {
             verticalDetails: ScrollableDetails.vertical(controller: verticalController),
             horizontalDetails: ScrollableDetails.horizontal(controller: horizontalController),
             diagonalDragBehavior: DiagonalDragBehavior.free,
-            delegate:
-                delegate = TwoDimensionalChildBuilderDelegate(
-                  maxXIndex: 100,
-                  maxYIndex: 100,
-                  builder: (BuildContext context, ChildVicinity vicinity) {
-                    return GestureDetector(
-                      onTapUp: (TapUpDetails details) {
-                        log.add('Tapped: $vicinity');
-                      },
-                      child: Text('$vicinity'),
-                    );
+            delegate: delegate = TwoDimensionalChildBuilderDelegate(
+              maxXIndex: 100,
+              maxYIndex: 100,
+              builder: (BuildContext context, ChildVicinity vicinity) {
+                return GestureDetector(
+                  onTapUp: (TapUpDetails details) {
+                    log.add('Tapped: $vicinity');
                   },
-                ),
+                  child: Text('$vicinity'),
+                );
+              },
+            ),
           ),
         ),
       );
@@ -650,9 +643,9 @@ void main() {
     group('Can drag horizontally when there is not enough vertical content', () {
       testWidgets('DiagonalDragBehavior.free', (WidgetTester tester) async {
         // Regression test for https://github.com/flutter/flutter/issues/144982
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         late final TwoDimensionalChildBuilderDelegate delegate;
         addTearDown(() => delegate.dispose());
@@ -664,12 +657,11 @@ void main() {
               verticalDetails: ScrollableDetails.vertical(controller: verticalController),
               horizontalDetails: ScrollableDetails.horizontal(controller: horizontalController),
               diagonalDragBehavior: DiagonalDragBehavior.free,
-              delegate:
-                  delegate = TwoDimensionalChildBuilderDelegate(
-                    maxXIndex: 20,
-                    maxYIndex: 1,
-                    builder: _testChildBuilder,
-                  ),
+              delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                maxXIndex: 20,
+                maxYIndex: 1,
+                builder: _testChildBuilder,
+              ),
             ),
           ),
         );
@@ -701,9 +693,9 @@ void main() {
 
       testWidgets('DiagonalDragBehavior.weightedEvent', (WidgetTester tester) async {
         // Regression test for https://github.com/flutter/flutter/issues/144982
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         late final TwoDimensionalChildBuilderDelegate delegate;
         addTearDown(() => delegate.dispose());
@@ -715,12 +707,11 @@ void main() {
               verticalDetails: ScrollableDetails.vertical(controller: verticalController),
               horizontalDetails: ScrollableDetails.horizontal(controller: horizontalController),
               diagonalDragBehavior: DiagonalDragBehavior.weightedEvent,
-              delegate:
-                  delegate = TwoDimensionalChildBuilderDelegate(
-                    maxXIndex: 20,
-                    maxYIndex: 1,
-                    builder: _testChildBuilder,
-                  ),
+              delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                maxXIndex: 20,
+                maxYIndex: 1,
+                builder: _testChildBuilder,
+              ),
             ),
           ),
         );
@@ -752,9 +743,9 @@ void main() {
 
       testWidgets('DiagonalDragBehavior.weightedContinuous', (WidgetTester tester) async {
         // Regression test for https://github.com/flutter/flutter/issues/144982
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         late final TwoDimensionalChildBuilderDelegate delegate;
         addTearDown(() => delegate.dispose());
@@ -766,12 +757,11 @@ void main() {
               verticalDetails: ScrollableDetails.vertical(controller: verticalController),
               horizontalDetails: ScrollableDetails.horizontal(controller: horizontalController),
               diagonalDragBehavior: DiagonalDragBehavior.weightedContinuous,
-              delegate:
-                  delegate = TwoDimensionalChildBuilderDelegate(
-                    maxXIndex: 20,
-                    maxYIndex: 1,
-                    builder: _testChildBuilder,
-                  ),
+              delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                maxXIndex: 20,
+                maxYIndex: 1,
+                builder: _testChildBuilder,
+              ),
             ),
           ),
         );
@@ -805,9 +795,9 @@ void main() {
     group('Can drag vertically when there is not enough horizontal content', () {
       testWidgets('DiagonalDragBehavior.free', (WidgetTester tester) async {
         // Regression test for https://github.com/flutter/flutter/issues/144982
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         late final TwoDimensionalChildBuilderDelegate delegate;
         addTearDown(() => delegate.dispose());
@@ -819,12 +809,11 @@ void main() {
               verticalDetails: ScrollableDetails.vertical(controller: verticalController),
               horizontalDetails: ScrollableDetails.horizontal(controller: horizontalController),
               diagonalDragBehavior: DiagonalDragBehavior.free,
-              delegate:
-                  delegate = TwoDimensionalChildBuilderDelegate(
-                    maxXIndex: 1,
-                    maxYIndex: 20,
-                    builder: _testChildBuilder,
-                  ),
+              delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                maxXIndex: 1,
+                maxYIndex: 20,
+                builder: _testChildBuilder,
+              ),
             ),
           ),
         );
@@ -856,9 +845,9 @@ void main() {
 
       testWidgets('DiagonalDragBehavior.weightedEvent', (WidgetTester tester) async {
         // Regression test for https://github.com/flutter/flutter/issues/144982
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         late final TwoDimensionalChildBuilderDelegate delegate;
         addTearDown(() => delegate.dispose());
@@ -870,12 +859,11 @@ void main() {
               verticalDetails: ScrollableDetails.vertical(controller: verticalController),
               horizontalDetails: ScrollableDetails.horizontal(controller: horizontalController),
               diagonalDragBehavior: DiagonalDragBehavior.weightedEvent,
-              delegate:
-                  delegate = TwoDimensionalChildBuilderDelegate(
-                    maxXIndex: 1,
-                    maxYIndex: 20,
-                    builder: _testChildBuilder,
-                  ),
+              delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                maxXIndex: 1,
+                maxYIndex: 20,
+                builder: _testChildBuilder,
+              ),
             ),
           ),
         );
@@ -907,9 +895,9 @@ void main() {
 
       testWidgets('DiagonalDragBehavior.weightedContinuous', (WidgetTester tester) async {
         // Regression test for https://github.com/flutter/flutter/issues/144982
-        final ScrollController verticalController = ScrollController();
+        final verticalController = ScrollController();
         addTearDown(verticalController.dispose);
-        final ScrollController horizontalController = ScrollController();
+        final horizontalController = ScrollController();
         addTearDown(horizontalController.dispose);
         late final TwoDimensionalChildBuilderDelegate delegate;
         addTearDown(() => delegate.dispose());
@@ -921,12 +909,11 @@ void main() {
               verticalDetails: ScrollableDetails.vertical(controller: verticalController),
               horizontalDetails: ScrollableDetails.horizontal(controller: horizontalController),
               diagonalDragBehavior: DiagonalDragBehavior.weightedContinuous,
-              delegate:
-                  delegate = TwoDimensionalChildBuilderDelegate(
-                    maxXIndex: 1,
-                    maxYIndex: 20,
-                    builder: _testChildBuilder,
-                  ),
+              delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                maxXIndex: 1,
+                maxYIndex: 20,
+                builder: _testChildBuilder,
+              ),
             ),
           ),
         );
@@ -961,26 +948,24 @@ void main() {
       WidgetTester tester,
     ) async {
       late final TwoDimensionalChildBuilderDelegate delegate;
-      final GlobalKey<ScaffoldState> scaffoldKey = GlobalKey<ScaffoldState>();
+      final overlayKey = GlobalKey<_DrawerLikeContainerState>();
       addTearDown(() => delegate.dispose());
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            key: scaffoldKey,
-            drawer: Container(),
-            body: Column(
+        TestWidgetsApp(
+          home: _DrawerLikeContainer(
+            key: overlayKey,
+            child: Column(
               children: <Widget>[
-                const TextField(),
+                const TestTextField(),
                 Expanded(
                   child: SimpleBuilderTableView(
                     keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                    delegate:
-                        delegate = TwoDimensionalChildBuilderDelegate(
-                          builder: _testChildBuilder,
-                          maxXIndex: 99,
-                          maxYIndex: 99,
-                        ),
+                    delegate: delegate = TwoDimensionalChildBuilderDelegate(
+                      builder: _testChildBuilder,
+                      maxXIndex: 99,
+                      maxYIndex: 99,
+                    ),
                   ),
                 ),
               ],
@@ -992,7 +977,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.testTextInput.isVisible, isFalse);
-      final Finder finder = find.byType(TextField).first;
+      final Finder finder = find.byType(TestTextField).first;
       await tester.tap(finder);
       expect(tester.testTextInput.isVisible, isTrue);
 
@@ -1000,10 +985,67 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.testTextInput.isVisible, isFalse);
-      scaffoldKey.currentState!.openDrawer();
+      overlayKey.currentState!.showOverlay();
       await tester.pumpAndSettle();
 
       expect(tester.testTextInput.isVisible, isFalse);
     });
+
+    testWidgets('cacheExtentStyle is passed to viewport', (WidgetTester tester) async {
+      late final TwoDimensionalChildBuilderDelegate delegate;
+      addTearDown(() => delegate.dispose());
+      await tester.pumpWidget(
+        TestWidgetsApp(
+          home: SimpleBuilderTableView(
+            cacheExtent: 1.0,
+            cacheExtentStyle: CacheExtentStyle.viewport,
+            delegate: delegate = TwoDimensionalChildBuilderDelegate(
+              builder: _testChildBuilder,
+              maxXIndex: 5,
+              maxYIndex: 5,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final SimpleBuilderTableViewport viewport = tester.widget(
+        find.byType(SimpleBuilderTableViewport),
+      );
+      expect(viewport.cacheExtent, 1.0);
+      expect(viewport.cacheExtentStyle, CacheExtentStyle.viewport);
+    });
   });
+}
+
+/// A simple container that can show an overlay on top of its child,
+/// used to simulate the effect of opening a drawer without depending
+/// on [Scaffold] from the Material library.
+class _DrawerLikeContainer extends StatefulWidget {
+  const _DrawerLikeContainer({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<_DrawerLikeContainer> createState() => _DrawerLikeContainerState();
+}
+
+class _DrawerLikeContainerState extends State<_DrawerLikeContainer> {
+  bool _showOverlay = false;
+
+  void showOverlay() {
+    setState(() {
+      _showOverlay = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: <Widget>[
+        widget.child,
+        if (_showOverlay) Positioned.fill(child: Container(color: const Color(0x88000000))),
+      ],
+    );
+  }
 }

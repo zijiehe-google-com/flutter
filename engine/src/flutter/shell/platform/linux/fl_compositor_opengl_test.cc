@@ -3,136 +3,179 @@
 // found in the LICENSE file.
 
 #include <thread>
+#include "flutter/shell/platform/linux/testing/linux_test.h"
 #include "gtest/gtest.h"
 
 #include "flutter/common/constants.h"
 #include "flutter/fml/logging.h"
-#include "flutter/fml/synchronization/waitable_event.h"
 #include "flutter/shell/platform/linux/fl_compositor_opengl.h"
 #include "flutter/shell/platform/linux/fl_engine_private.h"
 #include "flutter/shell/platform/linux/fl_framebuffer.h"
+#include "flutter/shell/platform/linux/fl_opengl_manager.h"
+#include "flutter/shell/platform/linux/public/flutter_linux/fl_dart_project.h"
 #include "flutter/shell/platform/linux/testing/mock_epoxy.h"
+#include "flutter/shell/platform/linux/testing/mock_gtk.h"
 #include "flutter/shell/platform/linux/testing/mock_renderable.h"
 
 #include <epoxy/egl.h>
 
-TEST(FlCompositorOpenGLTest, BackgroundColor) {
-  ::testing::NiceMock<flutter::testing::MockEpoxy> epoxy;
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
+class FlCompositorOpenGLTest : public flutter::testing::LinuxTest {
+ protected:
+  void SetUp() override {
+    opengl_manager = fl_opengl_manager_new();
+    renderable = fl_mock_renderable_new();
+    compositor = fl_compositor_opengl_new(opengl_manager, FALSE);
+    fl_engine_set_implicit_view(engine, FL_RENDERABLE(renderable));
+  }
 
-  ON_CALL(epoxy, epoxy_is_desktop_gl).WillByDefault(::testing::Return(true));
-  EXPECT_CALL(epoxy, epoxy_gl_version).WillRepeatedly(::testing::Return(30));
+  ~FlCompositorOpenGLTest() {
+    g_clear_object(&compositor);
+    g_clear_object(&renderable);
+    g_clear_object(&opengl_manager);
+  }
+
+  ::testing::NiceMock<flutter::testing::MockEpoxy> epoxy;
+  FlOpenGLManager* opengl_manager = nullptr;
+  FlMockRenderable* renderable = nullptr;
+  FlCompositorOpenGL* compositor = nullptr;
+};
+
+TEST_F(FlCompositorOpenGLTest, Render) {
+  // Present layer from a thread.
+  constexpr size_t width = 100;
+  constexpr size_t height = 100;
+  g_autoptr(FlFramebuffer) framebuffer =
+      fl_framebuffer_new(GL_RGB, width, height, FALSE);
+  FlutterBackingStore backing_store = {
+      .type = kFlutterBackingStoreTypeOpenGL,
+      .open_gl = {.framebuffer = {.user_data = framebuffer}}};
+  FlutterLayer layer = {.type = kFlutterLayerContentTypeBackingStore,
+                        .backing_store = &backing_store,
+                        .offset = {0, 0},
+                        .size = {width, height}};
+  const FlutterLayer* layers[1] = {&layer};
+  std::thread([&]() {
+    fl_compositor_opengl_composite_layers(compositor, layers, 1);
+  }).join();
+
+  size_t frame_width, frame_height;
+  fl_compositor_opengl_get_frame_size(compositor, &frame_width, &frame_height);
+  EXPECT_EQ(frame_width, width);
+  EXPECT_EQ(frame_height, height);
+
+  // Render presented layer.
+  int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+  g_autofree unsigned char* image_data =
+      static_cast<unsigned char*>(malloc(height * stride));
+  cairo_surface_t* surface = cairo_image_surface_create_for_data(
+      image_data, CAIRO_FORMAT_ARGB32, width, height, stride);
+  cairo_t* cr = cairo_create(surface);
+  fl_compositor_opengl_render(compositor, cr, nullptr);
+  cairo_surface_destroy(surface);
+  cairo_destroy(cr);
+}
+
+TEST_F(FlCompositorOpenGLTest, Resize) {
+  // Present a layer that is the old size.
+  constexpr size_t width1 = 90;
+  constexpr size_t height1 = 90;
+  g_autoptr(FlFramebuffer) framebuffer1 =
+      fl_framebuffer_new(GL_RGB, width1, height1, FALSE);
+  FlutterBackingStore backing_store1 = {
+      .type = kFlutterBackingStoreTypeOpenGL,
+      .open_gl = {.framebuffer = {.user_data = framebuffer1}}};
+  FlutterLayer layer1 = {.type = kFlutterLayerContentTypeBackingStore,
+                         .backing_store = &backing_store1,
+                         .offset = {0, 0},
+                         .size = {width1, height1}};
+  const FlutterLayer* layers1[1] = {&layer1};
+  fl_compositor_opengl_composite_layers(compositor, layers1, 1);
+
+  // Present layer in current size.
+  constexpr size_t width2 = 100;
+  constexpr size_t height2 = 100;
+  g_autoptr(FlFramebuffer) framebuffer2 =
+      fl_framebuffer_new(GL_RGB, width2, height2, FALSE);
+  FlutterBackingStore backing_store2 = {
+      .type = kFlutterBackingStoreTypeOpenGL,
+      .open_gl = {.framebuffer = {.user_data = framebuffer2}}};
+  FlutterLayer layer2 = {.type = kFlutterLayerContentTypeBackingStore,
+                         .backing_store = &backing_store2,
+                         .offset = {0, 0},
+                         .size = {width2, height2}};
+  const FlutterLayer* layers2[1] = {&layer2};
+  fl_compositor_opengl_composite_layers(compositor, layers2, 1);
+
+  // The stored frame is now the new size.
+  size_t frame_width, frame_height;
+  fl_compositor_opengl_get_frame_size(compositor, &frame_width, &frame_height);
+  EXPECT_EQ(frame_width, width2);
+  EXPECT_EQ(frame_height, height2);
+
+  // Render the presented layer.
+  int stride2 = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width2);
+  g_autofree unsigned char* image_data =
+      static_cast<unsigned char*>(malloc(height2 * stride2));
+  cairo_surface_t* surface = cairo_image_surface_create_for_data(
+      image_data, CAIRO_FORMAT_ARGB32, width2, height2, stride2);
+  cairo_t* cr = cairo_create(surface);
+  fl_compositor_opengl_render(compositor, cr, nullptr);
+  cairo_surface_destroy(surface);
+  cairo_destroy(cr);
+}
+
+TEST_F(FlCompositorOpenGLTest, RestoresGLState) {
+  constexpr size_t width = 100;
+  constexpr size_t height = 100;
+
+  // OpenGL 3.0
   ON_CALL(epoxy, glGetString(GL_VENDOR))
       .WillByDefault(
           ::testing::Return(reinterpret_cast<const GLubyte*>("Intel")));
-  EXPECT_CALL(epoxy, glClearColor(0.2, 0.3, 0.4, 0.5));
+  ON_CALL(epoxy, epoxy_is_desktop_gl).WillByDefault(::testing::Return(true));
+  ON_CALL(epoxy, epoxy_gl_version).WillByDefault(::testing::Return(30));
 
-  g_autoptr(FlMockRenderable) renderable = fl_mock_renderable_new();
-  g_autoptr(FlCompositorOpenGL) compositor = fl_compositor_opengl_new(engine);
-  fl_compositor_opengl_setup(compositor);
-  fl_engine_set_implicit_view(engine, FL_RENDERABLE(renderable));
-  fl_compositor_wait_for_frame(FL_COMPOSITOR(compositor), 1024, 1024);
-  FlutterBackingStoreConfig config = {
-      .struct_size = sizeof(FlutterBackingStoreConfig),
-      .size = {.width = 1024, .height = 1024}};
-  FlutterBackingStore backing_store;
-  fl_compositor_create_backing_store(FL_COMPOSITOR(compositor), &config,
-                                     &backing_store);
-
-  fml::AutoResetWaitableEvent latch;
-
-  // Simulate raster thread.
-  std::thread([&]() {
-    const FlutterLayer layer0 = {.struct_size = sizeof(FlutterLayer),
-                                 .type = kFlutterLayerContentTypeBackingStore,
-                                 .backing_store = &backing_store,
-                                 .size = {.width = 1024, .height = 1024}};
-    const FlutterLayer* layers[] = {&layer0};
-
-    fl_compositor_present_layers(FL_COMPOSITOR(compositor),
-                                 flutter::kFlutterImplicitViewId, layers, 1);
-    latch.Signal();
-  }).detach();
-
-  while (fl_mock_renderable_get_redraw_count(renderable) == 0) {
-    g_main_context_iteration(nullptr, true);
-  }
-
-  GdkRGBA background_color = {
-      .red = 0.2, .green = 0.3, .blue = 0.4, .alpha = 0.5};
-  fl_compositor_opengl_render(compositor, flutter::kFlutterImplicitViewId, 1024,
-                              1024, &background_color);
-
-  // Wait until the raster thread has finished before letting
-  // the engine go out of scope.
-  latch.Wait();
-}
-
-TEST(FlCompositorOpenGLTest, RestoresGLState) {
-  ::testing::NiceMock<flutter::testing::MockEpoxy> epoxy;
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
-
-  constexpr int kWidth = 100;
-  constexpr int kHeight = 100;
-
-  g_autoptr(FlMockRenderable) renderable = fl_mock_renderable_new();
-  g_autoptr(FlCompositorOpenGL) compositor = fl_compositor_opengl_new(engine);
   g_autoptr(FlFramebuffer) framebuffer =
-      fl_framebuffer_new(GL_RGB, kWidth, kHeight);
-
-  fl_engine_set_implicit_view(engine, FL_RENDERABLE(renderable));
-  fl_compositor_wait_for_frame(FL_COMPOSITOR(compositor), kWidth, kHeight);
-
-  FlutterBackingStore backing_store;
-  backing_store.type = kFlutterBackingStoreTypeOpenGL;
-  backing_store.open_gl.framebuffer.user_data = framebuffer;
-
-  FlutterLayer layer;
-  layer.type = kFlutterLayerContentTypeBackingStore;
-  layer.backing_store = &backing_store;
-  layer.offset = {0, 0};
-  layer.size = {kWidth, kHeight};
-
-  std::array<const FlutterLayer*, 1> layers = {&layer};
+      fl_framebuffer_new(GL_RGB, width, height, FALSE);
+  FlutterBackingStore backing_store = {
+      .type = kFlutterBackingStoreTypeOpenGL,
+      .open_gl = {.framebuffer = {.user_data = framebuffer}}};
+  FlutterLayer layer = {.type = kFlutterLayerContentTypeBackingStore,
+                        .backing_store = &backing_store,
+                        .offset = {0, 0},
+                        .size = {width, height}};
+  const FlutterLayer* layers[1] = {&layer};
 
   constexpr GLuint kFakeTextureName = 123;
   glBindTexture(GL_TEXTURE_2D, kFakeTextureName);
+  glDisable(GL_BLEND);
+  glEnable(GL_SCISSOR_TEST);
 
-  fml::AutoResetWaitableEvent latch;
-
-  // Simulate raster thread.
+  // Present layer and render.
   std::thread([&]() {
-    fl_compositor_present_layers(FL_COMPOSITOR(compositor),
-                                 flutter::kFlutterImplicitViewId, layers.data(),
-                                 layers.size());
-    latch.Signal();
-  }).detach();
-
-  while (fl_mock_renderable_get_redraw_count(renderable) == 0) {
-    g_main_context_iteration(nullptr, true);
-  }
-
-  GdkRGBA background_color = {
-      .red = 0.0, .green = 0.0, .blue = 0.0, .alpha = 1.0};
-  fl_compositor_opengl_render(compositor, flutter::kFlutterImplicitViewId,
-                              kWidth, kHeight, &background_color);
+    fl_compositor_opengl_composite_layers(compositor, layers, 1);
+  }).join();
+  int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+  g_autofree unsigned char* image_data =
+      static_cast<unsigned char*>(malloc(height * stride));
+  cairo_surface_t* surface = cairo_image_surface_create_for_data(
+      image_data, CAIRO_FORMAT_ARGB32, width, height, stride);
+  cairo_t* cr = cairo_create(surface);
+  fl_compositor_opengl_render(compositor, cr, nullptr);
+  cairo_surface_destroy(surface);
+  cairo_destroy(cr);
 
   GLuint texture_2d_binding;
   glGetIntegerv(GL_TEXTURE_BINDING_2D,
                 reinterpret_cast<GLint*>(&texture_2d_binding));
   EXPECT_EQ(texture_2d_binding, kFakeTextureName);
-
-  // Wait until the raster thread has finished before letting
-  // the engine go out of scope.
-  latch.Wait();
+  EXPECT_EQ(glIsEnabled(GL_BLEND), GL_FALSE);
+  EXPECT_EQ(glIsEnabled(GL_SCISSOR_TEST), GL_TRUE);
 }
 
-TEST(FlCompositorOpenGLTest, BlitFramebuffer) {
-  ::testing::NiceMock<flutter::testing::MockEpoxy> epoxy;
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
+TEST_F(FlCompositorOpenGLTest, BlitFramebuffer) {
+  constexpr size_t width = 100;
+  constexpr size_t height = 100;
 
   // OpenGL 3.0
   ON_CALL(epoxy, glGetString(GL_VENDOR))
@@ -143,48 +186,35 @@ TEST(FlCompositorOpenGLTest, BlitFramebuffer) {
 
   EXPECT_CALL(epoxy, glBlitFramebuffer);
 
-  g_autoptr(FlMockRenderable) renderable = fl_mock_renderable_new();
-  g_autoptr(FlCompositorOpenGL) compositor = fl_compositor_opengl_new(engine);
-  fl_compositor_opengl_setup(compositor);
-  fl_engine_set_implicit_view(engine, FL_RENDERABLE(renderable));
-  fl_compositor_wait_for_frame(FL_COMPOSITOR(compositor), 1024, 1024);
-  FlutterBackingStoreConfig config = {
-      .struct_size = sizeof(FlutterBackingStoreConfig),
-      .size = {.width = 1024, .height = 1024}};
-  FlutterBackingStore backing_store;
-  fl_compositor_create_backing_store(FL_COMPOSITOR(compositor), &config,
-                                     &backing_store);
+  g_autoptr(FlFramebuffer) framebuffer =
+      fl_framebuffer_new(GL_RGB, width, height, FALSE);
+  FlutterBackingStore backing_store = {
+      .type = kFlutterBackingStoreTypeOpenGL,
+      .open_gl = {.framebuffer = {.user_data = framebuffer}}};
+  FlutterLayer layer = {.type = kFlutterLayerContentTypeBackingStore,
+                        .backing_store = &backing_store,
+                        .offset = {0, 0},
+                        .size = {width, height}};
+  const FlutterLayer* layers[1] = {&layer};
 
-  fml::AutoResetWaitableEvent latch;
-
-  // Simulate raster thread.
+  // Present layer and render.
   std::thread([&]() {
-    const FlutterLayer layer0 = {.struct_size = sizeof(FlutterLayer),
-                                 .type = kFlutterLayerContentTypeBackingStore,
-                                 .backing_store = &backing_store,
-                                 .size = {.width = 1024, .height = 1024}};
-    const FlutterLayer* layers[] = {&layer0};
-    fl_compositor_present_layers(FL_COMPOSITOR(compositor),
-                                 flutter::kFlutterImplicitViewId, layers, 1);
-    latch.Signal();
-  }).detach();
-
-  while (fl_mock_renderable_get_redraw_count(renderable) == 0) {
-    g_main_context_iteration(nullptr, true);
-  }
-
-  GdkRGBA background_color = {
-      .red = 0.0, .green = 0.0, .blue = 0.0, .alpha = 1.0};
-  fl_compositor_opengl_render(compositor, flutter::kFlutterImplicitViewId, 1024,
-                              1024, &background_color);
-
-  latch.Wait();
+    fl_compositor_opengl_composite_layers(compositor, layers, 1);
+  }).join();
+  int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+  g_autofree unsigned char* image_data =
+      static_cast<unsigned char*>(malloc(height * stride));
+  cairo_surface_t* surface = cairo_image_surface_create_for_data(
+      image_data, CAIRO_FORMAT_ARGB32, width, height, stride);
+  cairo_t* cr = cairo_create(surface);
+  fl_compositor_opengl_render(compositor, cr, nullptr);
+  cairo_surface_destroy(surface);
+  cairo_destroy(cr);
 }
 
-TEST(FlCompositorOpenGLTest, BlitFramebufferExtension) {
-  ::testing::NiceMock<flutter::testing::MockEpoxy> epoxy;
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
+TEST_F(FlCompositorOpenGLTest, BlitFramebufferExtension) {
+  constexpr size_t width = 100;
+  constexpr size_t height = 100;
 
   // OpenGL 2.0 with GL_EXT_framebuffer_blit extension
   ON_CALL(epoxy, glGetString(GL_VENDOR))
@@ -200,48 +230,35 @@ TEST(FlCompositorOpenGLTest, BlitFramebufferExtension) {
 
   EXPECT_CALL(epoxy, glBlitFramebuffer);
 
-  g_autoptr(FlMockRenderable) renderable = fl_mock_renderable_new();
-  g_autoptr(FlCompositorOpenGL) compositor = fl_compositor_opengl_new(engine);
-  fl_compositor_opengl_setup(compositor);
-  fl_engine_set_implicit_view(engine, FL_RENDERABLE(renderable));
-  fl_compositor_wait_for_frame(FL_COMPOSITOR(compositor), 1024, 1024);
-  FlutterBackingStoreConfig config = {
-      .struct_size = sizeof(FlutterBackingStoreConfig),
-      .size = {.width = 1024, .height = 1024}};
-  FlutterBackingStore backing_store;
-  fl_compositor_create_backing_store(FL_COMPOSITOR(compositor), &config,
-                                     &backing_store);
+  g_autoptr(FlFramebuffer) framebuffer =
+      fl_framebuffer_new(GL_RGB, width, height, FALSE);
+  FlutterBackingStore backing_store = {
+      .type = kFlutterBackingStoreTypeOpenGL,
+      .open_gl = {.framebuffer = {.user_data = framebuffer}}};
+  FlutterLayer layer = {.type = kFlutterLayerContentTypeBackingStore,
+                        .backing_store = &backing_store,
+                        .offset = {0, 0},
+                        .size = {width, height}};
+  const FlutterLayer* layers[1] = {&layer};
 
-  fml::AutoResetWaitableEvent latch;
-
-  // Simulate raster thread.
+  // Present layer and render.
   std::thread([&]() {
-    const FlutterLayer layer0 = {.struct_size = sizeof(FlutterLayer),
-                                 .type = kFlutterLayerContentTypeBackingStore,
-                                 .backing_store = &backing_store,
-                                 .size = {.width = 1024, .height = 1024}};
-    const FlutterLayer* layers[] = {&layer0};
-    fl_compositor_present_layers(FL_COMPOSITOR(compositor),
-                                 flutter::kFlutterImplicitViewId, layers, 1);
-    latch.Signal();
-  }).detach();
-
-  while (fl_mock_renderable_get_redraw_count(renderable) == 0) {
-    g_main_context_iteration(nullptr, true);
-  }
-  GdkRGBA background_color = {
-      .red = 0.0, .green = 0.0, .blue = 0.0, .alpha = 1.0};
-  fl_compositor_opengl_render(compositor, flutter::kFlutterImplicitViewId, 1024,
-                              1024, &background_color);
-  // Wait until the raster thread has finished before letting
-  // the engine go out of scope.
-  latch.Wait();
+    fl_compositor_opengl_composite_layers(compositor, layers, 1);
+  }).join();
+  int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+  g_autofree unsigned char* image_data =
+      static_cast<unsigned char*>(malloc(height * stride));
+  cairo_surface_t* surface = cairo_image_surface_create_for_data(
+      image_data, CAIRO_FORMAT_ARGB32, width, height, stride);
+  cairo_t* cr = cairo_create(surface);
+  fl_compositor_opengl_render(compositor, cr, nullptr);
+  cairo_surface_destroy(surface);
+  cairo_destroy(cr);
 }
 
-TEST(FlCompositorOpenGLTest, NoBlitFramebuffer) {
-  ::testing::NiceMock<flutter::testing::MockEpoxy> epoxy;
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
+TEST_F(FlCompositorOpenGLTest, NoBlitFramebuffer) {
+  constexpr size_t width = 100;
+  constexpr size_t height = 100;
 
   // OpenGL 2.0
   ON_CALL(epoxy, glGetString(GL_VENDOR))
@@ -250,50 +267,35 @@ TEST(FlCompositorOpenGLTest, NoBlitFramebuffer) {
   ON_CALL(epoxy, epoxy_is_desktop_gl).WillByDefault(::testing::Return(true));
   EXPECT_CALL(epoxy, epoxy_gl_version).WillRepeatedly(::testing::Return(20));
 
-  g_autoptr(FlMockRenderable) renderable = fl_mock_renderable_new();
-  g_autoptr(FlCompositorOpenGL) compositor = fl_compositor_opengl_new(engine);
-  fl_compositor_opengl_setup(compositor);
-  fl_engine_set_implicit_view(engine, FL_RENDERABLE(renderable));
-  fl_compositor_wait_for_frame(FL_COMPOSITOR(compositor), 1024, 1024);
-  FlutterBackingStoreConfig config = {
-      .struct_size = sizeof(FlutterBackingStoreConfig),
-      .size = {.width = 1024, .height = 1024}};
-  FlutterBackingStore backing_store;
-  fl_compositor_create_backing_store(FL_COMPOSITOR(compositor), &config,
-                                     &backing_store);
+  g_autoptr(FlFramebuffer) framebuffer =
+      fl_framebuffer_new(GL_RGB, width, height, FALSE);
+  FlutterBackingStore backing_store = {
+      .type = kFlutterBackingStoreTypeOpenGL,
+      .open_gl = {.framebuffer = {.user_data = framebuffer}}};
+  FlutterLayer layer = {.type = kFlutterLayerContentTypeBackingStore,
+                        .backing_store = &backing_store,
+                        .offset = {0, 0},
+                        .size = {width, height}};
+  const FlutterLayer* layers[1] = {&layer};
 
-  fml::AutoResetWaitableEvent latch;
-
-  // Simulate raster thread.
+  // Present layer and render.
   std::thread([&]() {
-    const FlutterLayer layer0 = {.struct_size = sizeof(FlutterLayer),
-                                 .type = kFlutterLayerContentTypeBackingStore,
-                                 .backing_store = &backing_store,
-                                 .size = {.width = 1024, .height = 1024}};
-    const FlutterLayer* layers[] = {&layer0};
-    fl_compositor_present_layers(FL_COMPOSITOR(compositor),
-                                 flutter::kFlutterImplicitViewId, layers, 1);
-    latch.Signal();
-  }).detach();
-
-  while (fl_mock_renderable_get_redraw_count(renderable) == 0) {
-    g_main_context_iteration(nullptr, true);
-  }
-
-  GdkRGBA background_color = {
-      .red = 0.0, .green = 0.0, .blue = 0.0, .alpha = 1.0};
-  fl_compositor_opengl_render(compositor, flutter::kFlutterImplicitViewId, 1024,
-                              1024, &background_color);
-
-  // Wait until the raster thread has finished before letting
-  // the engine go out of scope.
-  latch.Wait();
+    fl_compositor_opengl_composite_layers(compositor, layers, 1);
+  }).join();
+  int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+  g_autofree unsigned char* image_data =
+      static_cast<unsigned char*>(malloc(height * stride));
+  cairo_surface_t* surface = cairo_image_surface_create_for_data(
+      image_data, CAIRO_FORMAT_ARGB32, width, height, stride);
+  cairo_t* cr = cairo_create(surface);
+  fl_compositor_opengl_render(compositor, cr, nullptr);
+  cairo_surface_destroy(surface);
+  cairo_destroy(cr);
 }
 
-TEST(FlCompositorOpenGLTest, BlitFramebufferNvidia) {
-  ::testing::NiceMock<flutter::testing::MockEpoxy> epoxy;
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
+TEST_F(FlCompositorOpenGLTest, BlitFramebufferNvidia) {
+  constexpr size_t width = 100;
+  constexpr size_t height = 100;
 
   // OpenGL 3.0, but on NVIDIA driver so temporarily disabled due to
   // https://github.com/flutter/flutter/issues/152099
@@ -303,104 +305,70 @@ TEST(FlCompositorOpenGLTest, BlitFramebufferNvidia) {
   ON_CALL(epoxy, epoxy_is_desktop_gl).WillByDefault(::testing::Return(true));
   EXPECT_CALL(epoxy, epoxy_gl_version).WillRepeatedly(::testing::Return(30));
 
-  g_autoptr(FlMockRenderable) renderable = fl_mock_renderable_new();
-  g_autoptr(FlCompositorOpenGL) compositor = fl_compositor_opengl_new(engine);
-  fl_compositor_opengl_setup(compositor);
-  fl_engine_set_implicit_view(engine, FL_RENDERABLE(renderable));
-  fl_compositor_wait_for_frame(FL_COMPOSITOR(compositor), 1024, 1024);
-  FlutterBackingStoreConfig config = {
-      .struct_size = sizeof(FlutterBackingStoreConfig),
-      .size = {.width = 1024, .height = 1024}};
-  FlutterBackingStore backing_store;
-  fl_compositor_create_backing_store(FL_COMPOSITOR(compositor), &config,
-                                     &backing_store);
+  g_autoptr(FlFramebuffer) framebuffer =
+      fl_framebuffer_new(GL_RGB, width, height, FALSE);
+  FlutterBackingStore backing_store = {
+      .type = kFlutterBackingStoreTypeOpenGL,
+      .open_gl = {.framebuffer = {.user_data = framebuffer}}};
+  FlutterLayer layer = {.type = kFlutterLayerContentTypeBackingStore,
+                        .backing_store = &backing_store,
+                        .offset = {0, 0},
+                        .size = {width, height}};
+  const FlutterLayer* layers[1] = {&layer};
 
-  fml::AutoResetWaitableEvent latch;
-
-  // Simulate raster thread.
+  // Present layer and render.
   std::thread([&]() {
-    const FlutterLayer layer0 = {.struct_size = sizeof(FlutterLayer),
-                                 .type = kFlutterLayerContentTypeBackingStore,
-                                 .backing_store = &backing_store,
-                                 .size = {.width = 1024, .height = 1024}};
-    const FlutterLayer* layers[] = {&layer0};
-    fl_compositor_present_layers(FL_COMPOSITOR(compositor),
-                                 flutter::kFlutterImplicitViewId, layers, 1);
-    latch.Signal();
-  }).detach();
-
-  while (fl_mock_renderable_get_redraw_count(renderable) == 0) {
-    g_main_context_iteration(nullptr, true);
-  }
-
-  GdkRGBA background_color = {
-      .red = 0.0, .green = 0.0, .blue = 0.0, .alpha = 1.0};
-  fl_compositor_opengl_render(compositor, flutter::kFlutterImplicitViewId, 1024,
-                              1024, &background_color);
-
-  // Wait until the raster thread has finished before letting
-  // the engine go out of scope.
-  latch.Wait();
+    fl_compositor_opengl_composite_layers(compositor, layers, 1);
+  }).join();
+  int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+  g_autofree unsigned char* image_data =
+      static_cast<unsigned char*>(malloc(height * stride));
+  cairo_surface_t* surface = cairo_image_surface_create_for_data(
+      image_data, CAIRO_FORMAT_ARGB32, width, height, stride);
+  cairo_t* cr = cairo_create(surface);
+  fl_compositor_opengl_render(compositor, cr, nullptr);
+  cairo_surface_destroy(surface);
+  cairo_destroy(cr);
 }
 
-TEST(FlCompositorOpenGLTest, MultiView) {
-  ::testing::NiceMock<flutter::testing::MockEpoxy> epoxy;
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
-
-  // OpenGL 3.0
-  ON_CALL(epoxy, glGetString(GL_VENDOR))
-      .WillByDefault(
-          ::testing::Return(reinterpret_cast<const GLubyte*>("Intel")));
-  ON_CALL(epoxy, epoxy_is_desktop_gl).WillByDefault(::testing::Return(true));
-  EXPECT_CALL(epoxy, epoxy_gl_version).WillRepeatedly(::testing::Return(30));
-
-  g_autoptr(FlMockRenderable) renderable = fl_mock_renderable_new();
-  g_autoptr(FlMockRenderable) secondary_renderable = fl_mock_renderable_new();
-
-  g_autoptr(FlCompositorOpenGL) compositor = fl_compositor_opengl_new(engine);
-  fl_compositor_opengl_setup(compositor);
-  fl_engine_set_implicit_view(engine, FL_RENDERABLE(renderable));
-  FlutterViewId view_id =
-      fl_engine_add_view(engine, FL_RENDERABLE(secondary_renderable), 1024, 768,
-                         1.0, nullptr, nullptr, nullptr);
-  fl_compositor_wait_for_frame(FL_COMPOSITOR(compositor), 1024, 1024);
-
-  EXPECT_EQ(fl_mock_renderable_get_redraw_count(renderable),
-            static_cast<size_t>(0));
-  EXPECT_EQ(fl_mock_renderable_get_redraw_count(secondary_renderable),
-            static_cast<size_t>(0));
-
-  FlutterBackingStoreConfig config = {
-      .struct_size = sizeof(FlutterBackingStoreConfig),
-      .size = {.width = 1024, .height = 1024}};
-  FlutterBackingStore backing_store;
-  fl_compositor_create_backing_store(FL_COMPOSITOR(compositor), &config,
-                                     &backing_store);
-
-  fml::AutoResetWaitableEvent latch;
-
-  // Simulate raster thread.
+TEST_F(FlCompositorOpenGLTest, RenderResizeCrash) {
+  // Present layer of size 100x100.
+  constexpr size_t width = 100;
+  constexpr size_t height = 100;
+  g_autoptr(FlFramebuffer) framebuffer =
+      fl_framebuffer_new(GL_RGB, width, height, FALSE);
+  FlutterBackingStore backing_store = {
+      .type = kFlutterBackingStoreTypeOpenGL,
+      .open_gl = {.framebuffer = {.user_data = framebuffer}}};
+  FlutterLayer layer = {.type = kFlutterLayerContentTypeBackingStore,
+                        .backing_store = &backing_store,
+                        .offset = {0, 0},
+                        .size = {width, height}};
+  const FlutterLayer* layers[1] = {&layer};
   std::thread([&]() {
-    const FlutterLayer layer0 = {.struct_size = sizeof(FlutterLayer),
-                                 .type = kFlutterLayerContentTypeBackingStore,
-                                 .backing_store = &backing_store,
-                                 .size = {.width = 1024, .height = 1024}};
-    const FlutterLayer* layers[] = {&layer0};
-    fl_compositor_present_layers(FL_COMPOSITOR(compositor), view_id, layers, 1);
-    latch.Signal();
-  }).detach();
+    fl_compositor_opengl_composite_layers(compositor, layers, 1);
+  }).join();
 
-  while (fl_mock_renderable_get_redraw_count(secondary_renderable) == 0) {
-    g_main_context_iteration(nullptr, true);
-  }
+  // Mock window size to be larger (200x200).
+  flutter::testing::MockGtk mock_gtk;
+  EXPECT_CALL(mock_gtk, gdk_window_get_width(::testing::_))
+      .WillRepeatedly(::testing::Return(200));
+  EXPECT_CALL(mock_gtk, gdk_window_get_height(::testing::_))
+      .WillRepeatedly(::testing::Return(200));
 
-  EXPECT_EQ(fl_mock_renderable_get_redraw_count(renderable),
-            static_cast<size_t>(0));
-  EXPECT_EQ(fl_mock_renderable_get_redraw_count(secondary_renderable),
-            static_cast<size_t>(1));
+  // Render into the larger window.
+  // This renders the 100x100 frame into the 200x200 window without waiting.
+  // If bug is present, it will try to read 200x200 from 100x100 buffer.
+  int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, 200);
+  g_autofree unsigned char* image_data =
+      static_cast<unsigned char*>(g_malloc(200 * stride));
+  cairo_surface_t* surface = cairo_image_surface_create_for_data(
+      image_data, CAIRO_FORMAT_ARGB32, 200, 200, stride);
+  cairo_t* cr = cairo_create(surface);
 
-  // Wait until the raster thread has finished before letting
-  // the engine go out of scope.
-  latch.Wait();
+  // We expect this to not crash.
+  fl_compositor_opengl_render(compositor, cr, nullptr);
+
+  cairo_surface_destroy(surface);
+  cairo_destroy(cr);
 }

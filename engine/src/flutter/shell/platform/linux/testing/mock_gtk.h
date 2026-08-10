@@ -7,6 +7,7 @@
 
 #include "gmock/gmock.h"
 
+#include <atk/atk.h>
 #include <gtk/gtk.h>
 
 namespace flutter {
@@ -22,6 +23,8 @@ class MockGtk {
               gdk_keymap_lookup_key,
               (GdkKeymap * keymap, const GdkKeymapKey* key));
   MOCK_METHOD(GdkWindowState, gdk_window_get_state, (GdkWindow * window));
+  MOCK_METHOD(int, gdk_window_get_width, (GdkWindow * window));
+  MOCK_METHOD(int, gdk_window_get_height, (GdkWindow * window));
   MOCK_METHOD(void, gtk_window_new, (GtkWindow * window, GtkWindowType type));
   MOCK_METHOD(void,
               gtk_window_set_default_size,
@@ -74,6 +77,14 @@ class MockGtk {
       void,
       gtk_im_context_set_surrounding,
       (GtkIMContext * context, const gchar* text, gint len, gint cursor_index));
+  MOCK_METHOD(void,
+              atk_object_notify_state_change,
+              (AtkObject * accessible, AtkState state, gboolean value));
+  MOCK_METHOD(void,
+              g_object_set,
+              (GObject * object, const gchar* property_name, gint value));
+
+  GThread* thread;
 };
 
 }  // namespace testing

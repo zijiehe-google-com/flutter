@@ -1,3 +1,7 @@
+// Copyright 2013 The Flutter Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 package io.flutter.embedding.engine.systemchannels;
 
 import static io.flutter.Build.API_LEVELS;
@@ -255,11 +259,7 @@ public class TextInputChannel {
 
   public void updateEditingStateWithTag(
       int inputClientId, @NonNull HashMap<String, TextEditState> editStates) {
-    Log.v(
-        TAG,
-        "Sending message to update editing state for "
-            + String.valueOf(editStates.size())
-            + " field(s).");
+    Log.v(TAG, "Sending message to update editing state for " + editStates.size() + " field(s).");
 
     final HashMap<String, HashMap<Object, Object>> json = new HashMap<>();
     for (Map.Entry<String, TextEditState> element : editStates.entrySet()) {
@@ -379,10 +379,16 @@ public class TextInputChannel {
   }
 
   public interface TextInputMethodHandler {
-    // TODO(mattcarroll): javadoc
+    /**
+     * Requests that the software keyboard (IME) be displayed on screen for the active text input
+     * client.
+     */
     void show();
 
-    // TODO(mattcarroll): javadoc
+    /**
+     * Requests that the software keyboard (IME) be hidden from screen, dismissing the current text
+     * input view.
+     */
     void hide();
 
     /**
@@ -405,7 +411,15 @@ public class TextInputChannel {
      */
     void finishAutofillContext(boolean shouldSave);
 
-    // TODO(mattcarroll): javadoc
+    /**
+     * Sets the active text input client identifier along with its input text configurations (e.g.,
+     * text capitalization rules, obscure text flags, and input actions such as done, go, or next).
+     *
+     * @param textInputClientId The unique ID of the text input client sent by the Dart framework
+     *     via {@code TextInput.setClient}.
+     * @param configuration The {@link Configuration} text editing configuration containing layout
+     *     and behavior options.
+     */
     void setClient(int textInputClientId, @NonNull Configuration configuration);
 
     /**
@@ -430,10 +444,16 @@ public class TextInputChannel {
      */
     void setEditableSizeAndTransform(double width, double height, @NonNull double[] transform);
 
-    // TODO(mattcarroll): javadoc
+    /**
+     * Sets the current text selection, composing ranges, and raw string contents for the active
+     * text input client.
+     *
+     * @param editingState The text state model containing the text, selections, and composing
+     *     offsets.
+     */
     void setEditingState(@NonNull TextEditState editingState);
 
-    // TODO(mattcarroll): javadoc
+    /** Clears the active text input client and tears down the text editing connection. */
     void clearClient();
 
     /**
@@ -509,7 +529,6 @@ public class TextInputChannel {
     private static Integer inputActionFromTextInputAction(@NonNull String inputAction) {
       switch (inputAction) {
         case "TextInputAction.newline":
-          return EditorInfo.IME_ACTION_NONE;
         case "TextInputAction.none":
           return EditorInfo.IME_ACTION_NONE;
         case "TextInputAction.unspecified":
@@ -588,6 +607,8 @@ public class TextInputChannel {
             return View.AUTOFILL_HINT_CREDIT_CARD_SECURITY_CODE;
           case "email":
             return View.AUTOFILL_HINT_EMAIL_ADDRESS;
+          case "emailOTPCode":
+            return "emailOTPCode";
           case "familyName":
             return "personFamilyName";
           case "fullStreetAddress":
@@ -697,7 +718,7 @@ public class TextInputChannel {
    * A text input type.
    *
    * <p>If the {@link #type} is {@link TextInputType#NUMBER}, this {@code InputType} also reports
-   * whether that number {@link #isSigned} and {@link #isDecimal}.
+   * whether that number {@link #isSigned}, {@link #isDecimal}, and {@link #isPassword}.
    */
   public static class InputType {
     @NonNull
@@ -706,17 +727,29 @@ public class TextInputChannel {
       return new InputType(
           TextInputType.fromValue(json.getString("name")),
           json.optBoolean("signed", false),
-          json.optBoolean("decimal", false));
+          json.optBoolean("decimal", false),
+          json.optBoolean("password", false));
     }
 
     @NonNull public final TextInputType type;
     public final boolean isSigned;
     public final boolean isDecimal;
+    public final boolean isPassword;
 
+    /**
+     * Convenience overload equivalent to {@code new InputType(type, isSigned, isDecimal, false)}.
+     */
     public InputType(@NonNull TextInputType type, boolean isSigned, boolean isDecimal) {
+      this(type, isSigned, isDecimal, false);
+    }
+
+    /** Constructs an {@code InputType} for {@code type} with the given NUMBER-variation flags. */
+    public InputType(
+        @NonNull TextInputType type, boolean isSigned, boolean isDecimal, boolean isPassword) {
       this.type = type;
       this.isSigned = isSigned;
       this.isDecimal = isDecimal;
+      this.isPassword = isPassword;
     }
   }
 
@@ -804,36 +837,25 @@ public class TextInputChannel {
       if ((selectionStart != -1 || selectionEnd != -1)
           && (selectionStart < 0 || selectionEnd < 0)) {
         throw new IndexOutOfBoundsException(
-            "invalid selection: ("
-                + String.valueOf(selectionStart)
-                + ", "
-                + String.valueOf(selectionEnd)
-                + ")");
+            "invalid selection: (" + selectionStart + ", " + selectionEnd + ")");
       }
 
       if ((composingStart != -1 || composingEnd != -1)
           && (composingStart < 0 || composingStart > composingEnd)) {
         throw new IndexOutOfBoundsException(
-            "invalid composing range: ("
-                + String.valueOf(composingStart)
-                + ", "
-                + String.valueOf(composingEnd)
-                + ")");
+            "invalid composing range: (" + composingStart + ", " + composingEnd + ")");
       }
 
       if (composingEnd > text.length()) {
-        throw new IndexOutOfBoundsException(
-            "invalid composing start: " + String.valueOf(composingStart));
+        throw new IndexOutOfBoundsException("invalid composing start: " + composingStart);
       }
 
       if (selectionStart > text.length()) {
-        throw new IndexOutOfBoundsException(
-            "invalid selection start: " + String.valueOf(selectionStart));
+        throw new IndexOutOfBoundsException("invalid selection start: " + selectionStart);
       }
 
       if (selectionEnd > text.length()) {
-        throw new IndexOutOfBoundsException(
-            "invalid selection end: " + String.valueOf(selectionEnd));
+        throw new IndexOutOfBoundsException("invalid selection end: " + selectionEnd);
       }
 
       this.text = text;

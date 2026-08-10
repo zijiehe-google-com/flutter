@@ -8,6 +8,7 @@
 
 #include <EGL/egl.h>
 
+#include "flutter/fml/task_runner_util.h"
 #include "flutter/shell/gpu/gpu_surface_gl_skia.h"
 #include "impeller/entity/gles/entity_shaders_gles.h"
 
@@ -43,7 +44,7 @@ ShellTestPlatformViewGL::ShellTestPlatformViewGL(
     std::shared_ptr<ShellTestExternalViewEmbedder>
         shell_test_external_view_embedder)
     : ShellTestPlatformView(delegate, task_runners),
-      gl_surface_(SkISize::Make(800, 600)),
+      gl_surface_(DlISize(800, 600)),
       create_vsync_waiter_(std::move(create_vsync_waiter)),
       vsync_clock_(std::move(vsync_clock)),
       shell_test_external_view_embedder_(
@@ -61,7 +62,9 @@ ShellTestPlatformViewGL::ShellTestPlatformViewGL(
       return;
     }
     impeller_context_ = impeller::ContextGLES::Create(
-        impeller::Flags{}, std::move(gl), ShaderLibraryMappings(), true);
+        impeller::Flags{}, std::move(gl), ShaderLibraryMappings(), true,
+        std::make_shared<fml::WrapperBasicTaskRunner>(
+            task_runners.GetIOTaskRunner()));
   }
 }
 

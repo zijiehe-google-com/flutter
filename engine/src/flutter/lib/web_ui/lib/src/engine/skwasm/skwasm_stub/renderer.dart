@@ -3,21 +3,25 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:js_interop';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:ui/src/engine.dart';
 import 'package:ui/ui.dart' as ui;
-import 'package:ui/ui_web/src/ui_web.dart' as ui_web;
 
-class SkwasmRenderer implements Renderer {
+class SkwasmRenderer extends Renderer {
+  @override
   bool get isMultiThreaded => false;
 
   @override
-  ui.Path combinePaths(ui.PathOperation op, ui.Path path1, ui.Path path2) {
-    throw UnimplementedError('Skwasm not implemented on this platform.');
-  }
+  bool get supportsResizingAnimatedImages =>
+      throw UnimplementedError('Skwasm not implemented on this platform.');
+
+  bool get isWimp => false;
+
+  @override
+  BackendPathConstructors get pathConstructors =>
+      throw UnimplementedError('Skwasm not implemented on this platform.');
 
   @override
   ui.ImageFilter composeImageFilters({
@@ -28,15 +32,11 @@ class SkwasmRenderer implements Renderer {
   }
 
   @override
-  ui.Path copyPath(ui.Path src) {
-    throw UnimplementedError('Skwasm not implemented on this platform.');
-  }
-
-  @override
   ui.ImageFilter createBlurImageFilter({
     double sigmaX = 0.0,
     double sigmaY = 0.0,
     ui.TileMode? tileMode,
+    ui.Rect? bounds,
   }) {
     throw UnimplementedError('Skwasm not implemented on this platform.');
   }
@@ -112,6 +112,11 @@ class SkwasmRenderer implements Renderer {
   }
 
   @override
+  WebParagraphPainter createWebParagraphPainter(WebParagraph paragraph) {
+    throw UnimplementedError('Skwasm not implemented on this platform.');
+  }
+
+  @override
   ui.ParagraphStyle createParagraphStyle({
     ui.TextAlign? textAlign,
     ui.TextDirection? textDirection,
@@ -126,11 +131,6 @@ class SkwasmRenderer implements Renderer {
     String? ellipsis,
     ui.Locale? locale,
   }) {
-    throw UnimplementedError('Skwasm not implemented on this platform.');
-  }
-
-  @override
-  ui.Path createPath() {
     throw UnimplementedError('Skwasm not implemented on this platform.');
   }
 
@@ -234,16 +234,12 @@ class SkwasmRenderer implements Renderer {
   }
 
   @override
-  void decodeImageFromPixels(
-    Uint8List pixels,
-    int width,
-    int height,
-    ui.PixelFormat format,
-    ui.ImageDecoderCallback callback, {
+  FutureOr<BackendImage> decodeBackendImageFromPixels(
+    Uint8List pixels, {
+    required int width,
+    required int height,
+    required ui.PixelFormat format,
     int? rowBytes,
-    int? targetWidth,
-    int? targetHeight,
-    bool allowUpscaling = true,
   }) {
     throw UnimplementedError('Skwasm not implemented on this platform.');
   }
@@ -253,25 +249,12 @@ class SkwasmRenderer implements Renderer {
       throw UnimplementedError('Skwasm not implemented on this platform.');
 
   @override
-  FutureOr<void> initialize() {
+  BackendAnimatedImage createAnimatedImage(Uint8List bytes, {int? targetWidth, int? targetHeight}) {
     throw UnimplementedError('Skwasm not implemented on this platform.');
   }
 
   @override
-  Future<ui.Codec> instantiateImageCodec(
-    Uint8List list, {
-    int? targetWidth,
-    int? targetHeight,
-    bool allowUpscaling = true,
-  }) {
-    throw UnimplementedError('Skwasm not implemented on this platform.');
-  }
-
-  @override
-  Future<ui.Codec> instantiateImageCodecFromUrl(
-    Uri uri, {
-    ui_web.ImageCodecChunkCallback? chunkCallback,
-  }) {
+  BackendImage createImageFromImageSource(ImageSource source) {
     throw UnimplementedError('Skwasm not implemented on this platform.');
   }
 
@@ -284,19 +267,12 @@ class SkwasmRenderer implements Renderer {
   String get rendererTag => throw UnimplementedError('Skwasm not implemented on this platform.');
 
   @override
-  void clearFragmentProgramCache() => _programs.clear();
-
-  static final Map<String, Future<ui.FragmentProgram>> _programs =
-      <String, Future<ui.FragmentProgram>>{};
+  void clearFragmentProgramCache() =>
+      throw UnimplementedError('Skwasm not implemented on this platform.');
 
   @override
   Future<ui.FragmentProgram> createFragmentProgram(String assetKey) {
-    if (_programs.containsKey(assetKey)) {
-      return _programs[assetKey]!;
-    }
-    return _programs[assetKey] = ui_web.assetManager.load(assetKey).then((ByteData data) {
-      return CkFragmentProgram.fromBytes(assetKey, data.buffer.asUint8List());
-    });
+    throw UnimplementedError('Skwasm not implemented on this platform.');
   }
 
   @override
@@ -313,22 +289,16 @@ class SkwasmRenderer implements Renderer {
   }) => throw UnimplementedError('Skwasm not implemented on this platform.');
 
   @override
-  ui.Image createImageFromImageBitmap(DomImageBitmap imageSource) {
-    throw UnimplementedError('Skwasm not implemented on this platform.');
-  }
-
-  @override
-  ui.Image createImageFromTextureSource(
-    JSAny object, {
-    required int width,
-    required int height,
-    required bool transferOwnership,
-  }) {
-    throw UnimplementedError('Skwasm not implemented on this platform.');
-  }
-
-  @override
   void dumpDebugInfo() {
     throw UnimplementedError('Skwasm not implemented on this platform.');
   }
+
+  @override
+  void debugResetRasterizer() {
+    throw UnimplementedError('Skwasm not implemented on this platform.');
+  }
+
+  @override
+  Surface get pictureToImageSurface =>
+      throw UnimplementedError('Skwasm not implemented on this platform.');
 }

@@ -14,7 +14,7 @@ import '../utils.dart';
 
 Future<void> verifyCodesignedTestRunner() async {
   printProgress('${green}Running binaries codesign verification$reset');
-  await runCommand('flutter', <String>[
+  await runCommand(path.join(flutterRoot, 'bin', 'flutter'), <String>[
     'precache',
     '--android',
     '--ios',
@@ -23,6 +23,23 @@ Future<void> verifyCodesignedTestRunner() async {
 
   await verifyExist(flutterRoot);
   await verifySignatures(flutterRoot);
+  await verifyFatBinaries(flutterRoot);
+}
+
+/// Some binaries should always be codesigned, even on master. Verify that they
+/// are codesigned and have the correct entitlements.
+Future<void> verifyPreCodesignedTestRunner() async {
+  printProgress('${green}Running binaries codesign verification$reset');
+  await runCommand(path.join(flutterRoot, 'bin', 'flutter'), <String>[
+    'precache',
+    '--android',
+    '--ios',
+    '--macos',
+  ], workingDirectory: flutterRoot);
+
+  await verifyExist(flutterRoot);
+  await verifySignatures(flutterRoot, forRelease: false);
+  await verifyFatBinaries(flutterRoot);
 }
 
 const List<String> expectedEntitlements = <String>[
@@ -37,9 +54,12 @@ const List<String> expectedEntitlements = <String>[
 /// Binaries that are expected to be codesigned and have entitlements.
 ///
 /// This list should be kept in sync with the actual contents of Flutter's
-/// cache.
+/// cache. You may also need to update the
+/// `//flutter/build/archives:artifacts_entitlement_config`
+/// `//flutter/build/archives:dart_sdk_entitlement_config`
+/// gn targets which populate the entitlement files.
 List<String> binariesWithEntitlements(String flutterRoot) {
-  return <String>[
+  final List<String> binaries = <String>[
     'artifacts/engine/android-arm-profile/darwin-x64/gen_snapshot',
     'artifacts/engine/android-arm-release/darwin-x64/gen_snapshot',
     'artifacts/engine/android-arm64-profile/darwin-x64/gen_snapshot',
@@ -59,19 +79,16 @@ List<String> binariesWithEntitlements(String flutterRoot) {
     'artifacts/engine/ios-profile/gen_snapshot_arm64',
     'artifacts/engine/ios-release/gen_snapshot_arm64',
     'artifacts/engine/ios/gen_snapshot_arm64',
-    'artifacts/libimobiledevice/idevicescreenshot',
-    'artifacts/libimobiledevice/idevicesyslog',
-    'artifacts/libimobiledevice/libimobiledevice-1.0.6.dylib',
-    'artifacts/libplist/libplist-2.0.3.dylib',
-    'artifacts/openssl/libcrypto.1.1.dylib',
-    'artifacts/openssl/libssl.1.1.dylib',
-    'artifacts/usbmuxd/iproxy',
-    'artifacts/usbmuxd/libusbmuxd-2.0.6.dylib',
     'dart-sdk/bin/dart',
     'dart-sdk/bin/dartaotruntime',
+    'dart-sdk/bin/dartvm',
     'dart-sdk/bin/utils/gen_snapshot',
     'dart-sdk/bin/utils/wasm-opt',
   ].map((String relativePath) => path.join(flutterRoot, 'bin', 'cache', relativePath)).toList();
+
+  presignedBinariesWithEntitlements(flutterRoot).forEach(binaries.add);
+
+  return binaries;
 }
 
 /// Binaries that are only expected to be codesigned.
@@ -79,11 +96,12 @@ List<String> binariesWithEntitlements(String flutterRoot) {
 /// This list should be kept in sync with the actual contents of Flutter's
 /// cache.
 List<String> binariesWithoutEntitlements(String flutterRoot) {
-  return <String>[
+  final List<String> binaries = <String>[
     'artifacts/engine/darwin-x64-profile/FlutterMacOS.xcframework/macos-arm64_x86_64/FlutterMacOS.framework/Versions/A/FlutterMacOS',
     'artifacts/engine/darwin-x64-release/FlutterMacOS.xcframework/macos-arm64_x86_64/FlutterMacOS.framework/Versions/A/FlutterMacOS',
     'artifacts/engine/darwin-x64/FlutterMacOS.xcframework/macos-arm64_x86_64/FlutterMacOS.framework/Versions/A/FlutterMacOS',
     'artifacts/engine/darwin-x64/font-subset',
+    'artifacts/engine/darwin-x64/frontend_server_aot.dart.snapshot',
     'artifacts/engine/darwin-x64/impellerc',
     'artifacts/engine/darwin-x64/libpath_ops.dylib',
     'artifacts/engine/darwin-x64/libtessellator.dylib',
@@ -99,8 +117,23 @@ List<String> binariesWithoutEntitlements(String flutterRoot) {
     'artifacts/engine/ios/Flutter.xcframework/ios-arm64_x86_64-simulator/Flutter.framework/Flutter',
     'artifacts/engine/ios/extension_safe/Flutter.xcframework/ios-arm64/Flutter.framework/Flutter',
     'artifacts/engine/ios/extension_safe/Flutter.xcframework/ios-arm64_x86_64-simulator/Flutter.framework/Flutter',
-    'artifacts/ios-deploy/ios-deploy',
+    'dart-sdk/bin/snapshots/analysis_server_aot.dart.snapshot',
+    'dart-sdk/bin/snapshots/dart2bytecode.dart.snapshot',
+    'dart-sdk/bin/snapshots/dart2js_aot.dart.snapshot',
+    'dart-sdk/bin/snapshots/dart2wasm_product.snapshot',
+    'dart-sdk/bin/snapshots/dart_runtime_service_vm_aot.dart.snapshot',
+    'dart-sdk/bin/snapshots/dart_tooling_daemon_aot.dart.snapshot',
+    'dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot',
+    'dart-sdk/bin/snapshots/dartdevc_aot.dart.snapshot',
+    'dart-sdk/bin/snapshots/dds_aot.dart.snapshot',
+    'dart-sdk/bin/snapshots/frontend_server_aot.dart.snapshot',
+    'dart-sdk/bin/snapshots/gen_kernel_aot.dart.snapshot',
+    'dart-sdk/bin/snapshots/kernel_worker_aot.dart.snapshot',
   ].map((String relativePath) => path.join(flutterRoot, 'bin', 'cache', relativePath)).toList();
+
+  presignedBinariesWithoutEntitlements(flutterRoot).forEach(binaries.add);
+
+  return binaries;
 }
 
 /// Binaries that are not expected to be codesigned.
@@ -113,6 +146,28 @@ List<String> unsignedBinaries(String flutterRoot) {
     'artifacts/engine/ios-release/Flutter.xcframework/ios-arm64_x86_64-simulator/dSYMs/Flutter.framework.dSYM/Contents/Resources/DWARF/Flutter',
     'artifacts/engine/ios-release/extension_safe/Flutter.xcframework/ios-arm64/dSYMs/Flutter.framework.dSYM/Contents/Resources/DWARF/Flutter',
     'artifacts/engine/ios-release/extension_safe/Flutter.xcframework/ios-arm64_x86_64-simulator/dSYMs/Flutter.framework.dSYM/Contents/Resources/DWARF/Flutter',
+  ].map((String relativePath) => path.join(flutterRoot, 'bin', 'cache', relativePath)).toList();
+}
+
+/// Binaries with entitlements that should always be signed, even on master.
+List<String> presignedBinariesWithEntitlements(String flutterRoot) {
+  return <String>[
+    'artifacts/libimobiledevice/idevicescreenshot',
+    'artifacts/libimobiledevice/idevicesyslog',
+    'artifacts/libusbmuxd/iproxy',
+  ].map((String relativePath) => path.join(flutterRoot, 'bin', 'cache', relativePath)).toList();
+}
+
+/// Binaries without entitlements that should always be signed, even on master.
+List<String> presignedBinariesWithoutEntitlements(String flutterRoot) {
+  return <String>[
+    'artifacts/ios-deploy/ios-deploy',
+    'artifacts/libimobiledevice/libimobiledevice-1.0.6.dylib',
+    'artifacts/libimobiledeviceglue/libimobiledevice-glue-1.0.0.dylib',
+    'artifacts/libplist/libplist-2.0.4.dylib',
+    'artifacts/openssl/libcrypto.3.dylib',
+    'artifacts/openssl/libssl.3.dylib',
+    'artifacts/libusbmuxd/libusbmuxd-2.0.7.dylib',
   ].map((String relativePath) => path.join(flutterRoot, 'bin', 'cache', relativePath)).toList();
 }
 
@@ -152,7 +207,7 @@ Future<void> verifyExist(
   final List<String> expectedSigned =
       binariesWithEntitlements(flutterRoot) + binariesWithoutEntitlements(flutterRoot);
   final List<String> expectedUnsigned = unsignedBinaries(flutterRoot);
-  final Set<String> foundFiles = <String>{
+  final foundFiles = <String>{
     for (final String binaryPath in binaryPaths)
       if (expectedSigned.contains(binaryPath))
         binaryPath
@@ -163,7 +218,7 @@ Future<void> verifyExist(
   };
 
   if (foundFiles.length < expectedSigned.length) {
-    final List<String> unfoundFiles = <String>[
+    final unfoundFiles = <String>[
       for (final String file in expectedSigned)
         if (!foundFiles.contains(file)) file,
     ];
@@ -179,35 +234,56 @@ Future<void> verifyExist(
   print('All expected binaries present.');
 }
 
-/// Verify code signatures and entitlements of all binaries in the cache.
+/// Verify code signatures and entitlements of binaries in the cache.
+///
+/// If [forRelease] is true, verify for all binaries. Otherwise, only verify for pre-signed binaries.
 Future<void> verifySignatures(
   String flutterRoot, {
   @visibleForTesting ProcessManager processManager = const LocalProcessManager(),
+  bool forRelease = true,
 }) async {
-  final List<String> unsignedFiles = <String>[];
-  final List<String> wrongEntitlementBinaries = <String>[];
-  final List<String> unexpectedFiles = <String>[];
+  final unsignedFiles = <String>[];
+  final wrongEntitlementBinaries = <String>[];
+  final unexpectedFiles = <String>[];
   final String cacheDirectory = path.join(flutterRoot, 'bin', 'cache');
 
   final List<String> binariesAndXcframeworks =
       (await findBinaryPaths(cacheDirectory, processManager: processManager)) +
       (await findXcframeworksPaths(cacheDirectory, processManager: processManager));
 
-  for (final String pathToCheck in binariesAndXcframeworks) {
-    bool verifySignature = false;
-    bool verifyEntitlements = false;
-    if (binariesWithEntitlements(flutterRoot).contains(pathToCheck)) {
+  final List<String> binariesToVerifyEntitlements;
+  final List<String> binariesToVerifyWithoutEntitlements;
+  final List<String> xcframeworksToVerifyCodesigned;
+  if (forRelease) {
+    binariesToVerifyEntitlements = binariesWithEntitlements(flutterRoot);
+    binariesToVerifyWithoutEntitlements = binariesWithoutEntitlements(flutterRoot);
+    xcframeworksToVerifyCodesigned = signedXcframeworks(flutterRoot);
+  } else {
+    binariesToVerifyEntitlements = presignedBinariesWithEntitlements(flutterRoot);
+    binariesToVerifyWithoutEntitlements = presignedBinariesWithoutEntitlements(flutterRoot);
+    xcframeworksToVerifyCodesigned = <String>[];
+  }
+
+  for (final pathToCheck in binariesAndXcframeworks) {
+    var verifySignature = false;
+    var verifyEntitlements = false;
+    if (binariesToVerifyEntitlements.contains(pathToCheck)) {
       verifySignature = true;
       verifyEntitlements = true;
     }
-    if (binariesWithoutEntitlements(flutterRoot).contains(pathToCheck)) {
+    if (binariesToVerifyWithoutEntitlements.contains(pathToCheck)) {
       verifySignature = true;
     }
-    if (signedXcframeworks(flutterRoot).contains(pathToCheck)) {
+    if (xcframeworksToVerifyCodesigned.contains(pathToCheck)) {
       verifySignature = true;
     }
     if (unsignedBinaries(flutterRoot).contains(pathToCheck)) {
       // Binary is expected to be unsigned. No need to check signature, entitlements.
+      continue;
+    }
+
+    // If not testing for release, skip path if not going to verify it's codesigned/entitlements.
+    if (!forRelease && !verifySignature && !verifyEntitlements) {
       continue;
     }
 
@@ -277,20 +353,59 @@ Future<void> verifySignatures(
   print('Verified that files are codesigned and have expected entitlements.');
 }
 
+/// Verify that specific binaries are fat binaries containing both x86_64 and arm64 slices.
+Future<void> verifyFatBinaries(
+  String flutterRoot, {
+  @visibleForTesting ProcessManager processManager = const LocalProcessManager(),
+}) async {
+  final List<String> fatBinaries =
+      presignedBinariesWithEntitlements(flutterRoot) +
+      presignedBinariesWithoutEntitlements(flutterRoot);
+  final failedBinaries = <String>[];
+
+  for (final binaryPath in fatBinaries) {
+    print('Verifying fat binary architectures for $binaryPath');
+    final io.ProcessResult result = await processManager.run(<String>['file', binaryPath]);
+
+    if (result.exitCode != 0) {
+      print('Failed to run file command on $binaryPath: \n${result.stderr}');
+      failedBinaries.add(binaryPath);
+      continue;
+    }
+
+    final output = result.stdout as String;
+    final bool containsX86_64 = output.contains('x86_64');
+    final bool containsArm64 = output.contains('arm64');
+
+    if (!containsX86_64 || !containsArm64) {
+      print('Binary $binaryPath is not a fat binary containing both x86_64 and arm64.');
+      print('Output: $output');
+      failedBinaries.add(binaryPath);
+    }
+  }
+
+  if (failedBinaries.isNotEmpty) {
+    throw Exception('Failed fat binary verification for:\n${failedBinaries.join('\n')}');
+  }
+  print('All expected fat binaries verified.');
+}
+
 /// Find every binary file in the given [rootDirectory].
 Future<List<String>> findBinaryPaths(
   String rootDirectory, {
   @visibleForTesting ProcessManager processManager = const LocalProcessManager(),
 }) async {
-  final List<String> allBinaryPaths = <String>[];
+  final allBinaryPaths = <String>[];
   final io.ProcessResult result = await processManager.run(<String>[
     'find',
     rootDirectory,
     '-type',
     'f',
   ]);
-  final List<String> allFiles =
-      (result.stdout as String).split('\n').where((String s) => s.isNotEmpty).toList();
+  final List<String> allFiles = (result.stdout as String)
+      .split('\n')
+      .where((String s) => s.isNotEmpty)
+      .toList();
 
   await Future.forEach(allFiles, (String filePath) async {
     if (await isBinary(filePath, processManager: processManager)) {
@@ -314,9 +429,10 @@ Future<List<String>> findXcframeworksPaths(
     '-name',
     '*xcframework',
   ]);
-  final List<String> allXcframeworkPaths =
-      LineSplitter.split(result.stdout as String).where((String s) => s.isNotEmpty).toList();
-  for (final String path in allXcframeworkPaths) {
+  final List<String> allXcframeworkPaths = LineSplitter.split(
+    result.stdout as String,
+  ).where((String s) => s.isNotEmpty).toList();
+  for (final path in allXcframeworkPaths) {
     print('Found: $path\n');
   }
   return allXcframeworkPaths;
@@ -333,7 +449,8 @@ Future<bool> isBinary(
     '-b', // is binary
     filePath,
   ]);
-  return (result.stdout as String).contains('application/x-mach-binary');
+  final output = result.stdout as String;
+  return output.contains('application/x-mach-binary') || output.contains('application/x-sharedlib');
 }
 
 /// Check if the binary has the expected entitlements.
@@ -358,8 +475,8 @@ Future<bool> hasExpectedEntitlements(
     return false;
   }
 
-  bool passes = true;
-  final String output = entitlementResult.stdout as String;
+  var passes = true;
+  final output = entitlementResult.stdout as String;
   for (final String entitlement in expectedEntitlements) {
     final bool entitlementExpected = binariesWithEntitlements(flutterRoot).contains(binaryPath);
     if (output.contains(entitlement) != entitlementExpected) {

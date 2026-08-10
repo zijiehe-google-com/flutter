@@ -89,7 +89,7 @@ std::optional<Entity> BorderMaskBlurFilterContents::RenderFilter(
                             outer_blur_factor = outer_blur_factor_, sigma](
                                const ContentContext& renderer,
                                const Entity& entity, RenderPass& pass) -> bool {
-    auto& host_buffer = renderer.GetTransientsBuffer();
+    auto& data_host_buffer = renderer.GetTransientsDataBuffer();
 
     auto origin = coverage.GetOrigin();
     auto size = coverage.GetSize();
@@ -106,8 +106,6 @@ std::optional<Entity> BorderMaskBlurFilterContents::RenderFilter(
 
     VS::FrameInfo frame_info;
     frame_info.mvp = entity.GetShaderTransform(pass);
-    frame_info.texture_sampler_y_coord_scale =
-        input_snapshot->texture->GetYCoordScale();
 
     FS::FragInfo frag_info;
     frag_info.sigma_uv = sigma.Abs() / input_snapshot->texture->GetSize();
@@ -117,10 +115,10 @@ std::optional<Entity> BorderMaskBlurFilterContents::RenderFilter(
 
     pass.SetCommandLabel("Border Mask Blur Filter");
     pass.SetPipeline(renderer.GetBorderMaskBlurPipeline(options));
-    pass.SetVertexBuffer(CreateVertexBuffer(vertices, host_buffer));
+    pass.SetVertexBuffer(CreateVertexBuffer(vertices, data_host_buffer));
 
-    FS::BindFragInfo(pass, host_buffer.EmplaceUniform(frag_info));
-    VS::BindFrameInfo(pass, host_buffer.EmplaceUniform(frame_info));
+    FS::BindFragInfo(pass, data_host_buffer.EmplaceUniform(frag_info));
+    VS::BindFrameInfo(pass, data_host_buffer.EmplaceUniform(frame_info));
 
     raw_ptr<const Sampler> sampler =
         renderer.GetContext()->GetSamplerLibrary()->GetSampler({});

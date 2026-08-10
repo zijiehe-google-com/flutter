@@ -10,6 +10,7 @@
 #include "flutter/display_list/dl_tile_mode.h"
 #include "flutter/display_list/effects/dl_color_source.h"
 #include "flutter/lib/ui/painting/fragment_program.h"
+#include "flutter/lib/ui/painting/image_filter.h"
 #include "third_party/tonic/converter/dart_converter.h"
 
 namespace flutter {
@@ -60,7 +61,8 @@ bool ReusableFragmentShader::ValidateSamplers() {
 }
 
 void ReusableFragmentShader::SetImageSampler(Dart_Handle index_handle,
-                                             Dart_Handle image_handle) {
+                                             Dart_Handle image_handle,
+                                             int filterQualityIndex) {
   uint64_t index = tonic::DartConverter<uint64_t>::FromDart(index_handle);
   CanvasImage* image =
       tonic::DartConverter<CanvasImage*>::FromDart(image_handle);
@@ -81,7 +83,7 @@ void ReusableFragmentShader::SetImageSampler(Dart_Handle index_handle,
   //               sampling options as a new default parameter for users.
   samplers_[index] = DlColorSource::MakeImage(
       image->image(), DlTileMode::kClamp, DlTileMode::kClamp,
-      DlImageSampling::kNearestNeighbor, nullptr);
+      ImageFilter::SamplingFromIndex(filterQualityIndex), nullptr);
   // This should be true since we already checked the image above, but
   // we check again for sanity.
   FML_DCHECK(samplers_[index]->isUIThreadSafe());
@@ -92,7 +94,8 @@ void ReusableFragmentShader::SetImageSampler(Dart_Handle index_handle,
   uniform_floats[float_count_ + 2 * index + 1] = image->height();
 }
 
-std::shared_ptr<DlImageFilter> ReusableFragmentShader::as_image_filter() const {
+std::shared_ptr<DlImageFilter> ReusableFragmentShader::as_image_filter(
+    DlImageSampling input_sampling) const {
   FML_CHECK(program_);
 
   // The lifetime of this object is longer than a frame, and the uniforms can be
@@ -102,7 +105,8 @@ std::shared_ptr<DlImageFilter> ReusableFragmentShader::as_image_filter() const {
   uniform_data->resize(uniform_data_->size());
   memcpy(uniform_data->data(), uniform_data_->bytes(), uniform_data->size());
 
-  return program_->MakeDlImageFilter(std::move(uniform_data), samplers_);
+  return program_->MakeDlImageFilter(std::move(uniform_data), samplers_,
+                                     input_sampling);
 }
 
 std::shared_ptr<DlColorSource> ReusableFragmentShader::shader(

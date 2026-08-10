@@ -534,7 +534,7 @@ class Router<T> extends StatefulWidget {
   ///  * [neglect]: which forces the [Router] to not create a new history entry
   ///    even if location does change.
   static void navigate(BuildContext context, VoidCallback callback) {
-    final _RouterScope scope =
+    final scope =
         context.getElementForInheritedWidgetOfExactType<_RouterScope>()!.widget as _RouterScope;
     scope.routerState._setStateWithExplicitReportStatus(
       RouteInformationReportingType.navigate,
@@ -565,7 +565,7 @@ class Router<T> extends StatefulWidget {
   ///  * [navigate]: which forces the [Router] to create a new history entry
   ///    even if location does not change.
   static void neglect(BuildContext context, VoidCallback callback) {
-    final _RouterScope scope =
+    final scope =
         context.getElementForInheritedWidgetOfExactType<_RouterScope>()!.widget as _RouterScope;
     scope.routerState._setStateWithExplicitReportStatus(
       RouteInformationReportingType.neglect,
@@ -821,12 +821,11 @@ class _RouterState<T> extends State<Router<T>> with RestorationMixin {
     };
   }
 
-  Future<void> _rebuild([void value]) {
+  void _rebuild() {
     setState(() {
       /* routerDelegate is ready to rebuild */
     });
     _maybeNeedToReportRouteInformation();
-    return SynchronousFuture<void>(value);
   }
 
   void _handleRouterDelegateNotification() {
@@ -940,14 +939,13 @@ class _CallbackHookProvider<T> {
           stack: stack,
           library: 'widget library',
           context: ErrorDescription('while invoking the callback for $runtimeType'),
-          informationCollector:
-              () => <DiagnosticsNode>[
-                DiagnosticsProperty<_CallbackHookProvider<T>>(
-                  'The $runtimeType that invoked the callback was',
-                  this,
-                  style: DiagnosticsTreeStyle.errorProperty,
-                ),
-              ],
+          informationCollector: () => <DiagnosticsNode>[
+            DiagnosticsProperty<_CallbackHookProvider<T>>(
+              'The $runtimeType that invoked the callback was',
+              this,
+              style: DiagnosticsTreeStyle.errorProperty,
+            ),
+          ],
         ),
       );
       return defaultValue;
@@ -975,7 +973,7 @@ abstract class BackButtonDispatcher extends _CallbackHookProvider<Future<bool>> 
       <ChildBackButtonDispatcher>{} as LinkedHashSet<ChildBackButtonDispatcher>;
 
   @override
-  bool get hasCallbacks => super.hasCallbacks || (_children.isNotEmpty);
+  bool get hasCallbacks => super.hasCallbacks || _children.isNotEmpty;
 
   /// Handles a pop route request.
   ///
@@ -1207,10 +1205,9 @@ class _BackButtonListenerState extends State<BackButtonListener> {
       'The parent router must have a backButtonDispatcher to use this widget',
     );
 
-    dispatcher =
-        rootBackDispatcher!.createChildBackButtonDispatcher()
-          ..addCallback(widget.onBackButtonPressed)
-          ..takePriority();
+    dispatcher = rootBackDispatcher!.createChildBackButtonDispatcher()
+      ..addCallback(widget.onBackButtonPressed)
+      ..takePriority();
     super.didChangeDependencies();
   }
 
@@ -1387,8 +1384,12 @@ abstract class RouterDelegate<T> extends Listenable {
   /// the operating system is requesting that the current route be popped.
   ///
   /// The method should return a boolean [Future] to indicate whether this
-  /// delegate handles the request. Returning false will cause the entire app
-  /// to be popped.
+  /// delegate handles the request. Returning true indicates that the request
+  /// has been handled and prevents it from bubbling up. Returning false means
+  /// this delegate did not handle the request, so the request may continue to a
+  /// parent [BackButtonDispatcher] in a nested [Router] setup. If the request
+  /// reaches the root [WidgetsBinding] and remains unhandled, the platform is
+  /// requested to pop the application by calling [SystemNavigator.pop].
   ///
   /// Consider using a [SynchronousFuture] if the result can be computed
   /// synchronously, so that the [Router] does not need to wait for the next
@@ -1630,8 +1631,8 @@ class _RestorableRouteInformation extends RestorableValue<RouteInformation?> {
       return null;
     }
     assert(data is List<Object?> && data.length == 2);
-    final List<Object?> castedData = data as List<Object?>;
-    final String? uri = castedData.first as String?;
+    final castedData = data as List<Object?>;
+    final uri = castedData.first as String?;
     if (uri == null) {
       return null;
     }

@@ -17,7 +17,7 @@ class FillRectGeometry final : public Geometry {
   ~FillRectGeometry() override;
 
   // |Geometry|
-  bool CoversArea(const Matrix& transform, const Rect& rect) const override;
+  bool CoversArea(const Matrix& transform, const IRect& rect) const override;
 
   // |Geometry|
   bool IsAxisAlignedRect() const override;
@@ -54,11 +54,6 @@ class StrokeRectGeometry final : public Geometry {
   const Join stroke_join_;
 
   static Join AdjustStrokeJoin(const StrokeParameters& stroke);
-
-  static Point* AppendRoundCornerJoin(Point* buffer,
-                                      Point corner,
-                                      Vector2 offset,
-                                      const Tessellator::Trigs& trigs);
 };
 
 }  // namespace impeller

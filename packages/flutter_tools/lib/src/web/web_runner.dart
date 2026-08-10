@@ -28,6 +28,7 @@ abstract class WebRunnerFactory {
     required bool stayResident,
     required FlutterProject flutterProject,
     required DebuggingOptions debuggingOptions,
+    Map<String, Object?> platformArgs = const <String, Object?>{},
     UrlTunneller? urlTunneller,
     required Logger logger,
     required Terminal terminal,
@@ -37,5 +38,6 @@ abstract class WebRunnerFactory {
     required SystemClock systemClock,
     required Analytics analytics,
     bool machine = false,
+    Map<String, String> webDefines,
   });
 }

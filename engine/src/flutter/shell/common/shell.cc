@@ -25,6 +25,7 @@
 #include "flutter/fml/make_copyable.h"
 #include "flutter/fml/message_loop.h"
 #include "flutter/fml/paths.h"
+#include "flutter/fml/task_runner_util.h"
 #include "flutter/fml/trace_event.h"
 #include "flutter/runtime/dart_vm.h"
 #include "flutter/shell/common/base64.h"
@@ -32,6 +33,7 @@
 #include "flutter/shell/common/skia_event_tracer_impl.h"
 #include "flutter/shell/common/switches.h"
 #include "flutter/shell/common/vsync_waiter.h"
+#include "impeller/renderer/pipeline_library.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "third_party/dart/runtime/include/dart_tools_api.h"
@@ -147,6 +149,56 @@ void PerformInitializationTasks(Settings& settings) {
 #if !SLIMPELLER
   PersistentCache::SetCacheSkSL(settings.cache_sksl);
 #endif  //  !SLIMPELLER
+}
+
+bool ValidateViewportMetrics(const ViewportMetrics& metrics) {
+  // Pixel ratio cannot be zero.
+  if (metrics.device_pixel_ratio <= 0) {
+    return false;
+  }
+
+  // If negative values are passed in.
+  if (metrics.physical_width < 0 || metrics.physical_height < 0 ||
+      metrics.physical_min_width_constraint < 0 ||
+      metrics.physical_max_width_constraint < 0 ||
+      metrics.physical_min_height_constraint < 0 ||
+      metrics.physical_max_height_constraint < 0) {
+    return false;
+  }
+
+  // If width is zero and the constraints are tight.
+  if (metrics.physical_width == 0 &&
+      metrics.physical_min_width_constraint ==
+          metrics.physical_max_width_constraint) {
+    return false;
+  }
+
+  // If not tight constraints, check the width fits in the constraints.
+  if (metrics.physical_min_width_constraint !=
+      metrics.physical_max_width_constraint) {
+    if (metrics.physical_min_width_constraint > metrics.physical_width ||
+        metrics.physical_width > metrics.physical_max_width_constraint) {
+      return false;
+    }
+  }
+
+  // If height is zero and the constraints are tight.
+  if (metrics.physical_height == 0 &&
+      metrics.physical_min_height_constraint ==
+          metrics.physical_max_height_constraint) {
+    return false;
+  }
+
+  // If not tight constraints, check the height fits in the constraints.
+  if (metrics.physical_min_height_constraint !=
+      metrics.physical_max_height_constraint) {
+    if (metrics.physical_min_height_constraint > metrics.physical_height ||
+        metrics.physical_height > metrics.physical_max_height_constraint) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 }  // namespace
@@ -474,12 +526,17 @@ Shell::Shell(DartVMRef vm,
   FML_CHECK(!settings.enable_software_rendering || !settings.enable_impeller)
       << "Software rendering is incompatible with Impeller.";
   if (!settings.enable_impeller && settings.warn_on_impeller_opt_out) {
-    FML_LOG(IMPORTANT)
-        << "[Action Required] The application opted out of Impeller by either "
-           "using the --no-enable-impeller flag or FLTEnableImpeller=false "
-           "plist flag. This option is going to go away in an upcoming Flutter "
-           "release. Remove the explicit opt-out. If you need to opt-out, "
-           "report a bug describing the issue.";
+    FML_LOG(IMPORTANT) <<  //
+        R"warn([Action Required]: Impeller opt-out deprecated.
+    The application opted out of Impeller by either using the
+    `--no-enable-impeller` flag or the
+    `io.flutter.embedding.android.EnableImpeller` `AndroidManifest.xml` entry.
+    These options are going to go away in an upcoming Flutter release. Remove
+    the explicit opt-out. If you need to opt-out, please report a bug describing
+    the issue.
+
+    https://github.com/flutter/flutter/issues/new?template=02_bug.yml
+)warn";
   }
   FML_CHECK(vm_) << "Must have access to VM to create a shell.";
   FML_DCHECK(task_runners_.IsValid());
@@ -488,6 +545,15 @@ Shell::Shell(DartVMRef vm,
   display_manager_ = std::make_unique<DisplayManager>();
   resource_cache_limit_calculator->AddResourceCacheLimitItem(
       weak_factory_.GetWeakPtr());
+
+  std::shared_future<fml::WeakPtr<ShellIOManager>> weak_io_manager_future(
+      weak_io_manager_promise_.get_future());
+  shutdown_safe_io_task_runner_ =
+      std::make_shared<fml::ConditionalBasicTaskRunner>(
+          task_runners_.GetIOTaskRunner(),
+          [weak_io_manager_future = std::move(weak_io_manager_future)] {
+            return static_cast<bool>(weak_io_manager_future.get());
+          });
 
   // Generate a WeakPtrFactory for use with the raster thread. This does not
   // need to wait on a latch because it can only ever be used from the raster
@@ -540,6 +606,10 @@ Shell::Shell(DartVMRef vm,
       task_runners_.GetPlatformTaskRunner(),
       std::bind(&Shell::OnServiceProtocolReloadAssetFonts, this,
                 std::placeholders::_1, std::placeholders::_2)};
+  service_protocol_handlers_[ServiceProtocol::kGetPipelineUsageExtensionName] =
+      {task_runners_.GetIOTaskRunner(),
+       std::bind(&Shell::OnServiceProtocolGetPipelineUsage, this,
+                 std::placeholders::_1, std::placeholders::_2)};
 }
 
 Shell::~Shell() {
@@ -584,8 +654,12 @@ Shell::~Shell() {
       fml::MakeCopyable([io_manager = std::move(io_manager_),
                          platform_view = platform_view_.get(),
                          &io_latch]() mutable {
+        std::weak_ptr<ShellIOManager> weak_io_manager(io_manager);
         io_manager.reset();
-        if (platform_view) {
+
+        // If the IO manager is not being used by any other spawned shells,
+        // then detach the resource context from the IO thread.
+        if (platform_view && weak_io_manager.expired()) {
           platform_view->ReleaseResourceContext();
         }
         io_latch.Signal();
@@ -809,6 +883,7 @@ bool Shell::Setup(std::unique_ptr<PlatformView> platform_view,
   engine_ = std::move(engine);
   rasterizer_ = std::move(rasterizer);
   io_manager_ = io_manager;
+  weak_io_manager_promise_.set_value(io_manager_->GetWeakPtr());
 
   // Set the external view embedder for the rasterizer.
   auto view_embedder = platform_view_->CreateExternalViewEmbedder();
@@ -885,6 +960,10 @@ fml::WeakPtr<PlatformView> Shell::GetPlatformView() {
 fml::WeakPtr<ShellIOManager> Shell::GetIOManager() {
   FML_DCHECK(is_set_up_);
   return io_manager_->GetWeakPtr();
+}
+
+std::shared_ptr<fml::BasicTaskRunner> Shell::GetShutdownSafeIOTaskRunner() {
+  return shutdown_safe_io_task_runner_;
 }
 
 DartVM* Shell::GetDartVM() {
@@ -999,15 +1078,6 @@ void Shell::OnPlatformViewDestroyed() {
   // This incorrect assumption can lead to deadlock.
   rasterizer_->DisableThreadMergerIfNeeded();
 
-  // Notify the Dart VM that the PlatformView has been destroyed and some
-  // cleanup activity can be done (e.g: garbage collect the Dart heap).
-  fml::TaskRunner::RunNowOrPostTask(task_runners_.GetUITaskRunner(),
-                                    [engine = engine_->GetWeakPtr()]() {
-                                      if (engine) {
-                                        engine->NotifyDestroyed();
-                                      }
-                                    });
-
   // Note:
   // This is a synchronous operation because certain platforms depend on
   // setup/suspension of all activities that may be interacting with the GPU in
@@ -1078,8 +1148,7 @@ void Shell::OnPlatformViewSetViewportMetrics(int64_t view_id,
   FML_DCHECK(is_set_up_);
   FML_DCHECK(task_runners_.GetPlatformTaskRunner()->RunsTasksOnCurrentThread());
 
-  if (metrics.device_pixel_ratio <= 0 || metrics.physical_width <= 0 ||
-      metrics.physical_height <= 0) {
+  if (!ValidateViewportMetrics(metrics)) {
     // Ignore invalid view-port metrics.
     return;
   }
@@ -1107,8 +1176,12 @@ void Shell::OnPlatformViewSetViewportMetrics(int64_t view_id,
 
   {
     std::scoped_lock<std::mutex> lock(resize_mutex_);
-    expected_frame_sizes_[view_id] =
-        SkISize::Make(metrics.physical_width, metrics.physical_height);
+
+    expected_frame_constraints_[view_id] =
+        BoxConstraints(Size(metrics.physical_min_width_constraint,
+                            metrics.physical_min_height_constraint),
+                       Size(metrics.physical_max_width_constraint,
+                            metrics.physical_max_height_constraint));
     device_pixel_ratio_ = metrics.device_pixel_ratio;
   }
 }
@@ -1166,6 +1239,17 @@ void Shell::OnPlatformViewDispatchPointerDataPacket(
         }
       }));
   next_pointer_flow_id_++;
+}
+
+HitTestResponse Shell::OnPlatformViewHitTest(int64_t view_id,
+                                             const flutter::PointData offset) {
+  // hit test should be performed only when UI & platform threads are merged.
+  FML_DCHECK(task_runners_.GetUITaskRunner()->RunsTasksOnCurrentThread());
+  FML_DCHECK(task_runners_.GetPlatformTaskRunner()->RunsTasksOnCurrentThread());
+  if (engine_) {
+    return engine_->HitTest(view_id, offset);
+  }
+  return {.has_platform_view = false};
 }
 
 // |PlatformView::Delegate|
@@ -1298,6 +1382,12 @@ const Settings& Shell::OnPlatformViewGetSettings() const {
   return settings_;
 }
 
+// |PlatformView::Delegate|
+std::shared_ptr<fml::BasicTaskRunner>
+Shell::OnPlatformViewGetShutdownSafeIOTaskRunner() const {
+  return shutdown_safe_io_task_runner_;
+}
+
 // |Animator::Delegate|
 void Shell::OnAnimatorBeginFrame(fml::TimePoint frame_target_time,
                                  uint64_t frame_number) {
@@ -1396,6 +1486,34 @@ void Shell::OnEngineUpdateSemantics(int64_t view_id,
 }
 
 // |Engine::Delegate|
+void Shell::OnEngineSetApplicationLocale(std::string locale) {
+  FML_DCHECK(is_set_up_);
+  FML_DCHECK(task_runners_.GetUITaskRunner()->RunsTasksOnCurrentThread());
+
+  task_runners_.GetPlatformTaskRunner()->RunNowOrPostTask(
+      task_runners_.GetPlatformTaskRunner(),
+      [view = platform_view_->GetWeakPtr(), locale_holder = std::move(locale)] {
+        if (view) {
+          view->SetApplicationLocale(locale_holder);
+        }
+      });
+}
+
+// |Engine::Delegate|
+void Shell::OnEngineSetSemanticsTreeEnabled(bool enabled) {
+  FML_DCHECK(is_set_up_);
+  FML_DCHECK(task_runners_.GetUITaskRunner()->RunsTasksOnCurrentThread());
+
+  task_runners_.GetPlatformTaskRunner()->RunNowOrPostTask(
+      task_runners_.GetPlatformTaskRunner(),
+      [view = platform_view_->GetWeakPtr(), enabled] {
+        if (view) {
+          view->SetSemanticsTreeEnabled(enabled);
+        }
+      });
+}
+
+// |Engine::Delegate|
 void Shell::OnEngineHandlePlatformMessage(
     std::unique_ptr<PlatformMessage> message) {
   FML_DCHECK(is_set_up_);
@@ -1475,7 +1593,7 @@ void Shell::HandleEngineSkiaMessage(std::unique_ptr<PlatformMessage> message) {
   if (document.HasParseError() || !document.IsObject()) {
     return;
   }
-  auto root = document.GetObject();
+  auto root = document.GetObj();
   auto method = root.FindMember("method");
   if (method->value != "Skia.setResourceCacheMaxBytes") {
     return;
@@ -1742,9 +1860,9 @@ fml::TimePoint Shell::GetLatestFrameTargetTime() const {
 bool Shell::ShouldDiscardLayerTree(int64_t view_id,
                                    const flutter::LayerTree& tree) {
   std::scoped_lock<std::mutex> lock(resize_mutex_);
-  auto expected_frame_size = ExpectedFrameSize(view_id);
-  return !expected_frame_size.isEmpty() &&
-         ToSkISize(tree.frame_size()) != expected_frame_size;
+  auto expected_frame_constraints = ExpectedFrameConstraints(view_id);
+  return !expected_frame_constraints.IsSatisfiedBy(
+      Size(tree.frame_size().width, tree.frame_size().height));
 }
 
 // |ServiceProtocol::Handler|
@@ -1890,6 +2008,8 @@ bool Shell::OnServiceProtocolRunInView(
   configuration.SetEntrypointAndLibrary(engine_->GetLastEntrypoint(),
                                         engine_->GetLastEntrypointLibrary());
   configuration.SetEntrypointArgs(engine_->GetLastEntrypointArgs());
+
+  configuration.SetEngineId(engine_->GetLastEngineId());
 
   configuration.AddAssetResolver(std::make_unique<DirectoryAssetBundle>(
       fml::OpenDirectory(asset_directory_path.c_str(), false,
@@ -2084,6 +2204,39 @@ bool Shell::OnServiceProtocolSetAssetBundlePath(
   return false;
 }
 
+bool Shell::OnServiceProtocolGetPipelineUsage(
+    const ServiceProtocol::Handler::ServiceProtocolMap& params,
+    rapidjson::Document* response) {
+  FML_DCHECK(task_runners_.GetIOTaskRunner()->RunsTasksOnCurrentThread());
+
+  response->SetObject();
+
+  auto context = io_manager_->GetImpellerContext();
+
+  if (!context) {
+    FML_DLOG(ERROR) << "Pipeline usage profiling only available in Impeller";
+    ServiceProtocolFailureError(
+        response, "Pipeline usage profiling only available in Impeller");
+    return false;
+  }
+
+  auto use_counts = context->GetPipelineLibrary()->GetPipelineUseCounts();
+
+  rapidjson::Value pipelines_json(rapidjson::kObjectType);
+
+  for (const auto& pipelineCount : use_counts) {
+    std::string_view pipeline_name = pipelineCount.first.GetLabel();
+    rapidjson::Value pipeline_key(pipeline_name.data(), pipeline_name.length(),
+                                  response->GetAllocator());
+
+    pipelines_json.AddMember(pipeline_key, pipelineCount.second,
+                             response->GetAllocator());
+  }
+
+  response->AddMember("Usages", pipelines_json, response->GetAllocator());
+  return true;
+}
+
 void Shell::SendFontChangeNotification() {
   // After system fonts are reloaded, we send a system channel message
   // to notify flutter framework.
@@ -2153,8 +2306,10 @@ void Shell::OnPlatformViewRemoveView(int64_t view_id,
   FML_DCHECK(view_id != kFlutterImplicitViewId)
       << "Unexpected request to remove the implicit view #"
       << kFlutterImplicitViewId << ". This view should never be removed.";
-
-  expected_frame_sizes_.erase(view_id);
+  {
+    std::scoped_lock<std::mutex> lock(resize_mutex_);
+    expected_frame_constraints_.erase(view_id);
+  }
   task_runners_.GetUITaskRunner()->RunNowOrPostTask(
       task_runners_.GetUITaskRunner(),
       [&task_runners = task_runners_,           //
@@ -2247,14 +2402,26 @@ fml::Status Shell::WaitForFirstFrame(fml::TimeDelta timeout) {
 
   std::unique_lock<std::mutex> lock(waiting_for_first_frame_mutex_);
   bool success = waiting_for_first_frame_condition_.wait_until(
-      lock, duration, [&waiting_for_first_frame = waiting_for_first_frame_] {
-        return !waiting_for_first_frame.load();
+      lock, duration,
+      [&waiting_for_first_frame = waiting_for_first_frame_,
+       &cancelled = wait_for_first_frame_cancelled_] {
+        return !waiting_for_first_frame.load() || cancelled;
       });
-  if (success) {
+  if (wait_for_first_frame_cancelled_) {
+    return fml::Status(fml::StatusCode::kAborted, "Shell is shutting down.");
+  } else if (success) {
     return fml::Status();
   } else {
     return fml::Status(fml::StatusCode::kDeadlineExceeded, "timeout");
   }
+}
+
+void Shell::CancelWaitForFirstFrame() {
+  {
+    std::scoped_lock lock(waiting_for_first_frame_mutex_);
+    wait_for_first_frame_cancelled_ = true;
+  }
+  waiting_for_first_frame_condition_.notify_all();
 }
 
 bool Shell::ReloadSystemFonts() {
@@ -2347,11 +2514,13 @@ Shell::GetConcurrentWorkerTaskRunner() const {
   return vm_->GetConcurrentWorkerTaskRunner();
 }
 
-SkISize Shell::ExpectedFrameSize(int64_t view_id) {
-  auto found = expected_frame_sizes_.find(view_id);
-  if (found == expected_frame_sizes_.end()) {
-    return SkISize::MakeEmpty();
+BoxConstraints Shell::ExpectedFrameConstraints(int64_t view_id) {
+  auto found = expected_frame_constraints_.find(view_id);
+
+  if (found == expected_frame_constraints_.end()) {
+    return {};
   }
+
   return found->second;
 }
 

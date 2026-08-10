@@ -8,8 +8,8 @@ import 'package:dds/dap.dart' hide DapServer;
 
 import '../base/file_system.dart';
 import '../base/platform.dart';
-import '../debug_adapters/flutter_adapter.dart';
-import '../debug_adapters/flutter_adapter_args.dart';
+import 'flutter_adapter.dart';
+import 'flutter_adapter_args.dart';
 import 'flutter_test_adapter.dart';
 
 /// A DAP server that communicates over a [ByteStreamServerChannel], usually constructed from the processes stdin/stdout streams.
@@ -32,27 +32,26 @@ class DapServer {
     this.logger,
     void Function(Object? e)? onError,
   }) : channel = ByteStreamServerChannel(input, output, logger) {
-    adapter =
-        test
-            ? FlutterTestDebugAdapter(
-              channel,
-              fileSystem: fileSystem,
-              platform: platform,
-              ipv6: ipv6,
-              enableFlutterDds: enableDds,
-              enableAuthCodes: enableAuthCodes,
-              logger: logger,
-              onError: onError,
-            )
-            : FlutterDebugAdapter(
-              channel,
-              fileSystem: fileSystem,
-              platform: platform,
-              enableFlutterDds: enableDds,
-              enableAuthCodes: enableAuthCodes,
-              logger: logger,
-              onError: onError,
-            );
+    adapter = test
+        ? FlutterTestDebugAdapter(
+            channel,
+            fileSystem: fileSystem,
+            platform: platform,
+            ipv6: ipv6,
+            enableFlutterDds: enableDds,
+            enableAuthCodes: enableAuthCodes,
+            logger: logger,
+            onError: onError,
+          )
+        : FlutterDebugAdapter(
+            channel,
+            fileSystem: fileSystem,
+            platform: platform,
+            enableFlutterDds: enableDds,
+            enableAuthCodes: enableAuthCodes,
+            logger: logger,
+            onError: onError,
+          );
   }
 
   final ByteStreamServerChannel channel;

@@ -11,6 +11,8 @@
 #include "flutter/shell/platform/linux/fl_text_input_channel.h"
 
 static constexpr char kNewlineInputAction[] = "TextInputAction.newline";
+static constexpr char kInputPurposeImProperty[] = "input-purpose";
+static constexpr char kInputHintsImProperty[] = "input-hints";
 
 static constexpr int64_t kClientIdUnset = -1;
 
@@ -239,18 +241,30 @@ static gboolean im_delete_surrounding_cb(FlTextInputHandler* self,
 }
 
 // Called when the input method client is set up.
-static void set_client(int64_t client_id,
-                       const gchar* input_action,
-                       gboolean enable_delta_model,
-                       FlTextInputType input_type,
-                       gpointer user_data) {
+static void set_client(int64_t client_id, gpointer user_data) {
   FlTextInputHandler* self = FL_TEXT_INPUT_HANDLER(user_data);
 
   self->client_id = client_id;
+}
+
+// Called when the input method configuration is changed.
+static void configure(const gchar* input_action,
+                      gboolean enable_delta_model,
+                      FlTextInputType input_type,
+                      GtkInputPurpose im_purpose,
+                      GtkInputHints im_hints,
+                      gpointer user_data) {
+  FlTextInputHandler* self = FL_TEXT_INPUT_HANDLER(user_data);
+
   g_free(self->input_action);
   self->input_action = g_strdup(input_action);
   self->enable_delta_model = enable_delta_model;
   self->input_type = input_type;
+
+  g_object_set(G_OBJECT(self->im_context), kInputPurposeImProperty, im_purpose,
+               nullptr);
+  g_object_set(G_OBJECT(self->im_context), kInputHintsImProperty, im_hints,
+               nullptr);
 }
 
 // Hides the input method.
@@ -319,6 +333,12 @@ static void clear_client(gpointer user_data) {
 static void update_im_cursor_position(FlTextInputHandler* self) {
   // Skip update if not composing to avoid setting to position 0.
   if (!self->text_model->composing()) {
+    return;
+  }
+
+  // Cannot compute a position without a widget (e.g. after the view is
+  // disposed).
+  if (self->widget == nullptr) {
     return;
   }
 
@@ -411,6 +431,7 @@ static void fl_text_input_handler_init(FlTextInputHandler* self) {
 
 static FlTextInputChannelVTable text_input_vtable = {
     .set_client = set_client,
+    .configure = configure,
     .hide = hide,
     .show = show,
     .set_editing_state = set_editing_state,
@@ -465,8 +486,9 @@ void fl_text_input_handler_set_widget(FlTextInputHandler* self,
                                       GtkWidget* widget) {
   g_return_if_fail(FL_IS_TEXT_INPUT_HANDLER(self));
   self->widget = widget;
-  gtk_im_context_set_client_window(self->im_context,
-                                   gtk_widget_get_window(self->widget));
+  gtk_im_context_set_client_window(
+      self->im_context,
+      widget != nullptr ? gtk_widget_get_window(widget) : nullptr);
 }
 
 GtkWidget* fl_text_input_handler_get_widget(FlTextInputHandler* self) {

@@ -7,23 +7,30 @@
 @Tags(<String>['reduced-test-set'])
 library;
 
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+const Color _debugBlack = Color(0xFF000000);
+const Color _debugCanvas = Color(0xFFFAFAFA);
+const Color _debugText = Color(0xDD000000);
 
 void main() {
   testWidgets('PhysicalModel updates clipBehavior in updateRenderObject', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: PhysicalModel(color: Colors.red)));
+    await tester.pumpWidget(const TestWidgetsApp(home: PhysicalModel(color: _debugBlack)));
 
-    final RenderPhysicalModel renderPhysicalModel =
-        tester.allRenderObjects.whereType<RenderPhysicalModel>().first;
+    final RenderPhysicalModel renderPhysicalModel = tester.allRenderObjects
+        .whereType<RenderPhysicalModel>()
+        .first;
 
     expect(renderPhysicalModel.clipBehavior, equals(Clip.none));
 
     await tester.pumpWidget(
-      const MaterialApp(home: PhysicalModel(clipBehavior: Clip.antiAlias, color: Colors.red)),
+      const TestWidgetsApp(
+        home: PhysicalModel(clipBehavior: Clip.antiAlias, color: _debugBlack),
+      ),
     );
 
     expect(renderPhysicalModel.clipBehavior, equals(Clip.antiAlias));
@@ -33,21 +40,25 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      const MaterialApp(
-        home: PhysicalShape(color: Colors.red, clipper: ShapeBorderClipper(shape: CircleBorder())),
+      const TestWidgetsApp(
+        home: PhysicalShape(
+          color: _debugBlack,
+          clipper: ShapeBorderClipper(shape: CircleBorder()),
+        ),
       ),
     );
 
-    final RenderPhysicalShape renderPhysicalShape =
-        tester.allRenderObjects.whereType<RenderPhysicalShape>().first;
+    final RenderPhysicalShape renderPhysicalShape = tester.allRenderObjects
+        .whereType<RenderPhysicalShape>()
+        .first;
 
     expect(renderPhysicalShape.clipBehavior, equals(Clip.none));
 
     await tester.pumpWidget(
-      const MaterialApp(
+      const TestWidgetsApp(
         home: PhysicalShape(
           clipBehavior: Clip.antiAlias,
-          color: Colors.red,
+          color: _debugBlack,
           clipper: ShapeBorderClipper(shape: CircleBorder()),
         ),
       ),
@@ -59,23 +70,35 @@ void main() {
   testWidgets('PhysicalModel - clips when overflows and elevation is 0', (
     WidgetTester tester,
   ) async {
-    const Key key = Key('test');
+    const key = Key('test');
     await tester.pumpWidget(
-      Theme(
-        data: ThemeData(useMaterial3: false),
-        child: const MediaQuery(
-          key: key,
-          data: MediaQueryData(),
-          child: Directionality(
-            textDirection: TextDirection.ltr,
+      const MediaQuery(
+        key: key,
+        data: MediaQueryData(),
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: DefaultTextStyle(
+            style: TextStyle(color: _debugText, fontFamily: 'Roboto'),
             child: Padding(
               padding: EdgeInsets.all(50),
               child: Row(
                 children: <Widget>[
-                  Material(child: Text('A long long long long long long long string')),
-                  Material(child: Text('A long long long long long long long string')),
-                  Material(child: Text('A long long long long long long long string')),
-                  Material(child: Text('A long long long long long long long string')),
+                  PhysicalModel(
+                    color: _debugCanvas,
+                    child: Text('A long long long long long long long string'),
+                  ),
+                  PhysicalModel(
+                    color: _debugCanvas,
+                    child: Text('A long long long long long long long string'),
+                  ),
+                  PhysicalModel(
+                    color: _debugCanvas,
+                    child: Text('A long long long long long long long string'),
+                  ),
+                  PhysicalModel(
+                    color: _debugCanvas,
+                    child: Text('A long long long long long long long string'),
+                  ),
                 ],
               ),
             ),
@@ -91,5 +114,34 @@ void main() {
     // ignore: avoid_dynamic_calls
     expect(exception.diagnostics.first.toString(), startsWith('A RenderFlex overflowed by '));
     await expectLater(find.byKey(key), matchesGoldenFile('physical_model_overflow.png'));
+  });
+
+  testWidgets('PhysicalModel does not crash at zero area', (WidgetTester tester) async {
+    tester.view.physicalSize = Size.zero;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(child: PhysicalModel(color: Color(0xAABBCC00))),
+      ),
+    );
+    expect(tester.getSize(find.byType(PhysicalModel)), Size.zero);
+  });
+
+  testWidgets('PhysicalShape does not crash at zero area', (WidgetTester tester) async {
+    tester.view.physicalSize = Size.zero;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: PhysicalShape(
+            color: Color(0xAABBCC00),
+            clipper: ShapeBorderClipper(shape: CircleBorder()),
+          ),
+        ),
+      ),
+    );
+    expect(tester.getSize(find.byType(PhysicalShape)), Size.zero);
   });
 }

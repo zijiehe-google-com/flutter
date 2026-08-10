@@ -4,8 +4,8 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // This test is very fragile and bypasses some zone-related checks.
@@ -47,9 +47,9 @@ class _CountButtonState extends State<CountButton> {
   int counter = 0;
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton(
+    return GestureDetector(
       child: Text('Counter $counter'),
-      onPressed: () {
+      onTap: () {
         setState(() {
           counter += 1;
         });
@@ -93,7 +93,7 @@ void main() {
   TestBinding.ensureInitialized();
 
   test('Test pump on LiveWidgetController', () async {
-    runApp(const MaterialApp(home: Center(child: CountButton())));
+    runApp(const TestWidgetsApp(home: CountButton()));
 
     await SchedulerBinding.instance.endOfFrame;
     final WidgetController controller = LiveWidgetController(WidgetsBinding.instance);
@@ -106,7 +106,7 @@ void main() {
   });
 
   test('Test pumpAndSettle on LiveWidgetController', () async {
-    runApp(const MaterialApp(home: Center(child: AnimateSample())));
+    runApp(const TestWidgetsApp(home: AnimateSample()));
     await SchedulerBinding.instance.endOfFrame;
     final WidgetController controller = LiveWidgetController(WidgetsBinding.instance);
     expect(find.text('Value: 1.0'), findsNothing);
@@ -115,9 +115,9 @@ void main() {
   });
 
   test('Input event array on LiveWidgetController', () async {
-    final List<String> logs = <String>[];
+    final logs = <String>[];
     runApp(
-      MaterialApp(
+      TestWidgetsApp(
         home: Listener(
           onPointerDown: (PointerDownEvent event) => logs.add('down ${event.buttons}'),
           onPointerMove: (PointerMoveEvent event) => logs.add('move ${event.buttons}'),
@@ -130,7 +130,7 @@ void main() {
     final WidgetController controller = LiveWidgetController(WidgetsBinding.instance);
 
     final Offset location = controller.getCenter(find.text('test'));
-    final List<PointerEventRecord> records = <PointerEventRecord>[
+    final records = <PointerEventRecord>[
       PointerEventRecord(Duration.zero, <PointerEvent>[
         // Typically PointerAddedEvent is not used in testers, but for records
         // captured on a device it is usually what starts a gesture.
@@ -164,7 +164,7 @@ void main() {
     final List<Duration> timeDiffs = await controller.handlePointerEventRecord(records);
 
     expect(timeDiffs.length, records.length);
-    for (final Duration diff in timeDiffs) {
+    for (final diff in timeDiffs) {
       // Allow some freedom of time delay in real world.
       // TODO(pdblasi-google): The expected wiggle room should be -1, but occasional
       // results were reaching -6. This assert has been adjusted to reduce flakiness,
@@ -175,9 +175,9 @@ void main() {
       );
     }
 
-    const String b = '$kSecondaryMouseButton';
+    const b = '$kSecondaryMouseButton';
     expect(logs.first, 'down $b');
-    for (int i = 1; i < logs.length - 1; i++) {
+    for (var i = 1; i < logs.length - 1; i++) {
       expect(logs[i], 'move $b');
     }
     expect(logs.last, 'up $b');

@@ -91,12 +91,14 @@ class NotifierLayoutDelegate extends SingleChildLayoutDelegate {
 }
 
 Widget buildFrame(SingleChildLayoutDelegate delegate) {
-  return Center(child: CustomSingleChildLayout(delegate: delegate, child: Container()));
+  return Center(
+    child: CustomSingleChildLayout(delegate: delegate, child: Container()),
+  );
 }
 
 void main() {
   testWidgets('Control test for CustomSingleChildLayout', (WidgetTester tester) async {
-    final TestSingleChildLayoutDelegate delegate = TestSingleChildLayoutDelegate();
+    final delegate = TestSingleChildLayoutDelegate();
     await tester.pumpWidget(buildFrame(delegate));
 
     expect(delegate.constraintsFromGetSize.minWidth, 0.0);
@@ -117,7 +119,7 @@ void main() {
   });
 
   testWidgets('Test SingleChildDelegate shouldRelayout method', (WidgetTester tester) async {
-    TestSingleChildLayoutDelegate delegate = TestSingleChildLayoutDelegate();
+    var delegate = TestSingleChildLayoutDelegate();
     await tester.pumpWidget(buildFrame(delegate));
 
     // Layout happened because the delegate was set.
@@ -152,7 +154,7 @@ void main() {
   });
 
   testWidgets('Can use listener for relayout', (WidgetTester tester) async {
-    final ValueNotifier<Size> size = ValueNotifier<Size>(const Size(100.0, 200.0));
+    final size = ValueNotifier<Size>(const Size(100.0, 200.0));
     addTearDown(size.dispose);
 
     await tester.pumpWidget(buildFrame(NotifierLayoutDelegate(size)));
@@ -165,5 +167,19 @@ void main() {
 
     box = tester.renderObject(find.byType(CustomSingleChildLayout));
     expect(box.size, equals(const Size(150.0, 240.0)));
+  });
+
+  testWidgets('CustomSingleChildLayout does not crash at zero area', (WidgetTester tester) async {
+    tester.view.physicalSize = Size.zero;
+    final size = ValueNotifier<Size>(const Size(100, 200));
+    addTearDown(tester.view.reset);
+    addTearDown(size.dispose);
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(child: CustomSingleChildLayout(delegate: NotifierLayoutDelegate(size))),
+      ),
+    );
+    expect(tester.getSize(find.byType(CustomSingleChildLayout)), Size.zero);
   });
 }

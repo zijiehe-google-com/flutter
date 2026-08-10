@@ -4,14 +4,13 @@
 
 #include "flutter/fml/logging.h"
 #include "flutter/fml/time/time_point.h"
+#include "impeller/base/validation.h"
 #include "impeller/core/device_buffer_descriptor.h"
 #include "impeller/core/formats.h"
 #include "impeller/core/host_buffer.h"
 #include "impeller/core/sampler_descriptor.h"
 #include "impeller/fixtures/array.frag.h"
 #include "impeller/fixtures/array.vert.h"
-#include "impeller/fixtures/baby.frag.h"
-#include "impeller/fixtures/baby.vert.h"
 #include "impeller/fixtures/box_fade.frag.h"
 #include "impeller/fixtures/box_fade.vert.h"
 #include "impeller/fixtures/colors.frag.h"
@@ -44,6 +43,23 @@
 // TODO(zanderso): https://github.com/flutter/flutter/issues/127701
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
+namespace {
+std::pair<std::shared_ptr<impeller::HostBuffer>,
+          std::shared_ptr<impeller::HostBuffer>>
+createHostBuffers(const std::shared_ptr<impeller::Context>& context) {
+  auto data_host_buffer = impeller::HostBuffer::Create(
+      context->GetResourceAllocator(), context->GetIdleWaiter(),
+      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto indexes_host_buffer =
+      context->GetCapabilities()->NeedsPartitionedHostBuffer()
+          ? impeller::HostBuffer::Create(
+                context->GetResourceAllocator(), context->GetIdleWaiter(),
+                context->GetCapabilities()->GetMinimumUniformAlignment())
+          : data_host_buffer;
+  return {data_host_buffer, indexes_host_buffer};
+}
+}  // namespace
+
 namespace impeller {
 namespace testing {
 
@@ -58,8 +74,10 @@ TEST_P(RendererTest, CanCreateBoxPrimitive) {
   using BoxPipelineBuilder = PipelineBuilder<VS, FS>;
   auto desc = BoxPipelineBuilder::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(desc.has_value());
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*desc));
   desc->SetSampleCount(SampleCount::kCount4);
-  desc->SetStencilAttachmentDescriptors(std::nullopt);
+  desc->ClearStencilAttachments();
+  desc->ClearDepthAttachment();
 
   // Vertex buffer.
   VertexBufferBuilder<VS::PerVertexData> vertex_builder;
@@ -78,14 +96,14 @@ TEST_P(RendererTest, CanCreateBoxPrimitive) {
   raw_ptr<const Sampler> sampler = context->GetSamplerLibrary()->GetSampler({});
   ASSERT_TRUE(sampler);
 
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   SinglePassCallback callback = [&](RenderPass& pass) {
-    ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
     static bool wireframe;
-    ImGui::Checkbox("Wireframe", &wireframe);
-    ImGui::End();
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+      ImGui::Checkbox("Wireframe", &wireframe);
+      ImGui::End();
+    }
 
     desc->SetPolygonMode(wireframe ? PolygonMode::kLine : PolygonMode::kFill);
     auto pipeline = context->GetPipelineLibrary()->GetPipeline(desc).Get();
@@ -102,7 +120,7 @@ TEST_P(RendererTest, CanCreateBoxPrimitive) {
               Matrix::MakeOrthographic(pass.GetRenderTargetSize()));
     uniforms.mvp =
         pass.GetOrthographicTransform() * Matrix::MakeScale(GetContentScale());
-    VS::BindUniformBuffer(pass, host_buffer->EmplaceUniform(uniforms));
+    VS::BindUniformBuffer(pass, data_host_buffer->EmplaceUniform(uniforms));
 
     FS::FrameInfo frame_info;
     frame_info.current_time = GetSecondsElapsed();
@@ -110,68 +128,11 @@ TEST_P(RendererTest, CanCreateBoxPrimitive) {
     frame_info.window_size.x = GetWindowSize().width;
     frame_info.window_size.y = GetWindowSize().height;
 
-    FS::BindFrameInfo(pass, host_buffer->EmplaceUniform(frame_info));
+    FS::BindFrameInfo(pass, data_host_buffer->EmplaceUniform(frame_info));
     FS::BindContents1(pass, boston, sampler);
     FS::BindContents2(pass, bridge, sampler);
 
-    host_buffer->Reset();
-    return pass.Draw().ok();
-  };
-  OpenPlaygroundHere(callback);
-}
-
-TEST_P(RendererTest, BabysFirstTriangle) {
-  auto context = GetContext();
-  ASSERT_TRUE(context);
-
-  // Declare a shorthand for the shaders we are going to use.
-  using VS = BabyVertexShader;
-  using FS = BabyFragmentShader;
-
-  // Create a pipeline descriptor that uses the shaders together and default
-  // initializes the fixed function state.
-  //
-  // If the vertex shader outputs disagree with the fragment shader inputs, this
-  // will be a compile time error.
-  auto desc = PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
-  ASSERT_TRUE(desc.has_value());
-
-  // Modify the descriptor for our environment. This is specific to our test.
-  desc->SetSampleCount(SampleCount::kCount4);
-  desc->SetStencilAttachmentDescriptors(std::nullopt);
-
-  // Create a pipeline from our descriptor. This is expensive to do. So just do
-  // it once.
-  auto pipeline = context->GetPipelineLibrary()->GetPipeline(desc).Get();
-
-  // Create a host side buffer to build the vertex and uniform information.
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
-
-  // Specify the vertex buffer information.
-  VertexBufferBuilder<VS::PerVertexData> vertex_buffer_builder;
-  vertex_buffer_builder.AddVertices({
-      {{-0.5, -0.5}, Color::Red(), Color::Green()},
-      {{0.0, 0.5}, Color::Green(), Color::Blue()},
-      {{0.5, -0.5}, Color::Blue(), Color::Red()},
-  });
-
-  auto vertex_buffer = vertex_buffer_builder.CreateVertexBuffer(
-      *context->GetResourceAllocator());
-
-  SinglePassCallback callback = [&](RenderPass& pass) {
-    pass.SetPipeline(pipeline);
-    pass.SetVertexBuffer(vertex_buffer);
-
-    FS::FragInfo frag_info;
-    frag_info.time = fml::TimePoint::Now().ToEpochDelta().ToSecondsF();
-
-    auto host_buffer = HostBuffer::Create(
-        context->GetResourceAllocator(), context->GetIdleWaiter(),
-        context->GetCapabilities()->GetMinimumUniformAlignment());
-    FS::BindFragInfo(pass, host_buffer->EmplaceUniform(frag_info));
-
+    data_host_buffer->Reset();
     return pass.Draw().ok();
   };
   OpenPlaygroundHere(callback);
@@ -184,10 +145,9 @@ TEST_P(RendererTest, CanRenderPerspectiveCube) {
   ASSERT_TRUE(context);
   auto desc = PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(desc.has_value());
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*desc));
   desc->SetCullMode(CullMode::kBackFace);
   desc->SetWindingOrder(WindingOrder::kCounterClockwise);
-  desc->SetSampleCount(SampleCount::kCount4);
-  desc->ClearStencilAttachments();
 
   // Setup the vertex layout to take two bindings. The first for positions and
   // the second for colors.
@@ -244,17 +204,17 @@ TEST_P(RendererTest, CanRenderPerspectiveCube) {
   ASSERT_TRUE(sampler);
 
   Vector3 euler_angles;
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   SinglePassCallback callback = [&](RenderPass& pass) {
     static Degrees fov_y(60);
     static Scalar distance = 10;
 
-    ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::SliderFloat("Field of view", &fov_y.degrees, 0, 180);
-    ImGui::SliderFloat("Camera distance", &distance, 0, 30);
-    ImGui::End();
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+      ImGui::SliderFloat("Field of view", &fov_y.degrees, 0, 180);
+      ImGui::SliderFloat("Camera distance", &distance, 0, 30);
+      ImGui::End();
+    }
 
     pass.SetCommandLabel("Perspective Cube");
     pass.SetPipeline(pipeline);
@@ -282,9 +242,9 @@ TEST_P(RendererTest, CanRenderPerspectiveCube) {
         Matrix::MakeRotationX(Radians(euler_angles.x)) *
         Matrix::MakeRotationY(Radians(euler_angles.y)) *
         Matrix::MakeRotationZ(Radians(euler_angles.z));
-    VS::BindUniformBuffer(pass, host_buffer->EmplaceUniform(uniforms));
+    VS::BindUniformBuffer(pass, data_host_buffer->EmplaceUniform(uniforms));
 
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return pass.Draw().ok();
   };
   OpenPlaygroundHere(callback);
@@ -298,8 +258,7 @@ TEST_P(RendererTest, CanRenderMultiplePrimitives) {
   using BoxPipelineBuilder = PipelineBuilder<VS, FS>;
   auto desc = BoxPipelineBuilder::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(desc.has_value());
-  desc->SetSampleCount(SampleCount::kCount4);
-  desc->SetStencilAttachmentDescriptors(std::nullopt);
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*desc));
   auto box_pipeline =
       context->GetPipelineLibrary()->GetPipeline(std::move(desc)).Get();
   ASSERT_TRUE(box_pipeline);
@@ -325,9 +284,7 @@ TEST_P(RendererTest, CanRenderMultiplePrimitives) {
   raw_ptr<const Sampler> sampler = context->GetSamplerLibrary()->GetSampler({});
   ASSERT_TRUE(sampler);
 
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   SinglePassCallback callback = [&](RenderPass& pass) {
     for (size_t i = 0; i < 1; i++) {
       for (size_t j = 0; j < 1; j++) {
@@ -341,7 +298,7 @@ TEST_P(RendererTest, CanRenderMultiplePrimitives) {
         frame_info.window_size.x = GetWindowSize().width;
         frame_info.window_size.y = GetWindowSize().height;
 
-        FS::BindFrameInfo(pass, host_buffer->EmplaceUniform(frame_info));
+        FS::BindFrameInfo(pass, data_host_buffer->EmplaceUniform(frame_info));
         FS::BindContents1(pass, boston, sampler);
         FS::BindContents2(pass, bridge, sampler);
 
@@ -351,14 +308,14 @@ TEST_P(RendererTest, CanRenderMultiplePrimitives) {
         uniforms.mvp = pass.GetOrthographicTransform() *
                        Matrix::MakeScale(GetContentScale()) *
                        Matrix::MakeTranslation({i * 50.0f, j * 50.0f, 0.0f});
-        VS::BindUniformBuffer(pass, host_buffer->EmplaceUniform(uniforms));
+        VS::BindUniformBuffer(pass, data_host_buffer->EmplaceUniform(uniforms));
         if (!pass.Draw().ok()) {
           return false;
         }
       }
     }
 
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   };
   OpenPlaygroundHere(callback);
@@ -380,9 +337,7 @@ TEST_P(RendererTest, CanRenderToTexture) {
   auto box_pipeline =
       context->GetPipelineLibrary()->GetPipeline(pipeline_desc).Get();
   ASSERT_TRUE(box_pipeline);
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
 
   VertexBufferBuilder<VS::PerVertexData> vertex_builder;
   vertex_builder.SetLabel("Box");
@@ -456,21 +411,29 @@ TEST_P(RendererTest, CanRenderToTexture) {
   frame_info.window_size.x = GetWindowSize().width;
   frame_info.window_size.y = GetWindowSize().height;
 
-  FS::BindFrameInfo(*r2t_pass, host_buffer->EmplaceUniform(frame_info));
+  FS::BindFrameInfo(*r2t_pass, data_host_buffer->EmplaceUniform(frame_info));
   FS::BindContents1(*r2t_pass, boston, sampler);
   FS::BindContents2(*r2t_pass, bridge, sampler);
 
   VS::UniformBuffer uniforms;
   uniforms.mvp = Matrix::MakeOrthographic(ISize{1024, 768}) *
                  Matrix::MakeTranslation({50.0f, 50.0f, 0.0f});
-  VS::BindUniformBuffer(*r2t_pass, host_buffer->EmplaceUniform(uniforms));
+  VS::BindUniformBuffer(*r2t_pass, data_host_buffer->EmplaceUniform(uniforms));
   ASSERT_TRUE(r2t_pass->Draw().ok());
   ASSERT_TRUE(r2t_pass->EncodeCommands());
+  ASSERT_TRUE(context->FlushCommandBuffers());
 }
 
 TEST_P(RendererTest, CanRenderInstanced) {
-  if (GetParam() == PlaygroundBackend::kOpenGLES) {
-    GTEST_SKIP() << "Instancing is not supported on OpenGL.";
+  if (GetParam() == PlaygroundBackend::kOpenGLES ||
+      GetParam() == PlaygroundBackend::kOpenGLESSDF) {
+    // This test drives instancing through gl_InstanceIndex and a storage
+    // buffer, both of which require OpenGL ES 3.1. The portable instance-rate
+    // vertex attribute path, which works down to OpenGL ES 2.0, is covered by
+    // CanRenderInstancedWithVertexAttributes.
+    GTEST_SKIP() << "This test's instance-ID mechanism requires OpenGL ES 3.1; "
+                    "CanRenderInstancedWithVertexAttributes covers the "
+                    "portable instance-rate path.";
   }
   using VS = InstancedDrawVertexShader;
   using FS = InstancedDrawFragmentShader;
@@ -485,16 +448,12 @@ TEST_P(RendererTest, CanRenderInstanced) {
       VS::PerVertexData{Point{110, 110}},
   });
 
-  ASSERT_NE(GetContext(), nullptr);
-  auto pipeline =
-      GetContext()
-          ->GetPipelineLibrary()
-          ->GetPipeline(PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(
-                            *GetContext())
-                            ->SetSampleCount(SampleCount::kCount4)
-                            .SetStencilAttachmentDescriptors(std::nullopt))
-
-          .Get();
+  std::shared_ptr<Context> context = GetContext();
+  ASSERT_TRUE(context);
+  auto desc = PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
+  ASSERT_TRUE(desc.has_value());
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*desc));
+  auto pipeline = GetContext()->GetPipelineLibrary()->GetPipeline(desc).Get();
   ASSERT_TRUE(pipeline && pipeline->IsValid());
 
   static constexpr size_t kInstancesCount = 5u;
@@ -503,9 +462,8 @@ TEST_P(RendererTest, CanRenderInstanced) {
     instances.colors[i] = Color::Random();
   }
 
-  auto host_buffer = HostBuffer::Create(
-      GetContext()->GetResourceAllocator(), GetContext()->GetIdleWaiter(),
-      GetContext()->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] =
+      createHostBuffers(GetContext());
   ASSERT_TRUE(OpenPlaygroundHere([&](RenderPass& pass) -> bool {
     pass.SetPipeline(pipeline);
     pass.SetCommandLabel("InstancedDraw");
@@ -515,21 +473,25 @@ TEST_P(RendererTest, CanRenderInstanced) {
               Matrix::MakeOrthographic(pass.GetRenderTargetSize()));
     frame_info.mvp =
         pass.GetOrthographicTransform() * Matrix::MakeScale(GetContentScale());
-    VS::BindFrameInfo(pass, host_buffer->EmplaceUniform(frame_info));
-    VS::BindInstanceInfo(pass, host_buffer->EmplaceStorageBuffer(instances));
-    pass.SetVertexBuffer(builder.CreateVertexBuffer(*host_buffer));
+    VS::BindFrameInfo(pass, data_host_buffer->EmplaceUniform(frame_info));
+    VS::BindInstanceInfo(pass,
+                         data_host_buffer->EmplaceStorageBuffer(instances));
+    pass.SetVertexBuffer(
+        builder.CreateVertexBuffer(*data_host_buffer, *indexes_host_buffer));
 
     pass.SetInstanceCount(kInstancesCount);
     pass.Draw();
 
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   }));
 }
 
 TEST_P(RendererTest, CanBlitTextureToTexture) {
-  if (GetBackend() == PlaygroundBackend::kOpenGLES) {
-    GTEST_SKIP() << "Mipmap test shader not supported on GLES.";
+  if (GetBackend() == PlaygroundBackend::kOpenGLES ||
+      GetBackend() == PlaygroundBackend::kOpenGLESSDF ||
+      GetBackend() == PlaygroundBackend::kVulkan) {
+    GTEST_SKIP() << "Mipmap test shader not supported on GLES or Vulkan.";
   }
   auto context = GetContext();
   ASSERT_TRUE(context);
@@ -538,8 +500,7 @@ TEST_P(RendererTest, CanBlitTextureToTexture) {
   using FS = MipmapsFragmentShader;
   auto desc = PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(desc.has_value());
-  desc->SetSampleCount(SampleCount::kCount4);
-  desc->SetStencilAttachmentDescriptors(std::nullopt);
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*desc));
   auto mipmaps_pipeline =
       context->GetPipelineLibrary()->GetPipeline(std::move(desc)).Get();
   ASSERT_TRUE(mipmaps_pipeline);
@@ -575,9 +536,7 @@ TEST_P(RendererTest, CanBlitTextureToTexture) {
       vertex_builder.CreateVertexBuffer(*context->GetResourceAllocator());
   ASSERT_TRUE(vertex_buffer);
 
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   Playground::RenderCallback callback = [&](RenderTarget& render_target) {
     auto buffer = context->CreateCommandBuffer();
     if (!buffer) {
@@ -593,7 +552,13 @@ TEST_P(RendererTest, CanBlitTextureToTexture) {
       pass->SetLabel("Playground Blit Pass");
 
       // Blit `bridge` to the top left corner of the texture.
-      pass->AddCopy(bridge, texture);
+      // The bridge image is larger than the texture which can fail
+      // if Metal validation is enabled as it is in run_tests.py.
+      IRect bridge_bounds = IRect::MakeSize(bridge->GetSize());
+      IRect texture_bounds = IRect::MakeSize(texture->GetSize());
+      std::optional<IRect> blit_bounds =
+          bridge_bounds.Intersection(texture_bounds);
+      pass->AddCopy(bridge, texture, blit_bounds);
 
       if (!pass->EncodeCommands()) {
         return false;
@@ -616,11 +581,11 @@ TEST_P(RendererTest, CanBlitTextureToTexture) {
                   Matrix::MakeOrthographic(pass->GetRenderTargetSize()));
         frame_info.mvp = pass->GetOrthographicTransform() *
                          Matrix::MakeScale(GetContentScale());
-        VS::BindFrameInfo(*pass, host_buffer->EmplaceUniform(frame_info));
+        VS::BindFrameInfo(*pass, data_host_buffer->EmplaceUniform(frame_info));
 
         FS::FragInfo frag_info;
         frag_info.lod = 0;
-        FS::BindFragInfo(*pass, host_buffer->EmplaceUniform(frag_info));
+        FS::BindFragInfo(*pass, data_host_buffer->EmplaceUniform(frag_info));
 
         auto sampler = context->GetSamplerLibrary()->GetSampler({});
         FS::BindTex(*pass, texture, sampler);
@@ -633,14 +598,15 @@ TEST_P(RendererTest, CanBlitTextureToTexture) {
     if (!context->GetCommandQueue()->Submit({buffer}).ok()) {
       return false;
     }
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   };
   OpenPlaygroundHere(callback);
 }
 
 TEST_P(RendererTest, CanBlitTextureToBuffer) {
-  if (GetBackend() == PlaygroundBackend::kOpenGLES) {
+  if (GetBackend() == PlaygroundBackend::kOpenGLES ||
+      GetBackend() == PlaygroundBackend::kOpenGLESSDF) {
     GTEST_SKIP() << "Mipmap test shader not supported on GLES.";
   }
   auto context = GetContext();
@@ -650,8 +616,7 @@ TEST_P(RendererTest, CanBlitTextureToBuffer) {
   using FS = MipmapsFragmentShader;
   auto desc = PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(desc.has_value());
-  desc->SetSampleCount(SampleCount::kCount4);
-  desc->SetStencilAttachmentDescriptors(std::nullopt);
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*desc));
   auto mipmaps_pipeline =
       context->GetPipelineLibrary()->GetPipeline(std::move(desc)).Get();
   ASSERT_TRUE(mipmaps_pipeline);
@@ -692,9 +657,7 @@ TEST_P(RendererTest, CanBlitTextureToBuffer) {
       vertex_builder.CreateVertexBuffer(*context->GetResourceAllocator());
   ASSERT_TRUE(vertex_buffer);
 
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   Playground::RenderCallback callback = [&](RenderTarget& render_target) {
     {
       auto buffer = context->CreateCommandBuffer();
@@ -739,11 +702,11 @@ TEST_P(RendererTest, CanBlitTextureToBuffer) {
                   Matrix::MakeOrthographic(pass->GetRenderTargetSize()));
         frame_info.mvp = pass->GetOrthographicTransform() *
                          Matrix::MakeScale(GetContentScale());
-        VS::BindFrameInfo(*pass, host_buffer->EmplaceUniform(frame_info));
+        VS::BindFrameInfo(*pass, data_host_buffer->EmplaceUniform(frame_info));
 
         FS::FragInfo frag_info;
         frag_info.lod = 0;
-        FS::BindFragInfo(*pass, host_buffer->EmplaceUniform(frag_info));
+        FS::BindFragInfo(*pass, data_host_buffer->EmplaceUniform(frag_info));
 
         raw_ptr<const Sampler> sampler =
             context->GetSamplerLibrary()->GetSampler({});
@@ -764,14 +727,15 @@ TEST_P(RendererTest, CanBlitTextureToBuffer) {
         return false;
       }
     }
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   };
   OpenPlaygroundHere(callback);
 }
 
 TEST_P(RendererTest, CanGenerateMipmaps) {
-  if (GetBackend() == PlaygroundBackend::kOpenGLES) {
+  if (GetBackend() == PlaygroundBackend::kOpenGLES ||
+      GetBackend() == PlaygroundBackend::kOpenGLESSDF) {
     GTEST_SKIP() << "Mipmap test shader not supported on GLES.";
   }
   auto context = GetContext();
@@ -781,8 +745,7 @@ TEST_P(RendererTest, CanGenerateMipmaps) {
   using FS = MipmapsFragmentShader;
   auto desc = PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(desc.has_value());
-  desc->SetSampleCount(SampleCount::kCount4);
-  desc->SetStencilAttachmentDescriptors(std::nullopt);
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*desc));
   auto mipmaps_pipeline =
       context->GetPipelineLibrary()->GetPipeline(std::move(desc)).Get();
   ASSERT_TRUE(mipmaps_pipeline);
@@ -807,9 +770,7 @@ TEST_P(RendererTest, CanGenerateMipmaps) {
   ASSERT_TRUE(vertex_buffer);
 
   bool first_frame = true;
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   Playground::RenderCallback callback = [&](RenderTarget& render_target) {
     const char* mip_filter_names[] = {"Base", "Nearest", "Linear"};
     const MipFilter mip_filters[] = {MipFilter::kBase, MipFilter::kNearest,
@@ -823,13 +784,15 @@ TEST_P(RendererTest, CanGenerateMipmaps) {
     static int selected_min_filter = 0;
     static float lod = 4.5;
 
-    ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Combo("Mip filter", &selected_mip_filter, mip_filter_names,
-                 sizeof(mip_filter_names) / sizeof(char*));
-    ImGui::Combo("Min filter", &selected_min_filter, min_filter_names,
-                 sizeof(min_filter_names) / sizeof(char*));
-    ImGui::SliderFloat("LOD", &lod, 0, boston->GetMipCount() - 1);
-    ImGui::End();
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+      ImGui::Combo("Mip filter", &selected_mip_filter, mip_filter_names,
+                   sizeof(mip_filter_names) / sizeof(char*));
+      ImGui::Combo("Min filter", &selected_min_filter, min_filter_names,
+                   sizeof(min_filter_names) / sizeof(char*));
+      ImGui::SliderFloat("LOD", &lod, 0, boston->GetMipCount() - 1);
+      ImGui::End();
+    }
 
     auto buffer = context->CreateCommandBuffer();
     if (!buffer) {
@@ -867,11 +830,11 @@ TEST_P(RendererTest, CanGenerateMipmaps) {
                   Matrix::MakeOrthographic(pass->GetRenderTargetSize()));
         frame_info.mvp = pass->GetOrthographicTransform() *
                          Matrix::MakeScale(GetContentScale());
-        VS::BindFrameInfo(*pass, host_buffer->EmplaceUniform(frame_info));
+        VS::BindFrameInfo(*pass, data_host_buffer->EmplaceUniform(frame_info));
 
         FS::FragInfo frag_info;
         frag_info.lod = lod;
-        FS::BindFragInfo(*pass, host_buffer->EmplaceUniform(frag_info));
+        FS::BindFragInfo(*pass, data_host_buffer->EmplaceUniform(frag_info));
 
         SamplerDescriptor sampler_desc;
         sampler_desc.mip_filter = mip_filters[selected_mip_filter];
@@ -888,7 +851,7 @@ TEST_P(RendererTest, CanGenerateMipmaps) {
     if (!context->GetCommandQueue()->Submit({buffer}).ok()) {
       return false;
     }
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   };
   OpenPlaygroundHere(callback);
@@ -902,8 +865,7 @@ TEST_P(RendererTest, TheImpeller) {
   auto pipeline_descriptor =
       PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(pipeline_descriptor.has_value());
-  pipeline_descriptor->SetSampleCount(SampleCount::kCount4);
-  pipeline_descriptor->SetStencilAttachmentDescriptors(std::nullopt);
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*pipeline_descriptor));
   auto pipeline =
       context->GetPipelineLibrary()->GetPipeline(pipeline_descriptor).Get();
   ASSERT_TRUE(pipeline && pipeline->IsValid());
@@ -921,10 +883,8 @@ TEST_P(RendererTest, TheImpeller) {
        "table_mountain_pz.png", "table_mountain_nz.png"});
   raw_ptr<const Sampler> cube_map_sampler =
       context->GetSamplerLibrary()->GetSampler({});
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
 
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   SinglePassCallback callback = [&](RenderPass& pass) {
     auto size = pass.GetRenderTargetSize();
 
@@ -937,22 +897,23 @@ TEST_P(RendererTest, TheImpeller) {
                          {Point(size.width, 0)},
                          {Point(0, size.height)},
                          {Point(size.width, size.height)}});
-    pass.SetVertexBuffer(builder.CreateVertexBuffer(*host_buffer));
+    pass.SetVertexBuffer(
+        builder.CreateVertexBuffer(*data_host_buffer, *indexes_host_buffer));
 
     VS::FrameInfo frame_info;
     EXPECT_EQ(pass.GetOrthographicTransform(), Matrix::MakeOrthographic(size));
     frame_info.mvp = pass.GetOrthographicTransform();
-    VS::BindFrameInfo(pass, host_buffer->EmplaceUniform(frame_info));
+    VS::BindFrameInfo(pass, data_host_buffer->EmplaceUniform(frame_info));
 
     FS::FragInfo fs_uniform;
     fs_uniform.texture_size = Point(size);
     fs_uniform.time = GetSecondsElapsed();
-    FS::BindFragInfo(pass, host_buffer->EmplaceUniform(fs_uniform));
+    FS::BindFragInfo(pass, data_host_buffer->EmplaceUniform(fs_uniform));
     FS::BindBlueNoise(pass, blue_noise, noise_sampler);
     FS::BindCubeMap(pass, cube_map, cube_map_sampler);
 
     pass.Draw().ok();
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   };
   OpenPlaygroundHere(callback);
@@ -966,16 +927,12 @@ TEST_P(RendererTest, Planet) {
   auto pipeline_descriptor =
       PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(pipeline_descriptor.has_value());
-  pipeline_descriptor->SetSampleCount(SampleCount::kCount4);
-  pipeline_descriptor->SetStencilAttachmentDescriptors(std::nullopt);
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*pipeline_descriptor));
   auto pipeline =
       context->GetPipelineLibrary()->GetPipeline(pipeline_descriptor).Get();
   ASSERT_TRUE(pipeline && pipeline->IsValid());
 
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
-
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   SinglePassCallback callback = [&](RenderPass& pass) {
     static Scalar speed = 0.1;
     static Scalar planet_size = 550.0;
@@ -985,13 +942,15 @@ TEST_P(RendererTest, Planet) {
 
     auto size = pass.GetRenderTargetSize();
 
-    ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::SliderFloat("Speed", &speed, 0.0, 10.0);
-    ImGui::SliderFloat("Planet Size", &planet_size, 0.1, 1000);
-    ImGui::Checkbox("Show Normals", &show_normals);
-    ImGui::Checkbox("Show Noise", &show_noise);
-    ImGui::InputFloat("Seed Value", &seed_value);
-    ImGui::End();
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+      ImGui::SliderFloat("Speed", &speed, 0.0, 10.0);
+      ImGui::SliderFloat("Planet Size", &planet_size, 0.1, 1000);
+      ImGui::Checkbox("Show Normals", &show_normals);
+      ImGui::Checkbox("Show Noise", &show_noise);
+      ImGui::InputFloat("Seed Value", &seed_value);
+      ImGui::End();
+    }
 
     pass.SetPipeline(pipeline);
     pass.SetCommandLabel("Planet scene");
@@ -1002,12 +961,13 @@ TEST_P(RendererTest, Planet) {
                          {Point(size.width, 0)},
                          {Point(0, size.height)},
                          {Point(size.width, size.height)}});
-    pass.SetVertexBuffer(builder.CreateVertexBuffer(*host_buffer));
+    pass.SetVertexBuffer(
+        builder.CreateVertexBuffer(*data_host_buffer, *indexes_host_buffer));
 
     VS::FrameInfo frame_info;
     EXPECT_EQ(pass.GetOrthographicTransform(), Matrix::MakeOrthographic(size));
     frame_info.mvp = pass.GetOrthographicTransform();
-    VS::BindFrameInfo(pass, host_buffer->EmplaceUniform(frame_info));
+    VS::BindFrameInfo(pass, data_host_buffer->EmplaceUniform(frame_info));
 
     FS::FragInfo fs_uniform;
     fs_uniform.resolution = Point(size);
@@ -1017,10 +977,10 @@ TEST_P(RendererTest, Planet) {
     fs_uniform.show_normals = show_normals ? 1.0 : 0.0;
     fs_uniform.show_noise = show_noise ? 1.0 : 0.0;
     fs_uniform.seed_value = seed_value;
-    FS::BindFragInfo(pass, host_buffer->EmplaceUniform(fs_uniform));
+    FS::BindFragInfo(pass, data_host_buffer->EmplaceUniform(fs_uniform));
 
     pass.Draw().ok();
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   };
   OpenPlaygroundHere(callback);
@@ -1034,15 +994,12 @@ TEST_P(RendererTest, ArrayUniforms) {
   auto pipeline_descriptor =
       PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(pipeline_descriptor.has_value());
-  pipeline_descriptor->SetSampleCount(SampleCount::kCount4);
-  pipeline_descriptor->SetStencilAttachmentDescriptors(std::nullopt);
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*pipeline_descriptor));
   auto pipeline =
       context->GetPipelineLibrary()->GetPipeline(pipeline_descriptor).Get();
   ASSERT_TRUE(pipeline && pipeline->IsValid());
 
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   SinglePassCallback callback = [&](RenderPass& pass) {
     auto size = pass.GetRenderTargetSize();
 
@@ -1055,13 +1012,14 @@ TEST_P(RendererTest, ArrayUniforms) {
                          {Point(size.width, 0)},
                          {Point(0, size.height)},
                          {Point(size.width, size.height)}});
-    pass.SetVertexBuffer(builder.CreateVertexBuffer(*host_buffer));
+    pass.SetVertexBuffer(
+        builder.CreateVertexBuffer(*data_host_buffer, *indexes_host_buffer));
 
     VS::FrameInfo frame_info;
     EXPECT_EQ(pass.GetOrthographicTransform(), Matrix::MakeOrthographic(size));
     frame_info.mvp =
         pass.GetOrthographicTransform() * Matrix::MakeScale(GetContentScale());
-    VS::BindFrameInfo(pass, host_buffer->EmplaceUniform(frame_info));
+    VS::BindFrameInfo(pass, data_host_buffer->EmplaceUniform(frame_info));
 
     auto time = GetSecondsElapsed();
     auto y_pos = [&time](float x) {
@@ -1076,10 +1034,10 @@ TEST_P(RendererTest, ArrayUniforms) {
                    Color::MakeRGBA8(244, 180, 0, 255),
                    Color::MakeRGBA8(15, 157, 88, 255)},
     };
-    FS::BindFragInfo(pass, host_buffer->EmplaceUniform(fs_uniform));
+    FS::BindFragInfo(pass, data_host_buffer->EmplaceUniform(fs_uniform));
 
     pass.Draw();
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   };
   OpenPlaygroundHere(callback);
@@ -1093,15 +1051,12 @@ TEST_P(RendererTest, InactiveUniforms) {
   auto pipeline_descriptor =
       PipelineBuilder<VS, FS>::MakeDefaultPipelineDescriptor(*context);
   ASSERT_TRUE(pipeline_descriptor.has_value());
-  pipeline_descriptor->SetSampleCount(SampleCount::kCount4);
-  pipeline_descriptor->SetStencilAttachmentDescriptors(std::nullopt);
+  ASSERT_TRUE(InitializePipelineDescriptorForRendering(*pipeline_descriptor));
   auto pipeline =
       context->GetPipelineLibrary()->GetPipeline(pipeline_descriptor).Get();
   ASSERT_TRUE(pipeline && pipeline->IsValid());
 
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   SinglePassCallback callback = [&](RenderPass& pass) {
     auto size = pass.GetRenderTargetSize();
 
@@ -1115,20 +1070,21 @@ TEST_P(RendererTest, InactiveUniforms) {
                          {Point(size.width, 0)},
                          {Point(0, size.height)},
                          {Point(size.width, size.height)}});
-    pass.SetVertexBuffer(builder.CreateVertexBuffer(*host_buffer));
+    pass.SetVertexBuffer(
+        builder.CreateVertexBuffer(*data_host_buffer, *indexes_host_buffer));
 
     VS::FrameInfo frame_info;
     EXPECT_EQ(pass.GetOrthographicTransform(), Matrix::MakeOrthographic(size));
     frame_info.mvp =
         pass.GetOrthographicTransform() * Matrix::MakeScale(GetContentScale());
-    VS::BindFrameInfo(pass, host_buffer->EmplaceUniform(frame_info));
+    VS::BindFrameInfo(pass, data_host_buffer->EmplaceUniform(frame_info));
 
     FS::FragInfo fs_uniform = {.unused_color = Color::Red(),
                                .color = Color::Green()};
-    FS::BindFragInfo(pass, host_buffer->EmplaceUniform(fs_uniform));
+    FS::BindFragInfo(pass, data_host_buffer->EmplaceUniform(fs_uniform));
 
     pass.Draw().ok();
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   };
   OpenPlaygroundHere(callback);
@@ -1265,9 +1221,7 @@ TEST_P(RendererTest, StencilMask) {
   static int current_back_compare =
       CompareFunctionUI().IndexOf(CompareFunction::kLessEqual);
 
-  auto host_buffer = HostBuffer::Create(
-      context->GetResourceAllocator(), context->GetIdleWaiter(),
-      context->GetCapabilities()->GetMinimumUniformAlignment());
+  auto [data_host_buffer, indexes_host_buffer] = createHostBuffers(context);
   Playground::RenderCallback callback = [&](RenderTarget& render_target) {
     auto buffer = context->CreateCommandBuffer();
     if (!buffer) {
@@ -1313,17 +1267,21 @@ TEST_P(RendererTest, StencilMask) {
         return false;
       }
       pass->SetLabel("Stencil Buffer");
-      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-      ImGui::SliderInt("Stencil Write Value", &stencil_reference_write, 0,
-                       0xFF);
-      ImGui::SliderInt("Stencil Compare Value", &stencil_reference_read, 0,
-                       0xFF);
-      ImGui::Checkbox("Back face mode", &mirror);
-      ImGui::ListBox("Front face compare function", &current_front_compare,
-                     CompareFunctionUI().labels(), CompareFunctionUI().size());
-      ImGui::ListBox("Back face compare function", &current_back_compare,
-                     CompareFunctionUI().labels(), CompareFunctionUI().size());
-      ImGui::End();
+      if (IsPlaygroundEnabled()) {
+        ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::SliderInt("Stencil Write Value", &stencil_reference_write, 0,
+                         0xFF);
+        ImGui::SliderInt("Stencil Compare Value", &stencil_reference_read, 0,
+                         0xFF);
+        ImGui::Checkbox("Back face mode", &mirror);
+        ImGui::ListBox("Front face compare function", &current_front_compare,
+                       CompareFunctionUI().labels(),
+                       CompareFunctionUI().size());
+        ImGui::ListBox("Back face compare function", &current_back_compare,
+                       CompareFunctionUI().labels(),
+                       CompareFunctionUI().size());
+        ImGui::End();
+      }
 
       StencilAttachmentDescriptor front;
       front.stencil_compare =
@@ -1349,7 +1307,7 @@ TEST_P(RendererTest, StencilMask) {
       if (mirror) {
         uniforms.mvp = Matrix::MakeScale(Vector2(-1, 1)) * uniforms.mvp;
       }
-      VS::BindUniformBuffer(*pass, host_buffer->EmplaceUniform(uniforms));
+      VS::BindUniformBuffer(*pass, data_host_buffer->EmplaceUniform(uniforms));
 
       FS::FrameInfo frame_info;
       frame_info.current_time = GetSecondsElapsed();
@@ -1357,7 +1315,7 @@ TEST_P(RendererTest, StencilMask) {
       frame_info.window_size.x = GetWindowSize().width;
       frame_info.window_size.y = GetWindowSize().height;
 
-      FS::BindFrameInfo(*pass, host_buffer->EmplaceUniform(frame_info));
+      FS::BindFrameInfo(*pass, data_host_buffer->EmplaceUniform(frame_info));
       FS::BindContents1(*pass, boston, sampler);
       FS::BindContents2(*pass, bridge, sampler);
       if (!pass->Draw().ok()) {
@@ -1369,9 +1327,13 @@ TEST_P(RendererTest, StencilMask) {
     if (!context->GetCommandQueue()->Submit({buffer}).ok()) {
       return false;
     }
-    host_buffer->Reset();
+    data_host_buffer->Reset();
     return true;
   };
+
+  if ((true)) {  // Disables trailing code without compiler warning.
+    GTEST_SKIP() << "See: https://github.com/flutter/flutter/issues/188884";
+  }
   OpenPlaygroundHere(callback);
 }
 
@@ -1411,6 +1373,7 @@ TEST_P(RendererTest,
 
 template <class VertexShader, class FragmentShader>
 std::shared_ptr<Pipeline<PipelineDescriptor>> CreateDefaultPipeline(
+    RendererTest* test,
     const std::shared_ptr<Context>& context) {
   using TexturePipelineBuilder = PipelineBuilder<VertexShader, FragmentShader>;
   auto pipeline_desc =
@@ -1418,8 +1381,9 @@ std::shared_ptr<Pipeline<PipelineDescriptor>> CreateDefaultPipeline(
   if (!pipeline_desc.has_value()) {
     return nullptr;
   }
-  pipeline_desc->SetSampleCount(SampleCount::kCount4);
-  pipeline_desc->SetStencilAttachmentDescriptors(std::nullopt);
+  if (!test->InitializePipelineDescriptorForRendering(*pipeline_desc)) {
+    return nullptr;
+  }
   auto pipeline =
       context->GetPipelineLibrary()->GetPipeline(pipeline_desc).Get();
   if (!pipeline || !pipeline->IsValid()) {
@@ -1446,8 +1410,9 @@ TEST_P(RendererTest, CanSepiaToneWithSubpasses) {
   }
 
   // Create pipelines.
-  auto texture_pipeline = CreateDefaultPipeline<TextureVS, TextureFS>(context);
-  auto sepia_pipeline = CreateDefaultPipeline<SepiaVS, SepiaFS>(context);
+  auto texture_pipeline =
+      CreateDefaultPipeline<TextureVS, TextureFS>(this, context);
+  auto sepia_pipeline = CreateDefaultPipeline<SepiaVS, SepiaFS>(this, context);
 
   ASSERT_TRUE(texture_pipeline);
   ASSERT_TRUE(sepia_pipeline);
@@ -1479,11 +1444,10 @@ TEST_P(RendererTest, CanSepiaToneWithSubpasses) {
   const auto& sampler = context->GetSamplerLibrary()->GetSampler({});
   ASSERT_TRUE(sampler);
 
+  auto buffer = HostBuffer::Create(
+      context->GetResourceAllocator(), context->GetIdleWaiter(),
+      context->GetCapabilities()->GetMinimumUniformAlignment());
   SinglePassCallback callback = [&](RenderPass& pass) {
-    auto buffer = HostBuffer::Create(
-        context->GetResourceAllocator(), context->GetIdleWaiter(),
-        context->GetCapabilities()->GetMinimumUniformAlignment());
-
     // Draw the texture.
     {
       pass.SetPipeline(texture_pipeline);
@@ -1519,6 +1483,16 @@ TEST_P(RendererTest, CanSepiaToneWithSubpasses) {
 }
 
 TEST_P(RendererTest, CanSepiaToneThenSwizzleWithSubpasses) {
+  switch (GetBackend()) {
+    case PlaygroundBackend::kMetal:
+    case PlaygroundBackend::kMetalSDF:
+    case PlaygroundBackend::kVulkan:
+      break;
+    case PlaygroundBackend::kOpenGLES:
+    case PlaygroundBackend::kOpenGLESSDF:
+      GTEST_SKIP() << "Platform is crashing in CI on this example "
+                   << "(see https://github.com/flutter/flutter/issues/189287).";
+  }
   // Define shader types
   using TextureVS = TextureVertexShader;
   using TextureFS = TextureFragmentShader;
@@ -1539,9 +1513,11 @@ TEST_P(RendererTest, CanSepiaToneThenSwizzleWithSubpasses) {
   }
 
   // Create pipelines.
-  auto texture_pipeline = CreateDefaultPipeline<TextureVS, TextureFS>(context);
-  auto swizzle_pipeline = CreateDefaultPipeline<SwizzleVS, SwizzleFS>(context);
-  auto sepia_pipeline = CreateDefaultPipeline<SepiaVS, SepiaFS>(context);
+  auto texture_pipeline =
+      CreateDefaultPipeline<TextureVS, TextureFS>(this, context);
+  auto swizzle_pipeline =
+      CreateDefaultPipeline<SwizzleVS, SwizzleFS>(this, context);
+  auto sepia_pipeline = CreateDefaultPipeline<SepiaVS, SepiaFS>(this, context);
 
   ASSERT_TRUE(texture_pipeline);
   ASSERT_TRUE(swizzle_pipeline);
@@ -1574,11 +1550,10 @@ TEST_P(RendererTest, CanSepiaToneThenSwizzleWithSubpasses) {
   const auto& sampler = context->GetSamplerLibrary()->GetSampler({});
   ASSERT_TRUE(sampler);
 
+  auto data_buffer = HostBuffer::Create(
+      context->GetResourceAllocator(), context->GetIdleWaiter(),
+      context->GetCapabilities()->GetMinimumUniformAlignment());
   SinglePassCallback callback = [&](RenderPass& pass) {
-    auto buffer = HostBuffer::Create(
-        context->GetResourceAllocator(), context->GetIdleWaiter(),
-        context->GetCapabilities()->GetMinimumUniformAlignment());
-
     // Draw the texture.
     {
       pass.SetPipeline(texture_pipeline);
@@ -1587,7 +1562,7 @@ TEST_P(RendererTest, CanSepiaToneThenSwizzleWithSubpasses) {
       TextureVS::UniformBuffer uniforms;
       uniforms.mvp = Matrix::MakeOrthographic(pass.GetRenderTargetSize()) *
                      Matrix::MakeScale(GetContentScale());
-      TextureVS::BindUniformBuffer(pass, buffer->EmplaceUniform(uniforms));
+      TextureVS::BindUniformBuffer(pass, data_buffer->EmplaceUniform(uniforms));
       TextureFS::BindTextureContents(pass, boston, sampler);
       if (!pass.Draw().ok()) {
         return false;
@@ -1602,7 +1577,7 @@ TEST_P(RendererTest, CanSepiaToneThenSwizzleWithSubpasses) {
       SepiaVS::UniformBuffer uniforms;
       uniforms.mvp = Matrix::MakeOrthographic(pass.GetRenderTargetSize()) *
                      Matrix::MakeScale(GetContentScale());
-      SepiaVS::BindUniformBuffer(pass, buffer->EmplaceUniform(uniforms));
+      SepiaVS::BindUniformBuffer(pass, data_buffer->EmplaceUniform(uniforms));
       if (!pass.Draw().ok()) {
         return false;
       }
@@ -1616,7 +1591,7 @@ TEST_P(RendererTest, CanSepiaToneThenSwizzleWithSubpasses) {
       SwizzleVS::UniformBuffer uniforms;
       uniforms.mvp = Matrix::MakeOrthographic(pass.GetRenderTargetSize()) *
                      Matrix::MakeScale(GetContentScale());
-      SwizzleVS::BindUniformBuffer(pass, buffer->EmplaceUniform(uniforms));
+      SwizzleVS::BindUniformBuffer(pass, data_buffer->EmplaceUniform(uniforms));
       if (!pass.Draw().ok()) {
         return false;
       }
@@ -1639,6 +1614,141 @@ TEST_P(RendererTest, BindingNullTexturesDoesNotCrash) {
 
   auto pass = command_buffer->CreateRenderPass(target);
   EXPECT_FALSE(FS::BindContents2(*pass, nullptr, sampler));
+}
+
+// Creating and uploading per-layer contents of a 2D array texture. The GLES
+// path requires ES 3.0 and is covered separately in the GLES texture unit
+// tests, so this skips the GLES backends to avoid an ES 2.0 failure.
+TEST_P(RendererTest, CanCreateAndUpload2DArrayTexture) {
+  if (GetBackend() == PlaygroundBackend::kOpenGLES ||
+      GetBackend() == PlaygroundBackend::kOpenGLESSDF) {
+    GTEST_SKIP() << "Covered by the GLES-specific texture array test.";
+  }
+  auto context = GetContext();
+  ASSERT_TRUE(context);
+
+  TextureDescriptor desc;
+  desc.storage_mode = StorageMode::kHostVisible;
+  desc.type = TextureType::kTexture2DArray;
+  desc.format = PixelFormat::kR8G8B8A8UNormInt;
+  desc.size = {2, 2};
+  desc.array_layer_count = 4;
+  desc.mip_count = 1;
+
+  auto texture = context->GetResourceAllocator()->CreateTexture(desc);
+  ASSERT_TRUE(texture);
+  EXPECT_EQ(static_cast<int>(texture->GetTextureDescriptor().array_layer_count),
+            4);
+  EXPECT_TRUE(texture->IsSliceValid(3));
+  EXPECT_FALSE(texture->IsSliceValid(4));
+
+  std::vector<uint8_t> layer(2u * 2u * 4u, 0xFF);
+  for (size_t slice = 0; slice < static_cast<size_t>(desc.array_layer_count);
+       ++slice) {
+    EXPECT_TRUE(texture->SetContents(layer.data(), layer.size(), slice));
+  }
+}
+
+// Clears a single cube map face by attaching it as a render target slice.
+// Rendering to cube faces is portable down to OpenGL ES 2.0, so this runs on
+// every backend.
+TEST_P(RendererTest, CanRenderToTextureSlice) {
+  auto context = GetContext();
+  ASSERT_TRUE(context);
+
+  TextureDescriptor desc;
+  desc.storage_mode = StorageMode::kDevicePrivate;
+  desc.type = TextureType::kTextureCube;
+  desc.format = PixelFormat::kR8G8B8A8UNormInt;
+  desc.size = {100, 100};
+  desc.usage = TextureUsage::kRenderTarget | TextureUsage::kShaderRead;
+  auto texture = context->GetResourceAllocator()->CreateTexture(desc);
+  ASSERT_TRUE(texture);
+
+  ColorAttachment color0;
+  color0.texture = texture;
+  color0.slice = 3u;  // +Y face.
+  color0.load_action = LoadAction::kClear;
+  color0.store_action = StoreAction::kStore;
+  color0.clear_color = Color::Green();
+  RenderTarget target;
+  target.SetColorAttachment(color0, 0u);
+
+  auto buffer = context->CreateCommandBuffer();
+  auto pass = buffer->CreateRenderPass(target);
+  ASSERT_TRUE(pass && pass->IsValid());
+  pass->EncodeCommands();
+  EXPECT_TRUE(context->GetCommandQueue()->Submit({buffer}).ok());
+}
+
+// Clears mip level 1 of a texture by attaching it as a render target. Skipped
+// on OpenGL ES, where rendering to non-zero mip levels needs ES 3.0 or
+// GL_OES_fbo_render_mipmap.
+TEST_P(RendererTest, CanRenderToMipLevel) {
+  if (GetBackend() == PlaygroundBackend::kOpenGLES ||
+      GetBackend() == PlaygroundBackend::kOpenGLESSDF) {
+    GTEST_SKIP() << "Rendering to non-zero mip levels is gated on a GLES "
+                    "capability; covered by the Metal and Vulkan backends.";
+  }
+  auto context = GetContext();
+  ASSERT_TRUE(context);
+
+  TextureDescriptor desc;
+  desc.storage_mode = StorageMode::kDevicePrivate;
+  desc.format = PixelFormat::kR8G8B8A8UNormInt;
+  desc.size = {100, 100};
+  desc.mip_count = 2u;
+  desc.usage = TextureUsage::kRenderTarget | TextureUsage::kShaderRead;
+  auto texture = context->GetResourceAllocator()->CreateTexture(desc);
+  ASSERT_TRUE(texture);
+
+  ColorAttachment color0;
+  color0.texture = texture;
+  color0.mip_level = 1u;
+  color0.load_action = LoadAction::kClear;
+  color0.store_action = StoreAction::kStore;
+  color0.clear_color = Color::Green();
+  RenderTarget target;
+  target.SetColorAttachment(color0, 0u);
+  // The render area follows the mip level dimensions.
+  EXPECT_EQ(target.GetRenderTargetSize(), ISize(50, 50));
+
+  auto buffer = context->CreateCommandBuffer();
+  auto pass = buffer->CreateRenderPass(target);
+  ASSERT_TRUE(pass && pass->IsValid());
+  pass->EncodeCommands();
+  EXPECT_TRUE(context->GetCommandQueue()->Submit({buffer}).ok());
+}
+
+// Attachment validation rejects out-of-range mip levels and slices.
+TEST_P(RendererTest, AttachmentRejectsOutOfRangeSubresource) {
+  auto context = GetContext();
+  ASSERT_TRUE(context);
+
+  TextureDescriptor desc;
+  desc.storage_mode = StorageMode::kDevicePrivate;
+  desc.format = PixelFormat::kR8G8B8A8UNormInt;
+  desc.size = {100, 100};
+  desc.mip_count = 2u;
+  desc.usage = TextureUsage::kRenderTarget;
+  auto texture = context->GetResourceAllocator()->CreateTexture(desc);
+  ASSERT_TRUE(texture);
+
+  ColorAttachment color0;
+  color0.texture = texture;
+  color0.load_action = LoadAction::kClear;
+  color0.store_action = StoreAction::kStore;
+  EXPECT_TRUE(color0.IsValid());
+
+  // The out-of-range cases log validation errors on purpose.
+  ScopedValidationDisable disable_validation;
+
+  color0.mip_level = 2u;  // Only levels 0 and 1 exist.
+  EXPECT_FALSE(color0.IsValid());
+
+  color0.mip_level = 0u;
+  color0.slice = 1u;  // A 2D texture has a single slice.
+  EXPECT_FALSE(color0.IsValid());
 }
 
 }  // namespace testing

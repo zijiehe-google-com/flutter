@@ -4,13 +4,15 @@
 
 #include "impeller/display_list/dl_golden_unittests.h"
 
+#include <utility>
+
 #include "display_list/dl_color.h"
 #include "display_list/dl_paint.h"
 #include "display_list/geometry/dl_geometry_types.h"
+#include "display_list/geometry/dl_path_builder.h"
 #include "flutter/display_list/dl_builder.h"
 #include "flutter/impeller/display_list/testing/render_text_in_canvas.h"
 #include "flutter/impeller/display_list/testing/rmse.h"
-#include "flutter/impeller/geometry/path_builder.h"
 #include "flutter/testing/testing.h"
 #include "gtest/gtest.h"
 
@@ -107,6 +109,30 @@ TEST_P(DlGoldenTest, Bug147807) {
   DisplayListBuilder builder;
   std::vector<sk_sp<DlImage>> images;
   draw(&builder, images);
+
+  ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
+}
+
+TEST_P(DlGoldenTest, FractionalDilation) {
+  auto draw = [](DlCanvas* canvas) {
+    const DlRect rect = DlRect::MakeLTRB(32, 32, 382, 382);
+    DlPaint layer_paint;
+    layer_paint.setImageFilter(DlImageFilter::MakeDilate(3.95f, 3.95f));
+    canvas->SaveLayer(rect.Expand(8.0f), &layer_paint);
+    canvas->DrawRect(rect, DlPaint().setColor(DlColor::kRed()));
+    canvas->Restore();
+    canvas->DrawRect(rect, DlPaint().setColor(DlColor::kBlack()));
+  };
+
+  DisplayListBuilder builder;
+  builder.Scale(GetContentScale().x, GetContentScale().y);
+  builder.DrawColor(DlColor::kWhite(), DlBlendMode::kSrc);
+
+  draw(&builder);
+
+  builder.Translate(440, 0);
+  builder.Scale(1.3f, 1.3f);
+  draw(&builder);
 
   ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
 }
@@ -209,7 +235,7 @@ TEST_P(DlGoldenTest, FastVsGeneralGaussianMaskBlur) {
     auto add_corner = [](DlPathBuilder& path_builder, DlPoint corner,
                          DlVector2 relative_from, DlVector2 relative_to,
                          bool first) {
-      static const auto magic = impeller::PathBuilder::kArcApproximationMagic;
+      static const auto magic = DlPathBuilder::kArcApproximationMagic;
 
       if (first) {
         path_builder.MoveTo(corner + relative_from);
@@ -236,7 +262,7 @@ TEST_P(DlGoldenTest, FastVsGeneralGaussianMaskBlur) {
                DlVector2(rx, 0.0f), DlVector2(0.0f, -ry), false);
     add_corner(path_builder, rect.GetLeftTop(),  //
                DlVector2(0.0f, ry), DlVector2(rx, 0.0f), false);
-    return DlPath(path_builder);
+    return path_builder.TakePath();
   };
 
   for (size_t i = 0; i < blur_sigmas.size(); i++) {
@@ -314,7 +340,7 @@ TEST_P(DlGoldenTest, DashedLinesTest) {
     path_builder.LineTo(DlPoint(325.0f, 275.0f));
     path_builder.LineTo(DlPoint(275.0f, 325.0f));
     path_builder.LineTo(DlPoint(225.0f, 275.0f));
-    canvas->ClipPath(DlPath(path_builder));
+    canvas->ClipPath(path_builder.TakePath());
     canvas->DrawColor(DlColor::kYellow());
     draw_one(DlStrokeCap::kRound, 275.0f, 275.0f, 15.0f, 10.0f);
     canvas->Restore();
@@ -367,9 +393,14 @@ int32_t CalculateMaxY(const impeller::testing::Screenshot* img) {
   return max_y;
 }
 
-int32_t CalculateSpaceBetweenUI(const impeller::testing::Screenshot* img) {
+std::optional<int32_t> CalculateSpaceBetweenUI(
+    const impeller::testing::Screenshot* img,
+    int32_t y) {
+  if (y < 0 || std::cmp_greater_equal(y, img->GetHeight())) {
+    return {};
+  }
   const uint32_t* ptr = reinterpret_cast<const uint32_t*>(img->GetBytes());
-  ptr += img->GetWidth() * static_cast<int32_t>(img->GetHeight() / 2.0);
+  ptr += img->GetWidth() * y;
   std::vector<size_t> boundaries;
   uint32_t value = *ptr++;
   for (size_t i = 1; i < img->GetWidth(); ++i) {
@@ -379,7 +410,9 @@ int32_t CalculateSpaceBetweenUI(const impeller::testing::Screenshot* img) {
     value = *ptr++;
   }
 
-  assert(boundaries.size() == 6);
+  if (boundaries.size() != 6) {
+    return {};
+  }
   return boundaries[4] - boundaries[3];
 }
 }  // namespace
@@ -394,11 +427,14 @@ TEST_P(DlGoldenTest, BaselineHE) {
     paint.setColor(DlColor::ARGB(1, 0, 0, 0));
     builder.DrawPaint(paint);
     builder.Scale(scale, scale);
-    RenderTextInCanvasSkia(&builder, text, "Roboto-Regular.ttf",
-                           DlPoint::MakeXY(10, 300),
-                           TextRenderOptions{
-                               .font_size = font_size,
-                           });
+    if (!RenderTextInCanvasSkia(&builder, text, "Roboto-Regular.ttf",
+                                DlPoint::MakeXY(10, 300),
+                                TextRenderOptions{
+                                    .font_size = font_size,
+                                })
+             .ok()) {
+      return nullptr;
+    }
     return builder.Build();
   };
 
@@ -419,35 +455,41 @@ TEST_P(DlGoldenTest, BaselineHE) {
 TEST_P(DlGoldenTest, MaintainsSpace) {
   SetWindowSize(impeller::ISize(1024, 200));
   impeller::Scalar font_size = 300;
-  auto callback = [&](const char* text,
-                      impeller::Scalar scale) -> sk_sp<DisplayList> {
-    DisplayListBuilder builder;
-    DlPaint paint;
-    paint.setColor(DlColor::ARGB(1, 0, 0, 0));
-    builder.DrawPaint(paint);
-    builder.Scale(scale, scale);
-    RenderTextInCanvasSkia(&builder, text, "Roboto-Regular.ttf",
-                           DlPoint::MakeXY(10, 300),
-                           TextRenderOptions{
-                               .font_size = font_size,
-                           });
-    return builder.Build();
-  };
 
+  int32_t middle = 0;
   std::optional<int32_t> last_space;
   for (int i = 0; i <= 100; ++i) {
     Scalar scale = 0.440 + i / 1000.0;
+    absl::StatusOr<DlRect> text_bounds_or;
+    sk_sp<DisplayList> display_list;
+    {
+      DisplayListBuilder builder;
+      DlPaint paint;
+      paint.setColor(DlColor::ARGB(1, 0, 0, 0));
+      builder.DrawPaint(paint);
+      builder.Scale(scale, scale);
+      text_bounds_or = RenderTextInCanvasSkia(
+          &builder, "ui", "Roboto-Regular.ttf", DlPoint::MakeXY(10, 300),
+          TextRenderOptions{
+              .font_size = font_size,
+          });
+      display_list = builder.Build();
+    }
+    ASSERT_TRUE(text_bounds_or.ok());
+    ASSERT_TRUE(display_list);
     std::unique_ptr<impeller::testing::Screenshot> right =
-        MakeScreenshot(callback("ui", scale));
+        MakeScreenshot(display_list);
     if (!right) {
       GTEST_SKIP() << "making screenshots not supported.";
     }
+    middle = std::rint(scale * text_bounds_or->GetCenter().y);
 
-    int32_t space = CalculateSpaceBetweenUI(right.get());
-    if (last_space.has_value()) {
-      int32_t diff = abs(space - *last_space);
+    std::optional<int32_t> space = CalculateSpaceBetweenUI(right.get(), middle);
+    ASSERT_TRUE(space.has_value());
+    if (space.has_value() && last_space.has_value()) {
+      int32_t diff = abs(*space - *last_space);
       EXPECT_TRUE(diff <= 1)
-          << "i:" << i << " space:" << space << " last_space:" << *last_space;
+          << "i:" << i << " space:" << *space << " last_space:" << *last_space;
     }
     last_space = space;
   }
@@ -494,12 +536,13 @@ TEST_P(DlGoldenTest, Subpixel) {
     DlPaint paint;
     paint.setColor(DlColor::ARGB(1, 0, 0, 0));
     builder.DrawPaint(paint);
-    RenderTextInCanvasSkia(&builder, "ui", "Roboto-Regular.ttf",
-                           DlPoint::MakeXY(offset_x, 180),
-                           TextRenderOptions{
-                               .font_size = font_size,
-                               .is_subpixel = true,
-                           });
+    EXPECT_TRUE(RenderTextInCanvasSkia(&builder, "ui", "Roboto-Regular.ttf",
+                                       DlPoint::MakeXY(offset_x, 180),
+                                       TextRenderOptions{
+                                           .font_size = font_size,
+                                           .is_subpixel = true,
+                                       })
+                    .ok());
     return builder.Build();
   };
 
@@ -534,12 +577,13 @@ TEST_P(DlGoldenTest, SubpixelScaled) {
     DlPaint paint;
     paint.setColor(DlColor::ARGB(1, 0, 0, 0));
     builder.DrawPaint(paint);
-    RenderTextInCanvasSkia(&builder, "ui", "Roboto-Regular.ttf",
-                           DlPoint::MakeXY(offset_x, 180),
-                           TextRenderOptions{
-                               .font_size = font_size,
-                               .is_subpixel = true,
-                           });
+    EXPECT_TRUE(RenderTextInCanvasSkia(&builder, "ui", "Roboto-Regular.ttf",
+                                       DlPoint::MakeXY(offset_x, 180),
+                                       TextRenderOptions{
+                                           .font_size = font_size,
+                                           .is_subpixel = true,
+                                       })
+                    .ok());
     return builder.Build();
   };
 
@@ -576,12 +620,13 @@ TEST_P(DlGoldenTest, SubpixelScaledTranslated) {
     paint.setColor(DlColor::ARGB(1, 0, 0, 0));
     builder.DrawPaint(paint);
     builder.Translate(offset_x, 180);
-    RenderTextInCanvasSkia(&builder, "ui", "Roboto-Regular.ttf",
-                           DlPoint::MakeXY(0, 0),
-                           TextRenderOptions{
-                               .font_size = font_size,
-                               .is_subpixel = true,
-                           });
+    EXPECT_TRUE(RenderTextInCanvasSkia(&builder, "ui", "Roboto-Regular.ttf",
+                                       DlPoint::MakeXY(0, 0),
+                                       TextRenderOptions{
+                                           .font_size = font_size,
+                                           .is_subpixel = true,
+                                       })
+                    .ok());
     return builder.Build();
   };
 

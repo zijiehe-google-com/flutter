@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import 'package:ui/ui.dart' as ui;
+import 'package:ui/ui_web/src/ui_web.dart' as ui_web;
 
 import '../dom.dart';
 import '../platform_dispatcher.dart';
@@ -46,6 +47,13 @@ class SemanticsTextEditingStrategy extends DefaultTextEditingStrategy {
 
   /// Current input configuration supplied by the "flutter/textinput" channel.
   InputConfiguration? inputConfig;
+
+  /// Whether an autofill form has been woken up for the active field.
+  ///
+  /// Tracked locally because the base strategy's `_appendedToForm` is private
+  /// to its library, and [SemanticsTextEditingStrategy] fully overrides
+  /// [disable] (it never calls `super.disable()`).
+  bool _formIsActive = false;
 
   /// The semantics implementation does not operate on DOM nodes, but only
   /// remembers the config and callbacks. This is because the DOM nodes are
@@ -109,11 +117,29 @@ class SemanticsTextEditingStrategy extends DefaultTextEditingStrategy {
     style = null;
     geometry = null;
 
-    for (int i = 0; i < subscriptions.length; i++) {
+    for (var i = 0; i < subscriptions.length; i++) {
       subscriptions[i].cancel();
     }
     subscriptions.clear();
     lastEditingState = null;
+
+    // The focused field is linked to the autofill form by the `form`
+    // attribute. On blur, detach it and leave a synthetic placeholder holding
+    // its value, then keep the form dormant in the DOM so the autofill context
+    // can still be submitted (credential save via
+    // `TextInput.finishAutofillContext`) and the group stays complete when
+    // another field is focused.
+    if (_formIsActive && inputConfiguration.autofillGroup != null) {
+      final EngineAutofillForm group = inputConfiguration.autofillGroup!;
+      if (inputConfiguration.autofill != null) {
+        group.demoteFocusedToSynthetic(activeDomElement, inputConfiguration.autofill!);
+      }
+      if (group.formElement != null) {
+        group.goDormant();
+      }
+      _formIsActive = false;
+    }
+
     EnginePlatformDispatcher.instance.viewManager.safeBlur(activeDomElement);
     domElement = null;
     activeTextField = null;
@@ -146,8 +172,25 @@ class SemanticsTextEditingStrategy extends DefaultTextEditingStrategy {
     OnActionCallback? onAction,
   }) {
     isEnabled = true;
-    inputConfiguration = inputConfig;
-    applyConfiguration(inputConfig);
+    final EngineAutofillForm? autofillGroup = inputConfig.autofillGroup;
+    inputConfiguration = autofillGroup == null
+        ? inputConfig
+        : inputConfig.copyWith(
+            autofillGroup: autofillGroup.copyWith(associateFocusedElementByAttribute: true),
+          );
+    applyConfiguration(inputConfiguration);
+
+    // Build the autofill form here, before [addEventHandlers] runs (it runs
+    // later in the same [enable] call). [addEventHandlers] subscribes to the
+    // `input` events of the synthetic group fields, so those fields must exist
+    // by then or non-focused fields would never propagate autofilled values.
+    //
+    // Note [placeElement]/[placeForm] are never reached via the normal
+    // placement path in semantics mode ([initializeElementPlacement] is a
+    // no-op), so the form must be set up explicitly here.
+    if (hasAutofillGroup) {
+      placeForm();
+    }
   }
 
   @override
@@ -165,7 +208,27 @@ class SemanticsTextEditingStrategy extends DefaultTextEditingStrategy {
   }
 
   @override
-  void placeForm() {}
+  void placeForm() {
+    // Safari autofills grouped credential fields by heuristic without needing a
+    // form. The attribute-linked form regresses that: a non-focused field's real
+    // input is left outside the form and stops being filled
+    // (flutter/flutter#180652). Skip the form on Safari and let its native
+    // heuristic fill the whole group. `_formIsActive` stays false, so [disable]
+    // skips the demote/dormant cleanup too.
+    //
+    // Other WebKit browsers (Chrome, Firefox on iOS) do not fill by heuristic
+    // and need the form path, so they are not skipped here.
+    if (ui_web.browser.isSafari) {
+      return;
+    }
+
+    // The focused element is the real semantics-owned `<input>`. It must not be
+    // moved into the form (that regressed a11y tab traversal, see
+    // flutter/flutter#180652). Link it to the form via the `form` attribute
+    // instead. See [EngineAutofillForm.wakeUp].
+    inputConfiguration.autofillGroup!.wakeUp(activeDomElement, inputConfiguration.autofill!);
+    _formIsActive = true;
+  }
 
   @override
   void updateElementPlacement(EditableTextGeometry textGeometry) {
@@ -208,7 +271,12 @@ class SemanticTextField extends SemanticRole {
   }
 
   @override
-  bool get acceptsPointerEvents => true;
+  bool get acceptsPointerEvents {
+    return switch (semanticsObject.hitTestBehavior) {
+      ui.SemanticsHitTestBehavior.transparent => false,
+      _ => true,
+    };
+  }
 
   /// The element used for editing, e.g. `<input>`, `<textarea>`, which is
   /// different from the host [element].
@@ -230,9 +298,9 @@ class SemanticTextField extends SemanticRole {
   }
 
   DomHTMLTextAreaElement _createMultiLineField() {
-    final textArea = createMultilineTextArea();
+    final DomHTMLTextAreaElement textArea = createMultilineTextArea();
 
-    if (semanticsObject.hasFlag(ui.SemanticsFlag.isObscured)) {
+    if (semanticsObject.flags.isObscured) {
       // -webkit-text-security is not standard, but it's the best we can do.
       // Another option would be to create a single-line <input type="password">
       // but that may have layout quirks, since it cannot represent multi-line
@@ -246,10 +314,9 @@ class SemanticTextField extends SemanticRole {
   }
 
   void _initializeEditableElement() {
-    editableElement =
-        semanticsObject.hasFlag(ui.SemanticsFlag.isMultiline)
-            ? _createMultiLineField()
-            : _createSingleLineField();
+    editableElement = semanticsObject.flags.isMultiline
+        ? _createMultiLineField()
+        : _createSingleLineField();
     _updateEnabledState();
 
     // On iOS, even though the semantic text field is transparent, the cursor
@@ -338,33 +405,73 @@ class SemanticTextField extends SemanticRole {
     } else {
       editableElement.removeAttribute('aria-required');
     }
+
+    // Apply hint as aria-description on the editable element so screen readers
+    // announce it along with the input field. This enables form validation
+    // errors to be announced when the error text is passed via the hint property.
+    _updateHintDescription();
+
     _updateInputType();
+  }
+
+  void _updateHintDescription() {
+    final String? hint = semanticsObject.hint;
+    if (hint != null && hint.trim().isNotEmpty) {
+      editableElement.setAttribute('aria-description', hint);
+    } else {
+      editableElement.removeAttribute('aria-description');
+    }
   }
 
   void _updateEnabledState() {
     (editableElement as DomElementWithDisabledProperty).disabled = !semanticsObject.isEnabled;
   }
 
+  /// Whether an autofill group owns the autofill-related attributes of this
+  /// field.
+  ///
+  /// When the field participates in an autofill group, [AutofillInfo.applyToDomElement]
+  /// sets the element's `name` (and `id`/`autocomplete`) to the autofill hint.
+  /// A plain semantic input never has a `name`, so a non-empty `name` is a
+  /// reliable, order-independent signal that [_updateInputType] must not
+  /// overwrite `autocomplete`, otherwise grouped autofill silently breaks on
+  /// the next semantics update (flutter/flutter#180652).
+  bool get _isAutofillOwned => editableElement.getAttribute('name')?.isNotEmpty ?? false;
+
   void _updateInputType() {
-    if (semanticsObject.hasFlag(ui.SemanticsFlag.isMultiline)) {
+    if (semanticsObject.flags.isMultiline) {
       // text area can't be annotated with input type
       return;
     }
-    final DomHTMLInputElement input = editableElement as DomHTMLInputElement;
-    if (semanticsObject.hasFlag(ui.SemanticsFlag.isObscured)) {
+    final input = editableElement as DomHTMLInputElement;
+    if (semanticsObject.flags.isObscured) {
       input.type = 'password';
     } else {
+      // For email inputs, prefer type="text" with inputmode="email" so that
+      // browsers keep selection APIs enabled while still providing email
+      // keyboards and hints. This avoids InvalidStateError and enables
+      // proper selection/cursor operations.
+      input.removeAttribute('inputmode');
+      input.removeAttribute('autocapitalize');
+      if (!_isAutofillOwned) {
+        input.autocomplete = 'off';
+      }
+      input.type = 'text';
+
       switch (semanticsObject.inputType) {
         case ui.SemanticsInputType.search:
           input.type = 'search';
-        case ui.SemanticsInputType.email:
-          input.type = 'email';
         case ui.SemanticsInputType.url:
           input.type = 'url';
         case ui.SemanticsInputType.phone:
           input.type = 'tel';
+        case ui.SemanticsInputType.email:
+          input.setAttribute('inputmode', 'email');
+          input.setAttribute('autocapitalize', 'none');
+          if (!_isAutofillOwned) {
+            input.autocomplete = 'email';
+          }
         default:
-          input.type = 'text';
       }
     }
   }

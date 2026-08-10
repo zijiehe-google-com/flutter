@@ -11,8 +11,8 @@ import 'base/file_system.dart';
 import 'base/io.dart';
 import 'base/logger.dart';
 import 'base/os.dart';
+import 'base/utils.dart';
 import 'build_info.dart';
-import 'convert.dart';
 import 'devfs.dart';
 import 'device.dart';
 import 'device_port_forwarder.dart';
@@ -42,8 +42,8 @@ abstract class DesktopDevice extends Device {
   final ProcessManager _processManager;
   final FileSystem _fileSystem;
   final OperatingSystemUtils _operatingSystemUtils;
-  final Set<Process> _runningProcesses = <Process>{};
-  final DesktopLogReader _deviceLogReader = DesktopLogReader();
+  final _runningProcesses = <Process>{};
+  final _deviceLogReader = DesktopLogReader();
 
   @override
   DevFSWriter createDevFSWriter(ApplicationPackage? app, String? userIdentifier) {
@@ -122,7 +122,7 @@ abstract class DesktopDevice extends Device {
     }
 
     Process process;
-    final List<String> command = <String>[executable, ...debuggingOptions.dartEntrypointArgs];
+    final command = <String>[executable, ...debuggingOptions.dartEntrypointArgs];
     try {
       process = await _processManager.start(
         command,
@@ -135,12 +135,12 @@ abstract class DesktopDevice extends Device {
     _runningProcesses.add(process);
     unawaited(process.exitCode.then((_) => _runningProcesses.remove(process)));
 
-    _deviceLogReader.initializeProcess(process);
+    _deviceLogReader.listenToProcessOutput(process);
     if (debuggingOptions.buildInfo.isRelease) {
       return LaunchResult.succeeded();
     }
-    final ProtocolDiscovery vmServiceDiscovery = ProtocolDiscovery.vmService(
-      _deviceLogReader,
+    final vmServiceDiscovery = ProtocolDiscovery.vmService(
+      SingleLaunchLogReader(_deviceLogReader.logLines, process.exitCode),
       devicePort: debuggingOptions.deviceVmServicePort,
       hostPort: debuggingOptions.hostVmServicePort,
       ipv6: debuggingOptions.ipv6,
@@ -150,7 +150,7 @@ abstract class DesktopDevice extends Device {
       Timer? timer;
       if (this is MacOSDevice) {
         if (await globals.isRunningOnBot) {
-          const int defaultTimeout = 5;
+          const defaultTimeout = 5;
           timer = Timer(const Duration(minutes: defaultTimeout), () {
             // As of macOS 14, if sandboxing is enabled and the app is not codesigned,
             // a dialog will prompt the user to allow the app to run. This will
@@ -200,10 +200,10 @@ abstract class DesktopDevice extends Device {
 
   @override
   Future<bool> stopApp(ApplicationPackage? app, {String? userIdentifier}) async {
-    bool succeeded = true;
+    var succeeded = true;
     // Walk a copy of _runningProcesses, since the exit handler removes from the
     // set.
-    for (final Process process in Set<Process>.of(_runningProcesses)) {
+    for (final process in Set<Process>.of(_runningProcesses)) {
       succeeded &= _processManager.killPid(process.pid);
     }
     return succeeded;
@@ -222,7 +222,7 @@ abstract class DesktopDevice extends Device {
   });
 
   /// Returns the path to the executable to run for [package] on this device for
-  /// the given [buildMode].
+  /// the given [BuildInfo.mode].
   String? executablePathForDevice(ApplicationPackage package, BuildInfo buildInfo);
 
   /// Called after a process is attached, allowing any device-specific extra
@@ -234,15 +234,15 @@ abstract class DesktopDevice extends Device {
   /// arguments.
   ///
   /// The format of the environment variables is:
-  ///   * FLUTTER_ENGINE_SWITCHES to the number of switches.
-  ///   * FLUTTER_ENGINE_SWITCH_<N> (indexing from 1) to the individual switches.
+  ///   * `FLUTTER_ENGINE_SWITCHES` to the number of switches.
+  ///   * `FLUTTER_ENGINE_SWITCH_<N>` (indexing from 1) to the individual switches.
   Map<String, String> _computeEnvironment(
     DebuggingOptions debuggingOptions,
     bool traceStartup,
     String? route,
   ) {
-    int flags = 0;
-    final Map<String, String> environment = <String, String>{};
+    var flags = 0;
+    final environment = <String, String>{};
 
     void addFlag(String value) {
       flags += 1;
@@ -255,6 +255,9 @@ abstract class DesktopDevice extends Device {
 
     addFlag('enable-dart-profiling=true');
 
+    if (debuggingOptions.profileStartup) {
+      addFlag('profile-startup=true');
+    }
     if (traceStartup) {
       addFlag('trace-startup=true');
     }
@@ -285,6 +288,9 @@ abstract class DesktopDevice extends Device {
     if (debuggingOptions.endlessTraceBuffer) {
       addFlag('endless-trace-buffer=true');
     }
+    if (debuggingOptions.profileMicrotasks) {
+      addFlag('profile-microtasks=true');
+    }
     if (debuggingOptions.purgePersistentCache) {
       addFlag('purge-persistent-cache=true');
     }
@@ -292,8 +298,12 @@ abstract class DesktopDevice extends Device {
       case ImpellerStatus.enabled:
         addFlag('enable-impeller=true');
       case ImpellerStatus.disabled:
-      case ImpellerStatus.platformDefault:
         addFlag('enable-impeller=false');
+      case ImpellerStatus.platformDefault:
+        break;
+    }
+    if (debuggingOptions.enableFlutterGpu) {
+      addFlag('enable-flutter-gpu=true');
     }
     // Options only supported when there is a VM Service connection between the
     // tool and the device, usually in debug or profile mode.
@@ -310,6 +320,9 @@ abstract class DesktopDevice extends Device {
       }
       if (debuggingOptions.disableServiceAuthCodes) {
         addFlag('disable-service-auth-codes=true');
+      }
+      if (debuggingOptions.disableServiceOriginCheck) {
+        addFlag('disable-service-origin-check=true');
       }
       final String dartVmFlags = debuggingOptions.dartFlags;
       if (dartVmFlags.isNotEmpty) {
@@ -329,31 +342,34 @@ abstract class DesktopDevice extends Device {
 
 /// A log reader for desktop applications that delegates to a [Process] stdout
 /// and stderr streams.
+///
+/// A single instance of this reader is kept for the lifetime of a
+/// [DesktopDevice], returned by [DesktopDevice.getLogReader], so that
+/// external callers (e.g. `flutter drive`, `flutter logs`) can subscribe to
+/// [logLines] once and keep receiving output across multiple `startApp`
+/// launches on the same device. Because of that, [logLines] is never closed
+/// when a given `process` exits: `Device.dispose()` (and therefore
+/// [dispose]) is called far more often than "the device is really done" —
+/// e.g. once per test file for desktop integration tests — so this reader
+/// deliberately has nothing for [dispose] to do, exactly like the upstream
+/// implementation this is based on. (Mirrors
+/// `CustomDeviceLogReader.listenToProcessOutput`, though that reader's
+/// [dispose] closes it — its callers dispose it at true end-of-life only.)
+///
+/// This reader is intentionally *not* used for a single launch's VM Service
+/// discovery — see [SingleLaunchLogReader] for that.
 class DesktopLogReader extends DeviceLogReader {
-  final StreamController<List<int>> _inputController = StreamController<List<int>>.broadcast();
+  final _inputController = StreamController<List<int>>.broadcast();
 
-  /// Begin listening to the stdout and stderr streams of the provided [process].
-  void initializeProcess(Process process) {
-    final StreamSubscription<List<int>> stdoutSub = process.stdout.listen(_inputController.add);
-    final StreamSubscription<List<int>> stderrSub = process.stderr.listen(_inputController.add);
-    final Future<void> stdioFuture = Future.wait<void>(<Future<void>>[
-      stdoutSub.asFuture<void>(),
-      stderrSub.asFuture<void>(),
-    ]);
-    process.exitCode.whenComplete(() async {
-      // Wait for output to be fully processed.
-      await stdioFuture;
-      // The streams have already completed, so waiting for the stream
-      // cancellation to complete is not needed.
-      unawaited(stdoutSub.cancel());
-      unawaited(stderrSub.cancel());
-      await _inputController.close();
-    });
+  /// Adds the stdout and stderr streams of the provided [process] to [logLines].
+  void listenToProcessOutput(Process process) {
+    process.stdout.listen(_inputController.add, onError: _inputController.addError);
+    process.stderr.listen(_inputController.add, onError: _inputController.addError);
   }
 
   @override
   Stream<String> get logLines {
-    return _inputController.stream.transform(utf8.decoder).transform(const LineSplitter());
+    return _inputController.stream.transform(utf8LineDecoder);
   }
 
   @override
@@ -362,6 +378,50 @@ class DesktopLogReader extends DeviceLogReader {
   @override
   void dispose() {
     // Nothing to dispose.
+  }
+
+  @override
+  Future<void> provideVmService(FlutterVmService connectedVmService) async {}
+}
+
+/// A [DeviceLogReader] that mirrors `source` but closes [logLines] as soon
+/// as `scope` completes.
+///
+/// [ProtocolDiscovery] relies on [logLines] reaching "done" to detect that a
+/// launched process exited without ever exposing a VM Service, so it can
+/// give up instead of waiting forever. The device-scoped [DesktopLogReader]
+/// returned by `getLogReader()` can't provide that signal — it must survive
+/// across relaunches — so a fresh, throwaway [SingleLaunchLogReader] is
+/// created for each [DesktopDevice.startApp] call instead, scoped to that
+/// single process via `scope` (typically `process.exitCode`). This mirrors
+/// how `AndroidDevice.startApp` avoids reusing its cached `getLogReader()`
+/// singleton for the same reason, constructing a fresh `AdbLogReader` for VM
+/// Service discovery on each launch.
+class SingleLaunchLogReader extends DeviceLogReader {
+  SingleLaunchLogReader(Stream<String> source, Future<void> scope) {
+    _subscription = source.listen(_controller.add, onError: _controller.addError);
+    // Ignore how `scope` completed — only that it did — so an error from it
+    // (e.g. an unexpected failure reading `process.exitCode`) can't escape
+    // as an unhandled Future error.
+    scope.catchError((Object _, StackTrace _) {}).whenComplete(() {
+      unawaited(_subscription.cancel());
+      unawaited(_controller.close());
+    });
+  }
+
+  final _controller = StreamController<String>.broadcast();
+  late final StreamSubscription<String> _subscription;
+
+  @override
+  Stream<String> get logLines => _controller.stream;
+
+  @override
+  String get name => 'desktop (single launch)';
+
+  @override
+  void dispose() {
+    unawaited(_subscription.cancel());
+    unawaited(_controller.close());
   }
 
   @override

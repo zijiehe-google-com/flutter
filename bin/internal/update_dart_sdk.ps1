@@ -30,7 +30,6 @@ $psMajorVersionRequired = 5
 $psMajorVersionLocal = $PSVersionTable.PSVersion.Major
 if ($psMajorVersionLocal -lt $psMajorVersionRequired) {
     Write-Host "Flutter requires PowerShell $psMajorVersionRequired.0 or newer."
-    Write-Host "See https://flutter.dev/docs/get-started/install/windows for more."
     Write-Host "Current version is $psMajorVersionLocal."
     # Use exit code 2 to signal that shared.bat should exit immediately instead of retrying.
     exit 2
@@ -50,10 +49,16 @@ if ($engineRealm) {
 
 # It's important to use the native Dart SDK as the default target architecture
 # for Flutter Windows builds depend on the Dart executable's architecture.
+# FLUTTER_HOST_ARCH can be set as an override to force download for the specified architecture.
+# PROCESSOR_ARCHITECTURE is a standard Windows env var indicating host CPU architecture.
 $dartZipNameX64 = "dart-sdk-windows-x64.zip"
 $dartZipNameArm64 = "dart-sdk-windows-arm64.zip"
 $dartZipName = $dartZipNameX64
-if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+if ($env:FLUTTER_HOST_ARCH -eq "arm64") {
+    $dartZipName = $dartZipNameArm64
+} elseif ($env:FLUTTER_HOST_ARCH -eq "x64") {
+    $dartZipName = $dartZipNameX64
+} elseif ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
     $dartSdkArm64Url = "$dartSdkBaseUrl/flutter_infra_release/flutter/$engineVersion/$dartZipNameArm64"
     Try {
         Invoke-WebRequest -Uri $dartSdkArm64Url -UseBasicParsing -Method Head | Out-Null

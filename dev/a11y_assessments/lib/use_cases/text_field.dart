@@ -7,11 +7,16 @@ import '../utils.dart';
 import 'use_cases.dart';
 
 class TextFieldUseCase extends UseCase {
+  TextFieldUseCase();
+
   @override
   String get name => 'TextField';
 
   @override
   String get route => '/text-field';
+
+  @override
+  List<Tag> get tags => <Tag>[Tag.batch1, Tag.core];
 
   @override
   Widget build(BuildContext context) => _MainWidget();
@@ -25,10 +30,7 @@ class _MainWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Semantics(headingLevel: 1, child: Text('$pageTitle Demo')),
-      ),
+      appBar: AppBar(title: Semantics(headingLevel: 1, child: Text('$pageTitle Demo'))),
       body: ListView(
         children: <Widget>[
           Semantics(

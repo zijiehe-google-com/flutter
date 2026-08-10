@@ -10,11 +10,14 @@
 #include "flutter/flow/surface.h"
 #include "flutter/fml/synchronization/sync_switch.h"
 #include "flutter/lib/ui/snapshot_delegate.h"
+#include "flutter/shell/common/snapshot_pixel_format.h"
 #include "flutter/shell/common/snapshot_surface_producer.h"
 
 namespace impeller {
 class AiksContext;
-}
+class Texture;
+class RuntimeStage;
+}  // namespace impeller
 
 namespace flutter {
 
@@ -37,21 +40,46 @@ class SnapshotController {
 
   virtual ~SnapshotController() = default;
 
-  virtual void MakeRasterSnapshot(
+  virtual void MakeSkiaSnapshot(
       sk_sp<DisplayList> display_list,
-      SkISize picture_size,
-      std::function<void(const sk_sp<DlImage>&)> callback) = 0;
+      DlISize picture_size,
+      std::function<void(const sk_sp<SkImage>&)> callback,
+      SnapshotPixelFormat pixel_format) = 0;
 
-  // Note that this image is not guaranteed to be UIThreadSafe and must
-  // be converted to a DlImageGPU if it is to be handed back to the UI
-  // thread.
-  virtual sk_sp<DlImage> MakeRasterSnapshotSync(sk_sp<DisplayList> display_list,
-                                                SkISize picture_size) = 0;
+  virtual sk_sp<SkImage> MakeSkiaSnapshotSync(
+      sk_sp<DisplayList> display_list,
+      DlISize picture_size,
+      SnapshotPixelFormat pixel_format) = 0;
+
+  virtual void MakeImpellerSnapshot(
+      sk_sp<DisplayList> display_list,
+      DlISize picture_size,
+      std::function<void(const std::shared_ptr<impeller::Texture>&)> callback,
+      SnapshotPixelFormat pixel_format) = 0;
+
+  virtual std::shared_ptr<impeller::Texture> MakeImpellerSnapshotSync(
+      sk_sp<DisplayList> display_list,
+      DlISize picture_size,
+      SnapshotPixelFormat pixel_format) = 0;
+
+  /// Creates a texture-backed DlImage from the provided SkImage.
+  ///
+  /// This is primarily used by `decodeImageFromPixelsSync` to upload pixels
+  /// to the GPU synchronously.
+  virtual sk_sp<SkImage> MakeSkiaTextureImage(
+      sk_sp<SkImage> image,
+      SnapshotPixelFormat pixel_format) = 0;
+
+  virtual std::shared_ptr<impeller::Texture> MakeImpellerTextureImage(
+      sk_sp<SkImage> image,
+      SnapshotPixelFormat pixel_format) = 0;
 
   virtual sk_sp<SkImage> ConvertToRasterImage(sk_sp<SkImage> image) = 0;
 
   virtual void CacheRuntimeStage(
       const std::shared_ptr<impeller::RuntimeStage>& runtime_stage) = 0;
+
+  virtual bool MakeRenderContextCurrent() = 0;
 
  protected:
   explicit SnapshotController(const Delegate& delegate);

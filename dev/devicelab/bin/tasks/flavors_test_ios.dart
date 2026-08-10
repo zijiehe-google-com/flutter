@@ -18,47 +18,59 @@ import 'package:standard_message_codec/standard_message_codec.dart';
 Future<void> main() async {
   deviceOperatingSystem = DeviceOperatingSystem.ios;
   await task(() async {
-    await createFlavorsTest().call();
-    await createIntegrationTestFlavorsTest().call();
-    // test install and uninstall of flavors app
-    final String projectDir = '${flutterDirectory.path}/dev/integration_tests/flavors';
-    final TaskResult installTestsResult = await inDirectory(projectDir, () async {
-      final List<TaskResult> testResults = <TaskResult>[
-        await _testInstallDebugPaidFlavor(projectDir),
-        await _testInstallBogusFlavor(),
-      ];
+    String? simulatorDeviceId;
+    var res = TaskResult.success(null);
+    try {
+      await testWithNewIOSSimulator('flavors_test_ios', (String deviceId) async {
+        simulatorDeviceId = deviceId;
+        await createFlavorsTest(deviceIdOverride: deviceId).call();
+        await createIntegrationTestFlavorsTest(deviceIdOverride: deviceId).call();
+        // test install and uninstall of flavors app
+        final projectDir = '${flutterDirectory.path}/dev/integration_tests/flavors';
+        final TaskResult installTestsResult = await inDirectory(projectDir, () async {
+          final testResults = <TaskResult>[
+            await _testInstallDebugPaidFlavor(projectDir, deviceId),
+            await _testInstallBogusFlavor(deviceId),
+          ];
 
-      final TaskResult? firstInstallFailure = testResults.firstWhereOrNull(
-        (TaskResult element) => element.failed,
-      );
+          final TaskResult? firstInstallFailure = testResults.firstWhereOrNull(
+            (TaskResult element) => element.failed,
+          );
 
-      return firstInstallFailure ?? TaskResult.success(null);
-    });
+          return firstInstallFailure ?? TaskResult.success(null);
+        });
 
-    await _testFlavorWhenBuiltFromXcode(projectDir);
+        if (installTestsResult.failed) {
+          res = installTestsResult;
+          return;
+        }
 
-    return installTestsResult;
+        res = await _testFlavorWhenBuiltFromXcode(projectDir, deviceId);
+      });
+    } finally {
+      await removeIOSSimulator(simulatorDeviceId);
+    }
+    return res;
   });
 }
 
-Future<TaskResult> _testInstallDebugPaidFlavor(String projectDir) async {
-  await evalFlutter('install', options: <String>['--flavor', 'paid']);
-  final Uint8List assetManifestFileData =
-      File(
-        path.join(
-          projectDir,
-          'build',
-          'ios',
-          'iphoneos',
-          'Paid App.app',
-          'Frameworks',
-          'App.framework',
-          'flutter_assets',
-          'AssetManifest.bin',
-        ),
-      ).readAsBytesSync();
+Future<TaskResult> _testInstallDebugPaidFlavor(String projectDir, String deviceId) async {
+  await evalFlutter('install', options: <String>['-d', deviceId, '--flavor', 'paid']);
+  final Uint8List assetManifestFileData = File(
+    path.join(
+      projectDir,
+      'build',
+      'ios',
+      'iphonesimulator',
+      'Paid App.app',
+      'Frameworks',
+      'App.framework',
+      'flutter_assets',
+      'AssetManifest.bin',
+    ),
+  ).readAsBytesSync();
 
-  final Map<Object?, Object?> assetManifest =
+  final assetManifest =
       const StandardMessageCodec().decodeMessage(ByteData.sublistView(assetManifestFileData))
           as Map<Object?, Object?>;
 
@@ -78,22 +90,27 @@ Future<TaskResult> _testInstallDebugPaidFlavor(String projectDir) async {
     );
   }
 
-  await flutter('install', options: <String>['--flavor', 'paid', '--uninstall-only']);
+  await flutter(
+    'install',
+    options: <String>['-d', deviceId, '--flavor', 'paid', '--uninstall-only'],
+  );
 
   return TaskResult.success(null);
 }
 
-Future<TaskResult> _testInstallBogusFlavor() async {
-  final StringBuffer stderr = StringBuffer();
+Future<TaskResult> _testInstallBogusFlavor(String deviceId) async {
+  final stderr = StringBuffer();
   await evalFlutter(
     'install',
     canFail: true,
     stderr: stderr,
-    options: <String>['--flavor', 'bogus'],
+    options: <String>['-d', deviceId, '--flavor', 'bogus'],
   );
 
-  final String stderrString = stderr.toString();
-  if (!stderrString.contains('The Xcode project defines schemes: free, paid')) {
+  final stderrString = stderr.toString();
+  if (!stderrString.contains(
+    'You must specify a --flavor option to select one of the available schemes.',
+  )) {
     print(stderrString);
     return TaskResult.failure('Should not succeed with bogus flavor');
   }
@@ -101,17 +118,16 @@ Future<TaskResult> _testInstallBogusFlavor() async {
   return TaskResult.success(null);
 }
 
-Future<TaskResult> _testFlavorWhenBuiltFromXcode(String projectDir) async {
-  final Device device = await devices.workingDevice;
+Future<TaskResult> _testFlavorWhenBuiltFromXcode(String projectDir, String deviceId) async {
   await inDirectory(projectDir, () async {
     // This will put FLAVOR=free in the Flutter/Generated.xcconfig file
     await flutter(
       'build',
-      options: <String>['ios', '--config-only', '--debug', '--flavor', 'free'],
+      options: <String>['ios', '--simulator', '--config-only', '--debug', '--flavor', 'free'],
     );
   });
 
-  final File generatedXcconfig = File(path.join(projectDir, 'ios/Flutter/Generated.xcconfig'));
+  final generatedXcconfig = File(path.join(projectDir, 'ios/Flutter/Generated.xcconfig'));
   if (!generatedXcconfig.existsSync()) {
     throw TaskResult.failure('Unable to find Generated.xcconfig');
   }
@@ -119,21 +135,21 @@ Future<TaskResult> _testFlavorWhenBuiltFromXcode(String projectDir) async {
     throw TaskResult.failure('Generated.xcconfig does not contain FLAVOR=free');
   }
 
-  const String configuration = 'Debug Paid';
-  const String productName = 'Paid App';
-  const String buildDir = 'build/ios';
+  const configuration = 'Debug Paid';
+  const productName = 'Paid App';
+  const buildDir = 'build/ios';
 
   // Delete app bundle before build to ensure checks below do not use previously
   // built bundle.
-  final String appPath = '$projectDir/$buildDir/$configuration-iphoneos/$productName.app';
-  final Directory appBundle = Directory(appPath);
+  final appPath = '$projectDir/$buildDir/$configuration-iphonesimulator/$productName.app';
+  final appBundle = Directory(appPath);
   if (appBundle.existsSync()) {
     appBundle.deleteSync(recursive: true);
   }
 
   if (!await runXcodeBuild(
     platformDirectory: path.join(projectDir, 'ios'),
-    destination: 'id=${device.deviceId}',
+    destination: 'id=$deviceId',
     testName: 'flavors_test_ios',
     configuration: configuration,
     scheme: 'paid',
@@ -154,6 +170,7 @@ Future<TaskResult> _testFlavorWhenBuiltFromXcode(String projectDir) async {
   // Despite FLAVOR=free being in the Generated.xcconfig, the flavor found in
   // the test should be "paid" because it was built with the "Debug Paid" configuration.
   return createFlavorsTest(
+    deviceIdOverride: deviceId,
     extraOptions: <String>['--flavor', 'paid', '--use-application-binary=$appPath'],
   ).call();
 }

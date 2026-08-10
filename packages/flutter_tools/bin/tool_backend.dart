@@ -12,7 +12,7 @@ Future<void> main(List<String> arguments) async {
   final String buildMode = arguments[1].toLowerCase();
 
   final String? dartDefines = Platform.environment['DART_DEFINES'];
-  final bool dartObfuscation = Platform.environment['DART_OBFUSCATION'] == 'true';
+  final dartObfuscation = Platform.environment['DART_OBFUSCATION'] == 'true';
   final String? frontendServerStarterPath = Platform.environment['FRONTEND_SERVER_STARTER_PATH'];
   final String? extraFrontEndOptions = Platform.environment['EXTRA_FRONT_END_OPTIONS'];
   final String? extraGenSnapshotOptions = Platform.environment['EXTRA_GEN_SNAPSHOT_OPTIONS'];
@@ -21,14 +21,15 @@ Future<void> main(List<String> arguments) async {
   final String flutterTarget =
       Platform.environment['FLUTTER_TARGET'] ?? pathJoin(<String>['lib', 'main.dart']);
   final String? codeSizeDirectory = Platform.environment['CODE_SIZE_DIRECTORY'];
+  final String? flavor = Platform.environment['FLAVOR'];
   final String? localEngine = Platform.environment['LOCAL_ENGINE'];
   final String? localEngineHost = Platform.environment['LOCAL_ENGINE_HOST'];
   final String? projectDirectory = Platform.environment['PROJECT_DIR'];
   final String? splitDebugInfo = Platform.environment['SPLIT_DEBUG_INFO'];
-  final bool trackWidgetCreation = Platform.environment['TRACK_WIDGET_CREATION'] == 'true';
-  final bool treeShakeIcons = Platform.environment['TREE_SHAKE_ICONS'] == 'true';
-  final bool verbose = Platform.environment['VERBOSE_SCRIPT_LOGGING'] == 'true';
-  final bool prefixedErrors = Platform.environment['PREFIXED_ERROR_LOGGING'] == 'true';
+  final trackWidgetCreation = Platform.environment['TRACK_WIDGET_CREATION'] == 'true';
+  final treeShakeIcons = Platform.environment['TREE_SHAKE_ICONS'] == 'true';
+  final verbose = Platform.environment['VERBOSE_SCRIPT_LOGGING'] == 'true';
+  final prefixedErrors = Platform.environment['PREFIXED_ERROR_LOGGING'] == 'true';
 
   if (projectDirectory == null) {
     stderr.write(
@@ -76,8 +77,9 @@ or
     'bin',
     if (Platform.isWindows) 'flutter.bat' else 'flutter',
   ]);
-  final String bundlePlatform = targetPlatform;
-  final String target = '${buildMode}_bundle_${bundlePlatform}_assets';
+  final target = targetPlatform.startsWith('darwin')
+      ? '${buildMode}_macos_bundle_flutter_assets'
+      : '${buildMode}_bundle_${targetPlatform}_assets';
   final Process assembleProcess = await Process.start(flutterExecutable, <String>[
     if (verbose) '--verbose',
     if (prefixedErrors) '--prefixed-errors',
@@ -91,9 +93,10 @@ or
     '-dTrackWidgetCreation=$trackWidgetCreation',
     '-dBuildMode=$buildMode',
     '-dTargetFile=$flutterTarget',
-    '-dTreeShakeIcons="$treeShakeIcons"',
+    '-dTreeShakeIcons=$treeShakeIcons',
     '-dDartObfuscation=$dartObfuscation',
     if (codeSizeDirectory != null) '-dCodeSizeDirectory=$codeSizeDirectory',
+    if (flavor != null && flavor.isNotEmpty) '-dFlavor=$flavor',
     if (splitDebugInfo != null) '-dSplitDebugInfo=$splitDebugInfo',
     if (dartDefines != null) '--DartDefines=$dartDefines',
     if (extraGenSnapshotOptions != null) '--ExtraGenSnapshotOptions=$extraGenSnapshotOptions',
@@ -119,6 +122,6 @@ or
 ///
 /// Does not normalize paths that have repeated separators.
 String pathJoin(List<String> segments) {
-  final String separator = Platform.isWindows ? r'\' : '/';
+  final separator = Platform.isWindows ? r'\' : '/';
   return segments.join(separator);
 }

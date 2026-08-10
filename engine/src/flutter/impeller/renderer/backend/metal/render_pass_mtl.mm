@@ -20,6 +20,8 @@
 #include "impeller/renderer/backend/metal/sampler_mtl.h"
 #include "impeller/renderer/backend/metal/texture_mtl.h"
 #include "impeller/renderer/command.h"
+#include "impeller/renderer/pipeline_descriptor.h"
+#include "impeller/renderer/pipeline_library.h"
 #include "impeller/renderer/vertex_descriptor.h"
 
 namespace impeller {
@@ -62,6 +64,10 @@ static bool ConfigureAttachment(const Attachment& desc,
   attachment.texture = TextureMTL::Cast(*desc.texture).GetMTLTexture();
   attachment.loadAction = ToMTLLoadAction(desc.load_action);
   attachment.storeAction = ToMTLStoreAction(desc.store_action);
+  // mip_level/slice select the subresource of the primary texture. The
+  // resolve texture, if any, resolves into its own level 0 / slice 0.
+  attachment.level = desc.mip_level;
+  attachment.slice = desc.slice;
 
   if (!ConfigureResolveTextureAttachment(desc, attachment)) {
     return false;
@@ -155,7 +161,7 @@ RenderPassMTL::RenderPassMTL(std::shared_ptr<const Context> context,
   pass_bindings_.SetEncoder(encoder_);
   pass_bindings_.SetViewport(
       Viewport{.rect = Rect::MakeSize(GetRenderTargetSize())});
-  pass_bindings_.SetScissor(IRect::MakeSize(GetRenderTargetSize()));
+  pass_bindings_.SetScissor(IRect32::MakeSize(GetRenderTargetSize()));
   is_valid_ = true;
 }
 
@@ -216,16 +222,6 @@ static bool Bind(PassBindingsCacheMTL& pass,
     return false;
   }
 
-  if (texture.NeedsMipmapGeneration()) {
-    // TODO(127697): generate mips when the GPU is available on iOS.
-#if !FML_OS_IOS
-    VALIDATION_LOG
-        << "Texture at binding index " << bind_index
-        << " has a mip count > 1, but the mipmap has not been generated.";
-    return false;
-#endif  // !FML_OS_IOS
-  }
-
   return pass.SetTexture(stage, bind_index,
                          TextureMTL::Cast(texture).GetMTLTexture()) &&
          pass.SetSampler(stage, bind_index,
@@ -235,6 +231,7 @@ static bool Bind(PassBindingsCacheMTL& pass,
 // |RenderPass|
 void RenderPassMTL::SetPipeline(PipelineRef pipeline) {
   const PipelineDescriptor& pipeline_desc = pipeline->GetDescriptor();
+  context_->GetPipelineLibrary()->LogPipelineUsage(pipeline_desc);
   primitive_type_ = pipeline_desc.GetPrimitiveType();
   pass_bindings_.SetRenderPipelineState(
       PipelineMTL::Cast(*pipeline).GetMTLRenderPipelineState());
@@ -278,7 +275,7 @@ void RenderPassMTL::SetViewport(Viewport viewport) {
 }
 
 // |RenderPass|
-void RenderPassMTL::SetScissor(IRect scissor) {
+void RenderPassMTL::SetScissor(IRect32 scissor) {
   pass_bindings_.SetScissor(scissor);
 }
 

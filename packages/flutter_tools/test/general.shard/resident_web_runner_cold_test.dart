@@ -13,10 +13,10 @@ import 'package:flutter_tools/src/base/terminal.dart';
 import 'package:flutter_tools/src/base/time.dart';
 import 'package:flutter_tools/src/build_info.dart';
 import 'package:flutter_tools/src/build_system/build_system.dart';
+import 'package:flutter_tools/src/build_system/tools/shader_compiler.dart';
 import 'package:flutter_tools/src/dart/pub.dart';
 import 'package:flutter_tools/src/devfs.dart';
 import 'package:flutter_tools/src/device.dart';
-import 'package:flutter_tools/src/features.dart';
 import 'package:flutter_tools/src/isolated/devfs_web.dart';
 import 'package:flutter_tools/src/isolated/resident_web_runner.dart';
 import 'package:flutter_tools/src/project.dart';
@@ -26,26 +26,20 @@ import 'package:test/fake.dart';
 
 import '../src/common.dart';
 import '../src/context.dart';
-import '../src/fake_pub_deps.dart';
 import '../src/fakes.dart';
 import '../src/package_config.dart';
 import '../src/test_build_system.dart';
+import '../src/throwing_pub.dart';
 
 void main() {
   late FakeFlutterDevice mockFlutterDevice;
   late FakeWebDevFS mockWebDevFS;
   late MemoryFileSystem fileSystem;
 
-  // TODO(matanlurey): Remove after `explicit-package-dependencies` is enabled by default.
-  // See https://github.com/flutter/flutter/issues/160257 for details.
-  FeatureFlags enableExplicitPackageDependencies() {
-    return TestFeatureFlags(isExplicitPackageDependenciesEnabled: true);
-  }
-
   setUp(() {
     fileSystem = MemoryFileSystem.test();
     mockWebDevFS = FakeWebDevFS();
-    final FakeWebDevice mockWebDevice = FakeWebDevice();
+    final mockWebDevice = FakeWebDevice();
     mockFlutterDevice = FakeFlutterDevice(mockWebDevice);
     mockFlutterDevice._devFS = mockWebDevFS;
 
@@ -53,7 +47,7 @@ void main() {
 name: my_app
 ''');
 
-    writePackageConfigFile(directory: fileSystem.currentDirectory, mainLibName: 'my_app');
+    writePackageConfigFiles(directory: fileSystem.currentDirectory, mainLibName: 'my_app');
     fileSystem.file(fileSystem.path.join('lib', 'main.dart')).createSync(recursive: true);
     fileSystem.file(fileSystem.path.join('web', 'index.html')).createSync(recursive: true);
   });
@@ -62,7 +56,7 @@ name: my_app
     'Can successfully run and connect without vmservice',
     () async {
       final FlutterProject project = FlutterProject.fromDirectoryTest(fileSystem.currentDirectory);
-      final ResidentWebRunner residentWebRunner = ResidentWebRunner(
+      final residentWebRunner = ResidentWebRunner(
         mockFlutterDevice,
         flutterProject: project,
         debuggingOptions: DebuggingOptions.disabled(BuildInfo.release),
@@ -78,8 +72,7 @@ name: my_app
         ),
       );
 
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       final DebugConnectionInfo debugConnectionInfo = await connectionInfoCompleter.future;
 
@@ -89,8 +82,7 @@ name: my_app
       BuildSystem: () => TestBuildSystem.all(BuildResult(success: true)),
       FileSystem: () => fileSystem,
       ProcessManager: () => FakeProcessManager.any(),
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -99,7 +91,7 @@ name: my_app
     'ResidentWebRunner calls appFailedToStart if initial compilation fails',
     () async {
       final FlutterProject project = FlutterProject.fromDirectoryTest(fileSystem.currentDirectory);
-      final ResidentWebRunner residentWebRunner = ResidentWebRunner(
+      final residentWebRunner = ResidentWebRunner(
         mockFlutterDevice,
         flutterProject: project,
         debuggingOptions: DebuggingOptions.disabled(BuildInfo.release),
@@ -122,8 +114,7 @@ name: my_app
       BuildSystem: () => TestBuildSystem.all(BuildResult(success: false)),
       FileSystem: () => fileSystem,
       ProcessManager: () => FakeProcessManager.any(),
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -132,7 +123,7 @@ name: my_app
     'ResidentWebRunner calls appFailedToStart if error is thrown during startup',
     () async {
       final FlutterProject project = FlutterProject.fromDirectoryTest(fileSystem.currentDirectory);
-      final ResidentWebRunner residentWebRunner = ResidentWebRunner(
+      final residentWebRunner = ResidentWebRunner(
         mockFlutterDevice,
         flutterProject: project,
         debuggingOptions: DebuggingOptions.disabled(BuildInfo.release),
@@ -155,8 +146,7 @@ name: my_app
       BuildSystem: () => TestBuildSystem.error(Exception('foo')),
       FileSystem: () => fileSystem,
       ProcessManager: () => FakeProcessManager.any(),
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -164,7 +154,7 @@ name: my_app
     'Can full restart after attaching',
     () async {
       final FlutterProject project = FlutterProject.fromDirectoryTest(fileSystem.currentDirectory);
-      final ResidentWebRunner residentWebRunner = ResidentWebRunner(
+      final residentWebRunner = ResidentWebRunner(
         mockFlutterDevice,
         flutterProject: project,
         debuggingOptions: DebuggingOptions.disabled(BuildInfo.release),
@@ -179,8 +169,7 @@ name: my_app
           fakeFlutterVersion: FakeFlutterVersion(),
         ),
       );
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
       final OperationResult result = await residentWebRunner.restart(fullRestart: true);
@@ -191,8 +180,7 @@ name: my_app
       BuildSystem: () => TestBuildSystem.all(BuildResult(success: true)),
       FileSystem: () => fileSystem,
       ProcessManager: () => FakeProcessManager.any(),
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 
@@ -200,7 +188,7 @@ name: my_app
     'Fails on compilation errors in hot restart',
     () async {
       final FlutterProject project = FlutterProject.fromDirectoryTest(fileSystem.currentDirectory);
-      final ResidentWebRunner residentWebRunner = ResidentWebRunner(
+      final residentWebRunner = ResidentWebRunner(
         mockFlutterDevice,
         flutterProject: project,
         debuggingOptions: DebuggingOptions.disabled(BuildInfo.release),
@@ -215,8 +203,7 @@ name: my_app
           fakeFlutterVersion: FakeFlutterVersion(),
         ),
       );
-      final Completer<DebugConnectionInfo> connectionInfoCompleter =
-          Completer<DebugConnectionInfo>();
+      final connectionInfoCompleter = Completer<DebugConnectionInfo>();
       unawaited(residentWebRunner.run(connectionInfoCompleter: connectionInfoCompleter));
       await connectionInfoCompleter.future;
       final OperationResult result = await residentWebRunner.restart(fullRestart: true);
@@ -225,15 +212,13 @@ name: my_app
       expect(result.message, contains('Failed to recompile application.'));
     },
     overrides: <Type, Generator>{
-      BuildSystem:
-          () => TestBuildSystem.list(<BuildResult>[
-            BuildResult(success: true),
-            BuildResult(success: false),
-          ]),
+      BuildSystem: () => TestBuildSystem.list(<BuildResult>[
+        BuildResult(success: true),
+        BuildResult(success: false),
+      ]),
       FileSystem: () => fileSystem,
       ProcessManager: () => FakeProcessManager.any(),
-      FeatureFlags: enableExplicitPackageDependencies,
-      Pub: FakePubWithPrimedDeps.new,
+      Pub: ThrowingPub.new,
     },
   );
 }
@@ -296,4 +281,25 @@ class FakeFlutterDevice extends Fake implements FlutterDevice {
 
   @override
   FlutterVmService? vmService;
+
+  @override
+  final DevelopmentShaderCompiler developmentShaderCompiler = const FakeShaderCompiler();
+
+  @override
+  Future<void> handleHotRestart() async {}
+}
+
+class FakeShaderCompiler implements DevelopmentShaderCompiler {
+  const FakeShaderCompiler();
+
+  @override
+  void configureCompiler(TargetPlatform? platform) {}
+
+  @override
+  Future<DevFSContent> recompileShader(DevFSContent inputShader) {
+    throw UnimplementedError();
+  }
+
+  @override
+  bool areDependenciesModified(DevFSContent shaderContent) => false;
 }

@@ -19,9 +19,9 @@ void main() {
       bool includeLinkLocal = true,
       InternetAddressType type = InternetAddressType.any,
     }) async {
-      final List<FakeNetworkInterface> interfaces = <FakeNetworkInterface>[
-        FakeNetworkInterface(<FakeInternetAddress>[const FakeInternetAddress('127.0.0.1')]),
-        FakeNetworkInterface(<FakeInternetAddress>[const FakeInternetAddress('::1')]),
+      final interfaces = <FakeNetworkInterface>[
+        FakeNetworkInterface(<FakeInterfaceAddress>[const FakeInterfaceAddress('127.0.0.1')]),
+        FakeNetworkInterface(<FakeInterfaceAddress>[const FakeInterfaceAddress('::1')]),
       ];
 
       return Future<List<NetworkInterface>>.value(interfaces);
@@ -203,10 +203,29 @@ void main() {
       ]);
     },
   );
+
+  // Regression test for https://github.com/flutter/flutter/issues/35598
+  testWithoutContext('ProxyValidator reports issues when NO_PROXY is malformed', () async {
+    final Platform platform = FakePlatform(
+      environment: <String, String>{
+        'HTTP_PROXY': 'fakeproxy.local',
+        'NO_PROXY': 'localhost;127.0.0.1',
+      },
+    );
+    final ValidationResult results = await ProxyValidator(platform: platform).validate();
+
+    expect(results.messages, const <ValidationMessage>[
+      ValidationMessage('HTTP_PROXY is set'),
+      ValidationMessage('NO_PROXY is localhost;127.0.0.1'),
+      ValidationMessage.hint('NO_PROXY does not contain localhost'),
+      ValidationMessage.hint('NO_PROXY does not contain 127.0.0.1'),
+      ValidationMessage.hint('NO_PROXY does not contain ::1'),
+    ]);
+  });
 }
 
 class FakeNetworkInterface extends NetworkInterface {
-  FakeNetworkInterface(List<FakeInternetAddress> addresses)
+  FakeNetworkInterface(List<FakeInterfaceAddress> addresses)
     : super(FakeNetworkInterfaceDelegate(addresses));
 
   @override
@@ -216,10 +235,10 @@ class FakeNetworkInterface extends NetworkInterface {
 class FakeNetworkInterfaceDelegate implements io.NetworkInterface {
   FakeNetworkInterfaceDelegate(this._fakeAddresses);
 
-  final List<FakeInternetAddress> _fakeAddresses;
+  final List<FakeInterfaceAddress> _fakeAddresses;
 
   @override
-  List<io.InternetAddress> get addresses => _fakeAddresses;
+  List<io.InterfaceAddress> get addresses => _fakeAddresses;
 
   @override
   int get index => addresses.length;
@@ -228,8 +247,8 @@ class FakeNetworkInterfaceDelegate implements io.NetworkInterface {
   String get name => 'FakeNetworkInterfaceDelegate$index';
 }
 
-class FakeInternetAddress implements io.InternetAddress {
-  const FakeInternetAddress(this._fakeAddress);
+class FakeInterfaceAddress implements io.InterfaceAddress {
+  const FakeInterfaceAddress(this._fakeAddress);
 
   final String _fakeAddress;
 
@@ -256,4 +275,10 @@ class FakeInternetAddress implements io.InternetAddress {
 
   @override
   io.InternetAddressType get type => throw UnimplementedError();
+
+  @override
+  int get prefixLength => 24;
+
+  @override
+  InternetAddress? get broadcast => null;
 }

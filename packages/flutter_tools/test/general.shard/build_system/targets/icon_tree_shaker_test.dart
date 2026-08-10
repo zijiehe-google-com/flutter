@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:convert';
+
 import 'package:file/memory.dart';
 import 'package:flutter_tools/src/artifacts.dart';
 import 'package:flutter_tools/src/base/file_system.dart';
@@ -10,18 +12,19 @@ import 'package:flutter_tools/src/build_info.dart';
 import 'package:flutter_tools/src/build_system/build_system.dart';
 import 'package:flutter_tools/src/build_system/targets/icon_tree_shaker.dart';
 import 'package:flutter_tools/src/devfs.dart';
+import 'package:record_use/record_use.dart';
 
 import '../../../src/common.dart';
 import '../../../src/fake_process_manager.dart';
 import '../../../src/fakes.dart';
 
-const List<int> _kTtfHeaderBytes = <int>[0, 1, 0, 0, 0, 15, 0, 128, 0, 3, 0, 112];
+const _kTtfHeaderBytes = <int>[0, 1, 0, 0, 0, 15, 0, 128, 0, 3, 0, 112];
 
-const String inputPath = '/input/fonts/MaterialIcons-Regular.otf';
-const String outputPath = '/output/fonts/MaterialIcons-Regular.otf';
-const String relativePath = 'fonts/MaterialIcons-Regular.otf';
+const inputPath = '/input/fonts/MaterialIcons-Regular.otf';
+const outputPath = '/output/fonts/MaterialIcons-Regular.otf';
+const relativePath = 'fonts/MaterialIcons-Regular.otf';
 
-final RegExp whitespace = RegExp(r'\s+');
+final whitespace = RegExp(r'\s+');
 
 void main() {
   late BufferLogger logger;
@@ -30,40 +33,19 @@ void main() {
   late Artifacts artifacts;
   late DevFSStringContent fontManifestContent;
 
-  late String dartPath;
-  late String constFinderPath;
   late String fontSubsetPath;
   late List<String> fontSubsetArgs;
 
-  List<String> getConstFinderArgs(String appDillPath) => <String>[
-    dartPath,
-    constFinderPath,
-    '--kernel-file',
-    appDillPath,
-    '--class-library-uri',
-    'package:flutter/src/widgets/icon_data.dart',
-    '--class-name',
-    'IconData',
-    '--annotation-class-name',
-    '_StaticIconProvider',
-    '--annotation-class-library-uri',
-    'package:flutter/src/widgets/icon_data.dart',
-  ];
-
-  void addConstFinderInvocation(
+  void writeRecordedUsesFile(
     String appDillPath, {
-    int exitCode = 0,
-    String stdout = '',
-    String stderr = '',
+    required String content,
+    String fileName = 'recorded_uses.json',
   }) {
-    processManager.addCommand(
-      FakeCommand(
-        command: getConstFinderArgs(appDillPath),
-        exitCode: exitCode,
-        stdout: stdout,
-        stderr: stderr,
-      ),
-    );
+    final File appDillFile = fileSystem.file(appDillPath);
+    final Directory buildDir = appDillFile.parent;
+    buildDir.childFile(fileName)
+      ..createSync(recursive: true)
+      ..writeAsStringSync(content);
   }
 
   void resetFontSubsetInvocation({
@@ -90,14 +72,10 @@ void main() {
     artifacts = Artifacts.test();
     fileSystem = MemoryFileSystem.test();
     logger = BufferLogger.test();
-    dartPath = artifacts.getArtifactPath(Artifact.engineDartBinary);
-    constFinderPath = artifacts.getArtifactPath(Artifact.constFinder);
     fontSubsetPath = artifacts.getArtifactPath(Artifact.fontSubset);
 
     fontSubsetArgs = <String>[fontSubsetPath, outputPath, inputPath];
 
-    fileSystem.file(constFinderPath).createSync(recursive: true);
-    fileSystem.file(dartPath).createSync(recursive: true);
     fileSystem.file(fontSubsetPath).createSync(recursive: true);
     fileSystem.file(inputPath)
       ..createSync(recursive: true)
@@ -121,7 +99,7 @@ void main() {
       kBuildMode: 'debug',
     });
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -131,29 +109,23 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
+    expect(iconTreeShaker.enabled, false);
     expect(
       logger.errorText,
-      'Font subsetting is not supported in debug mode. The --tree-shake-icons'
-      ' flag will be ignored.\n',
+      contains(
+        'Font subsetting is not supported in debug mode. The --tree-shake-icons flag will be ignored.',
+      ),
     );
-    expect(iconTreeShaker.enabled, false);
-
-    final bool subsets = await iconTreeShaker.subsetFont(
-      input: fileSystem.file(inputPath),
-      outputPath: outputPath,
-      relativePath: relativePath,
-    );
-    expect(subsets, false);
     expect(processManager, hasNoRemainingExpectations);
   });
 
-  testWithoutContext('Does not get enabled without font manifest', () {
+  testWithoutContext('Does not get enabled without font manifest', () async {
     final Environment environment = createEnvironment(<String, String>{
       kIconTreeShakerFlag: 'true',
       kBuildMode: 'release',
     });
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       null,
       logger: logger,
@@ -163,18 +135,17 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
-    expect(logger.errorText, isEmpty);
     expect(iconTreeShaker.enabled, false);
     expect(processManager, hasNoRemainingExpectations);
   });
 
-  testWithoutContext('Gets enabled', () {
+  testWithoutContext('Gets enabled', () async {
     final Environment environment = createEnvironment(<String, String>{
       kIconTreeShakerFlag: 'true',
       kBuildMode: 'release',
     });
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -184,18 +155,17 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
-    expect(logger.errorText, isEmpty);
     expect(iconTreeShaker.enabled, true);
     expect(processManager, hasNoRemainingExpectations);
   });
 
-  test('No app.dill throws exception', () async {
+  testWithoutContext('No recorded uses file throws exception', () async {
     final Environment environment = createEnvironment(<String, String>{
       kIconTreeShakerFlag: 'true',
       kBuildMode: 'release',
     });
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -205,12 +175,11 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
+    final File input = fileSystem.file(inputPath)..createSync(recursive: true);
+    input.writeAsBytesSync(_kTtfHeaderBytes);
+
     expect(
-      () async => iconTreeShaker.subsetFont(
-        input: fileSystem.file(inputPath),
-        outputPath: outputPath,
-        relativePath: relativePath,
-      ),
+      iconTreeShaker.subsetFont(input: input, outputPath: outputPath, relativePath: relativePath),
       throwsA(isA<IconTreeShakerException>()),
     );
     expect(processManager, hasNoRemainingExpectations);
@@ -223,7 +192,7 @@ void main() {
     });
     final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -232,8 +201,8 @@ void main() {
       artifacts: artifacts,
       targetPlatform: TargetPlatform.android,
     );
-    final CompleterIOSink stdinSink = CompleterIOSink();
-    addConstFinderInvocation(appDill.path, stdout: validConstFinderResult);
+    final stdinSink = CompleterIOSink();
+    writeRecordedUsesFile(appDill.path, content: validRecordedUsesResult);
     resetFontSubsetInvocation(stdinSink: stdinSink);
     // Font starts out 2500 bytes long
     final File inputFont = fileSystem.file(inputPath)..writeAsBytesSync(List<int>.filled(2500, 0));
@@ -273,7 +242,7 @@ void main() {
     });
     final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -283,14 +252,13 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
-    final CompleterIOSink stdinSink = CompleterIOSink();
-    addConstFinderInvocation(appDill.path, stdout: validConstFinderResult);
+    final stdinSink = CompleterIOSink();
+    writeRecordedUsesFile(appDill.path, content: validRecordedUsesResult);
     resetFontSubsetInvocation(stdinSink: stdinSink);
 
-    final File notAFont =
-        fileSystem.file('input/foo/bar.txt')
-          ..createSync(recursive: true)
-          ..writeAsStringSync('I could not think of a better string');
+    final File notAFont = fileSystem.file('input/foo/bar.txt')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('I could not think of a better string');
     final bool subsetted = await iconTreeShaker.subsetFont(
       input: notAFont,
       outputPath: outputPath,
@@ -306,7 +274,7 @@ void main() {
     });
     final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -316,8 +284,8 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
-    final CompleterIOSink stdinSink = CompleterIOSink();
-    addConstFinderInvocation(appDill.path, stdout: validConstFinderResult);
+    final stdinSink = CompleterIOSink();
+    writeRecordedUsesFile(appDill.path, content: validRecordedUsesResult);
     resetFontSubsetInvocation(stdinSink: stdinSink);
 
     final File notAFont = fileSystem.file(inputPath)..writeAsBytesSync(<int>[0, 1, 2]);
@@ -330,7 +298,7 @@ void main() {
     expect(subsetted, false);
   });
 
-  for (final TargetPlatform platform in <TargetPlatform>[
+  for (final platform in <TargetPlatform>[
     TargetPlatform.android_arm,
     TargetPlatform.web_javascript,
   ]) {
@@ -341,7 +309,7 @@ void main() {
       });
       final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
 
-      final IconTreeShaker iconTreeShaker = IconTreeShaker(
+      final iconTreeShaker = IconTreeShaker(
         environment,
         fontManifestContent,
         logger: logger,
@@ -351,7 +319,7 @@ void main() {
         targetPlatform: platform,
       );
 
-      addConstFinderInvocation(appDill.path, stdout: constFinderResultWithInvalid);
+      writeRecordedUsesFile(appDill.path, content: recordedUsesWithInvalidResult);
 
       await expectLater(
         () => iconTreeShaker.subsetFont(
@@ -376,7 +344,7 @@ void main() {
     });
     final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -386,12 +354,8 @@ void main() {
       targetPlatform: TargetPlatform.android_arm64,
     );
 
-    addConstFinderInvocation(
-      appDill.path,
-      // Does not contain space char
-      stdout: validConstFinderResult,
-    );
-    final CompleterIOSink stdinSink = CompleterIOSink();
+    writeRecordedUsesFile(appDill.path, content: validRecordedUsesResult);
+    final stdinSink = CompleterIOSink();
     resetFontSubsetInvocation(stdinSink: stdinSink);
     expect(processManager.hasRemainingExpectations, isTrue);
     final File inputFont = fileSystem.file(inputPath)..writeAsBytesSync(List<int>.filled(2500, 0));
@@ -419,7 +383,7 @@ void main() {
     });
     final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -429,12 +393,8 @@ void main() {
       targetPlatform: TargetPlatform.web_javascript,
     );
 
-    addConstFinderInvocation(
-      appDill.path,
-      // Does not contain space char
-      stdout: validConstFinderResult,
-    );
-    final CompleterIOSink stdinSink = CompleterIOSink();
+    writeRecordedUsesFile(appDill.path, content: validRecordedUsesResult);
+    final stdinSink = CompleterIOSink();
     resetFontSubsetInvocation(stdinSink: stdinSink);
     expect(processManager.hasRemainingExpectations, isTrue);
     final File inputFont = fileSystem.file(inputPath)..writeAsBytesSync(List<int>.filled(2500, 0));
@@ -463,7 +423,7 @@ void main() {
     final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
     fileSystem.file(inputPath).createSync(recursive: true);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -473,8 +433,8 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
-    final CompleterIOSink stdinSink = CompleterIOSink();
-    addConstFinderInvocation(appDill.path, stdout: validConstFinderResult);
+    final stdinSink = CompleterIOSink();
+    writeRecordedUsesFile(appDill.path, content: validRecordedUsesResult);
     resetFontSubsetInvocation(exitCode: -1, stdinSink: stdinSink);
 
     await expectLater(
@@ -495,7 +455,7 @@ void main() {
     });
     final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -505,8 +465,8 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
-    final CompleterIOSink stdinSink = CompleterIOSink(throwOnAdd: true);
-    addConstFinderInvocation(appDill.path, stdout: validConstFinderResult);
+    final stdinSink = CompleterIOSink(throwOnAdd: true);
+    writeRecordedUsesFile(appDill.path, content: validRecordedUsesResult);
     resetFontSubsetInvocation(exitCode: -1, stdinSink: stdinSink);
 
     await expectLater(
@@ -529,7 +489,7 @@ void main() {
 
     fontManifestContent = DevFSStringContent(invalidFontManifestJson);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -539,7 +499,7 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
-    addConstFinderInvocation(appDill.path, stdout: validConstFinderResult);
+    writeRecordedUsesFile(appDill.path, content: validRecordedUsesResult);
 
     await expectLater(
       () => iconTreeShaker.subsetFont(
@@ -562,7 +522,7 @@ void main() {
     // Valid manifest, just not using it.
     fontManifestContent = DevFSStringContent(validFontManifestJson);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -572,7 +532,7 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
-    addConstFinderInvocation(appDill.path, stdout: emptyConstFinderResult);
+    writeRecordedUsesFile(appDill.path, content: emptyRecordedUsesResult);
     // Does not throw
     await iconTreeShaker.subsetFont(
       input: fileSystem.file(inputPath),
@@ -605,7 +565,7 @@ void main() {
       // Nothing in font manifest
       fontManifestContent = DevFSStringContent(emptyFontManifestJson);
 
-      final IconTreeShaker iconTreeShaker = IconTreeShaker(
+      final iconTreeShaker = IconTreeShaker(
         environment,
         fontManifestContent,
         logger: logger,
@@ -615,7 +575,7 @@ void main() {
         targetPlatform: TargetPlatform.android,
       );
 
-      addConstFinderInvocation(appDill.path, stdout: emptyConstFinderResult);
+      writeRecordedUsesFile(appDill.path, content: emptyRecordedUsesResult);
       // Does not throw
       await iconTreeShaker.subsetFont(
         input: fileSystem.file(inputPath),
@@ -637,16 +597,16 @@ void main() {
     },
   );
 
-  testWithoutContext('ConstFinder non-zero exit', () async {
+  testWithoutContext('Invalid recorded uses JSON', () async {
     final Environment environment = createEnvironment(<String, String>{
       kIconTreeShakerFlag: 'true',
       kBuildMode: 'release',
     });
     final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
 
-    fontManifestContent = DevFSStringContent(invalidFontManifestJson);
+    fontManifestContent = DevFSStringContent(validFontManifestJson);
 
-    final IconTreeShaker iconTreeShaker = IconTreeShaker(
+    final iconTreeShaker = IconTreeShaker(
       environment,
       fontManifestContent,
       logger: logger,
@@ -656,7 +616,7 @@ void main() {
       targetPlatform: TargetPlatform.android,
     );
 
-    addConstFinderInvocation(appDill.path, exitCode: -1);
+    writeRecordedUsesFile(appDill.path, content: 'invalid json content');
 
     await expectLater(
       () async => iconTreeShaker.subsetFont(
@@ -668,57 +628,424 @@ void main() {
     );
     expect(processManager, hasNoRemainingExpectations);
   });
+
+  testWithoutContext(
+    'Can subset a font using InstanceCreationReference with constant arguments',
+    () async {
+      final Environment environment = createEnvironment(<String, String>{
+        kIconTreeShakerFlag: 'true',
+        kBuildMode: 'release',
+      });
+      final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
+
+      final iconTreeShaker = IconTreeShaker(
+        environment,
+        fontManifestContent,
+        logger: logger,
+        processManager: processManager,
+        fileSystem: fileSystem,
+        artifacts: artifacts,
+        targetPlatform: TargetPlatform.android,
+      );
+
+      writeRecordedUsesFile(appDill.path, content: validRecordedUsesCreationResult);
+
+      final stdinSink = CompleterIOSink();
+      resetFontSubsetInvocation(stdinSink: stdinSink);
+
+      final File inputFont = fileSystem.file(inputPath)
+        ..writeAsBytesSync(List<int>.filled(2500, 0));
+      fileSystem.file(outputPath)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(List<int>.filled(1200, 0));
+
+      final bool subsetted = await iconTreeShaker.subsetFont(
+        input: inputFont,
+        outputPath: outputPath,
+        relativePath: relativePath,
+      );
+
+      expect(subsetted, true);
+      expect(stdinSink.getAndClear(), '59470\n');
+      expect(processManager, hasNoRemainingExpectations);
+    },
+  );
+
+  testWithoutContext(
+    'InstanceCreationReference with non-constant arguments fails icon tree shaking',
+    () async {
+      final Environment environment = createEnvironment(<String, String>{
+        kIconTreeShakerFlag: 'true',
+        kBuildMode: 'release',
+      });
+      final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
+
+      final iconTreeShaker = IconTreeShaker(
+        environment,
+        fontManifestContent,
+        logger: logger,
+        processManager: processManager,
+        fileSystem: fileSystem,
+        artifacts: artifacts,
+        targetPlatform: TargetPlatform.android,
+      );
+
+      writeRecordedUsesFile(appDill.path, content: recordedUsesNonConstantCreationResult);
+
+      await expectLater(
+        () async => iconTreeShaker.subsetFont(
+          input: fileSystem.file(inputPath),
+          outputPath: outputPath,
+          relativePath: relativePath,
+        ),
+        throwsToolExit(),
+      );
+      expect(processManager, hasNoRemainingExpectations);
+    },
+  );
+
+  testWithoutContext('ConstructorTearoffReference fails icon tree shaking', () async {
+    final Environment environment = createEnvironment(<String, String>{
+      kIconTreeShakerFlag: 'true',
+      kBuildMode: 'release',
+    });
+    final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
+
+    final iconTreeShaker = IconTreeShaker(
+      environment,
+      fontManifestContent,
+      logger: logger,
+      processManager: processManager,
+      fileSystem: fileSystem,
+      artifacts: artifacts,
+      targetPlatform: TargetPlatform.android,
+    );
+
+    writeRecordedUsesFile(appDill.path, content: recordedUsesTearoffResult);
+
+    await expectLater(
+      () async => iconTreeShaker.subsetFont(
+        input: fileSystem.file(inputPath),
+        outputPath: outputPath,
+        relativePath: relativePath,
+      ),
+      throwsToolExit(),
+    );
+    expect(processManager, hasNoRemainingExpectations);
+  });
+
+  testWithoutContext('Combines recorded uses from both js and wasm files', () async {
+    final Environment environment = createEnvironment(<String, String>{
+      kIconTreeShakerFlag: 'true',
+      kBuildMode: 'release',
+    });
+    final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
+
+    final iconTreeShaker = IconTreeShaker(
+      environment,
+      fontManifestContent,
+      logger: logger,
+      processManager: processManager,
+      fileSystem: fileSystem,
+      artifacts: artifacts,
+      targetPlatform: TargetPlatform.web_javascript,
+    );
+
+    writeRecordedUsesFile(
+      appDill.path,
+      content: validRecordedUsesResult,
+      fileName: 'recorded_uses_js.json',
+    );
+    writeRecordedUsesFile(
+      appDill.path,
+      content: validRecordedUsesSecondResult,
+      fileName: 'recorded_uses_wasm.json',
+    );
+
+    final stdinSink = CompleterIOSink();
+    resetFontSubsetInvocation(stdinSink: stdinSink);
+
+    final File inputFont = fileSystem.file(inputPath)..writeAsBytesSync(List<int>.filled(2500, 0));
+    fileSystem.file(outputPath)
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(List<int>.filled(1200, 0));
+
+    expect(
+      await iconTreeShaker.subsetFont(
+        input: inputFont,
+        outputPath: outputPath,
+        relativePath: relativePath,
+      ),
+      true,
+    );
+
+    final String stdin = stdinSink.getAndClear();
+    expect(stdin, contains('59470'));
+    expect(stdin, contains('59471'));
+    expect(stdin, contains('optional:32'));
+    expect(processManager, hasNoRemainingExpectations);
+  });
+
+  testWithoutContext(
+    'Non-constant instance of non-Flutter IconData does not fail icon tree shaking',
+    () async {
+      final Environment environment = createEnvironment(<String, String>{
+        kIconTreeShakerFlag: 'true',
+        kBuildMode: 'release',
+      });
+      final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
+
+      final iconTreeShaker = IconTreeShaker(
+        environment,
+        fontManifestContent,
+        logger: logger,
+        processManager: processManager,
+        fileSystem: fileSystem,
+        artifacts: artifacts,
+        targetPlatform: TargetPlatform.android,
+      );
+
+      const customLibrary = Library('package:my_package/custom_icon_data.dart');
+      const customIconDataClass = Class('IconData', customLibrary);
+      const customOtherClass = Class('MyIconData', customLibrary);
+
+      final String mixedRecordings = json.encode(
+        Recordings(
+          calls: <DefinitionWithStaticCalls, List<CallReference>>{},
+          instances: <DefinitionWithInstances, List<InstanceReference>>{
+            iconDataClass: <InstanceReference>[
+              const InstanceConstantReference(
+                instanceConstant: InstanceConstant(
+                  definition: iconDataClass,
+                  fields: <String, Constant>{
+                    'codePoint': IntConstant(59470),
+                    'fontFamily': StringConstant('MaterialIcons'),
+                  },
+                ),
+                loadingUnit: rootLoadingUnit,
+              ),
+            ],
+            customIconDataClass: <InstanceReference>[
+              const InstanceCreationReference(
+                definition: customIconDataClass,
+                loadingUnit: rootLoadingUnit,
+                positionalArguments: <MaybeConstant>[NonConstant()],
+                namedArguments: <String, MaybeConstant>{},
+              ),
+            ],
+            customOtherClass: <InstanceReference>[
+              const InstanceCreationReference(
+                definition: customOtherClass,
+                loadingUnit: rootLoadingUnit,
+                positionalArguments: <MaybeConstant>[NonConstant()],
+                namedArguments: <String, MaybeConstant>{},
+              ),
+            ],
+          },
+        ).toJson(),
+      );
+
+      writeRecordedUsesFile(appDill.path, content: mixedRecordings);
+
+      final stdinSink = CompleterIOSink();
+      resetFontSubsetInvocation(stdinSink: stdinSink);
+
+      final File inputFont = fileSystem.file(inputPath)
+        ..writeAsBytesSync(List<int>.filled(2500, 0));
+      fileSystem.file(outputPath)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(List<int>.filled(1200, 0));
+
+      final bool subsetted = await iconTreeShaker.subsetFont(
+        input: inputFont,
+        outputPath: outputPath,
+        relativePath: relativePath,
+      );
+
+      expect(subsetted, true);
+      expect(stdinSink.getAndClear(), '59470\n');
+      expect(processManager, hasNoRemainingExpectations);
+    },
+  );
+
+  testWithoutContext('Skips empty recorded uses files', () async {
+    final Environment environment = createEnvironment(<String, String>{
+      kIconTreeShakerFlag: 'true',
+      kBuildMode: 'release',
+    });
+    final File appDill = environment.buildDir.childFile('app.dill')..createSync(recursive: true);
+
+    final iconTreeShaker = IconTreeShaker(
+      environment,
+      fontManifestContent,
+      logger: logger,
+      processManager: processManager,
+      fileSystem: fileSystem,
+      artifacts: artifacts,
+      targetPlatform: TargetPlatform.web_javascript,
+    );
+
+    writeRecordedUsesFile(appDill.path, content: '', fileName: 'recorded_uses_js.json');
+    writeRecordedUsesFile(
+      appDill.path,
+      content: validRecordedUsesResult,
+      fileName: 'recorded_uses_wasm.json',
+    );
+
+    final stdinSink = CompleterIOSink();
+    resetFontSubsetInvocation(stdinSink: stdinSink);
+
+    final File inputFont = fileSystem.file(inputPath)..writeAsBytesSync(List<int>.filled(2500, 0));
+    fileSystem.file(outputPath)
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(List<int>.filled(1200, 0));
+
+    expect(
+      await iconTreeShaker.subsetFont(
+        input: inputFont,
+        outputPath: outputPath,
+        relativePath: relativePath,
+      ),
+      true,
+    );
+
+    final String stdin = stdinSink.getAndClear();
+    expect(stdin, contains('59470'));
+    expect(processManager, hasNoRemainingExpectations);
+  });
 }
 
-const String validConstFinderResult = '''
-{
-  "constantInstances": [
-    {
-      "codePoint": 59470,
-      "fontFamily": "MaterialIcons",
-      "fontPackage": null,
-      "matchTextDirection": false
-    }
-  ],
-  "nonConstantLocations": []
-}
-''';
+const Library iconDataLibrary = Library('package:flutter/src/widgets/icon_data.dart');
+const Class iconDataClass = Class('IconData', iconDataLibrary);
+const LoadingUnit rootLoadingUnit = LoadingUnit('root');
 
-const String emptyConstFinderResult = '''
-{
-  "constantInstances": [
-    {
-      "codePoint": 59470,
-      "fontFamily": null,
-      "fontPackage": null,
-      "matchTextDirection": false
-    }
-  ],
-  "nonConstantLocations": []
-}
-''';
+// Generated from: const IconData(0xe84e, fontFamily: 'MaterialIcons')
+final String validRecordedUsesResult = json.encode(
+  Recordings(
+    calls: <DefinitionWithStaticCalls, List<CallReference>>{},
+    instances: <DefinitionWithInstances, List<InstanceReference>>{
+      iconDataClass: <InstanceReference>[
+        const InstanceConstantReference(
+          instanceConstant: InstanceConstant(
+            definition: iconDataClass,
+            fields: <String, Constant>{
+              'codePoint': IntConstant(59470),
+              'fontFamily': StringConstant('MaterialIcons'),
+            },
+          ),
+          loadingUnit: rootLoadingUnit,
+        ),
+      ],
+    },
+  ).toJson(),
+);
 
-const String constFinderResultWithInvalid = '''
-{
-  "constantInstances": [
-    {
-      "codePoint": 59470,
-      "fontFamily": "MaterialIcons",
-      "fontPackage": null,
-      "matchTextDirection": false
-    }
-  ],
-  "nonConstantLocations": [
-    {
-      "file": "file:///Path/to/hello_world/lib/file.dart",
-      "line": 19,
-      "column": 11
-    }
-  ]
-}
-''';
+// Generated from: const IconData(0xe84f, fontFamily: 'MaterialIcons')
+final String validRecordedUsesSecondResult = json.encode(
+  Recordings(
+    calls: <DefinitionWithStaticCalls, List<CallReference>>{},
+    instances: <DefinitionWithInstances, List<InstanceReference>>{
+      iconDataClass: <InstanceReference>[
+        const InstanceConstantReference(
+          instanceConstant: InstanceConstant(
+            definition: iconDataClass,
+            fields: <String, Constant>{
+              'codePoint': IntConstant(59471),
+              'fontFamily': StringConstant('MaterialIcons'),
+            },
+          ),
+          loadingUnit: rootLoadingUnit,
+        ),
+      ],
+    },
+  ).toJson(),
+);
 
-const String validFontManifestJson = '''
+// Generated from: IconData(0xe84e, fontFamily: 'MaterialIcons')
+final String validRecordedUsesCreationResult = json.encode(
+  Recordings(
+    calls: <DefinitionWithStaticCalls, List<CallReference>>{},
+    instances: <DefinitionWithInstances, List<InstanceReference>>{
+      iconDataClass: <InstanceReference>[
+        const InstanceCreationReference(
+          definition: iconDataClass,
+          loadingUnit: rootLoadingUnit,
+          positionalArguments: <MaybeConstant>[IntConstant(59470)],
+          namedArguments: <String, MaybeConstant>{'fontFamily': StringConstant('MaterialIcons')},
+        ),
+      ],
+    },
+  ).toJson(),
+);
+
+// Generated from: const IconData(0xe84e)
+final String emptyRecordedUsesResult = json.encode(
+  Recordings(
+    calls: <DefinitionWithStaticCalls, List<CallReference>>{},
+    instances: <DefinitionWithInstances, List<InstanceReference>>{
+      iconDataClass: <InstanceReference>[
+        const InstanceConstantReference(
+          instanceConstant: InstanceConstant(
+            definition: iconDataClass,
+            fields: <String, Constant>{
+              'codePoint': IntConstant(59470),
+              'fontFamily': NullConstant(),
+            },
+          ),
+          loadingUnit: rootLoadingUnit,
+        ),
+      ],
+    },
+  ).toJson(),
+);
+
+// Generated from: IconData(codePoint) (where codePoint is a non-const variable)
+final String recordedUsesWithInvalidResult = json.encode(
+  Recordings(
+    calls: <DefinitionWithStaticCalls, List<CallReference>>{},
+    instances: <DefinitionWithInstances, List<InstanceReference>>{
+      iconDataClass: <InstanceReference>[
+        const InstanceCreationReference(
+          definition: iconDataClass,
+          loadingUnit: rootLoadingUnit,
+          positionalArguments: <MaybeConstant>[NonConstant()],
+          namedArguments: <String, MaybeConstant>{},
+        ),
+      ],
+    },
+  ).toJson(),
+);
+
+// Generated from: IconData(codePoint, fontFamily: 'MaterialIcons') (where codePoint is a non-const variable)
+final String recordedUsesNonConstantCreationResult = json.encode(
+  Recordings(
+    calls: <DefinitionWithStaticCalls, List<CallReference>>{},
+    instances: <DefinitionWithInstances, List<InstanceReference>>{
+      iconDataClass: <InstanceReference>[
+        const InstanceCreationReference(
+          definition: iconDataClass,
+          loadingUnit: rootLoadingUnit,
+          positionalArguments: <MaybeConstant>[NonConstant()],
+          namedArguments: <String, MaybeConstant>{'fontFamily': StringConstant('MaterialIcons')},
+        ),
+      ],
+    },
+  ).toJson(),
+);
+
+// Generated from: const fn = IconData.new;
+final String recordedUsesTearoffResult = json.encode(
+  Recordings(
+    calls: <DefinitionWithStaticCalls, List<CallReference>>{},
+    instances: <DefinitionWithInstances, List<InstanceReference>>{
+      iconDataClass: <InstanceReference>[
+        const ConstructorTearoffReference(definition: iconDataClass, loadingUnit: rootLoadingUnit),
+      ],
+    },
+  ).toJson(),
+);
+
+const validFontManifestJson = '''
 [
   {
     "family": "MaterialIcons",
@@ -747,7 +1074,7 @@ const String validFontManifestJson = '''
 ]
 ''';
 
-const String invalidFontManifestJson = '''
+const invalidFontManifestJson = '''
 {
   "famly": "MaterialIcons",
   "fonts": [
@@ -758,4 +1085,4 @@ const String invalidFontManifestJson = '''
 }
 ''';
 
-const String emptyFontManifestJson = '[]';
+const emptyFontManifestJson = '[]';

@@ -25,8 +25,8 @@ import '../../src/android_common.dart';
 import '../../src/common.dart';
 import '../../src/context.dart';
 import '../../src/fake_process_manager.dart';
-import '../../src/fake_pub_deps.dart';
 import '../../src/fakes.dart' hide FakeFlutterProjectFactory;
+import '../../src/test_build_system.dart';
 import '../../src/test_flutter_command_runner.dart';
 
 void main() {
@@ -45,7 +45,7 @@ void main() {
     AndroidSdk? androidSdk = const _FakeAndroidSdk(),
     List<String>? arguments,
   }) async {
-    final BuildAarCommand command = BuildAarCommand(
+    final command = BuildAarCommand(
       androidSdk: androidSdk,
       fileSystem: globals.fs,
       logger: BufferLogger.test(),
@@ -54,11 +54,6 @@ void main() {
     final CommandRunner<void> runner = createTestCommandRunner(command);
     await runner.run(<String>['aar', ...?arguments, target]);
     return command;
-  }
-
-  // TODO(matanlurey): Remove after `explicit-package-dependencies` is enabled by default.
-  FeatureFlags enableExplicitPackageDependencies() {
-    return TestFeatureFlags(isExplicitPackageDependenciesEnabled: true);
   }
 
   group('Usage', () {
@@ -154,8 +149,7 @@ void main() {
       overrides: <Type, Generator>{
         AndroidBuilder: () => _CapturingFakeAndroidBuilder(),
         Analytics: () => analytics,
-        FeatureFlags: enableExplicitPackageDependencies,
-        Pub: () => FakePubWithPrimedDeps(allowGet: true),
+        Pub: FakePub.new,
       },
     );
 
@@ -215,8 +209,8 @@ void main() {
       final Invocation buildAarCall = fakeAndroidBuilder.capturedBuildAarCalls.single;
       expect(buildAarCall.namedArguments[#buildNumber], '1.0');
 
-      final List<BuildMode> buildModes = <BuildMode>[];
-      for (final AndroidBuildInfo androidBuildInfo
+      final buildModes = <BuildMode>[];
+      for (final androidBuildInfo
           in buildAarCall.namedArguments[#androidBuildInfo] as Set<AndroidBuildInfo>) {
         final BuildInfo buildInfo = androidBuildInfo.buildInfo;
         buildModes.add(buildInfo.mode);
@@ -230,10 +224,10 @@ void main() {
         expect(buildInfo.flavor, isNull);
         expect(buildInfo.splitDebugInfoPath, isNull);
         expect(buildInfo.dartObfuscation, isFalse);
-        expect(androidBuildInfo.targetArchs, <AndroidArch>[
-          AndroidArch.armeabi_v7a,
-          AndroidArch.arm64_v8a,
-          AndroidArch.x86_64,
+        expect(androidBuildInfo.targetArchs, <CpuArch>[
+          CpuArch.armv7,
+          CpuArch.arm64,
+          CpuArch.x64,
         ]);
       }
       expect(buildModes, hasLength(3));
@@ -255,7 +249,7 @@ void main() {
           '--no-debug',
           '--no-profile',
           '--target-platform',
-          'android-x86',
+          'android-x64',
           '--tree-shake-icons',
           '--flavor',
           'free',
@@ -278,7 +272,7 @@ void main() {
 
       final AndroidBuildInfo androidBuildInfo =
           (buildAarCall.namedArguments[#androidBuildInfo] as Set<AndroidBuildInfo>).single;
-      expect(androidBuildInfo.targetArchs, <AndroidArch>[AndroidArch.x86]);
+      expect(androidBuildInfo.targetArchs, <CpuArch>[CpuArch.x64]);
 
       final BuildInfo buildInfo = androidBuildInfo.buildInfo;
       expect(buildInfo.mode, BuildMode.release);
@@ -287,6 +281,38 @@ void main() {
       expect(buildInfo.splitDebugInfoPath, '/project-name/v1.2.3/');
       expect(buildInfo.dartObfuscation, isTrue);
       expect(buildInfo.dartDefines.contains('foo=bar'), isTrue);
+    }, overrides: <Type, Generator>{AndroidBuilder: () => fakeAndroidBuilder});
+
+    testUsingContext('defaults androidEnableHcpp to false without explicit flag', () async {
+      final String projectPath = await createProject(
+        tempDir,
+        arguments: <String>['--no-pub', '--template=module'],
+      );
+      await runBuildAar(projectPath, arguments: <String>['--no-pub']);
+
+      final Invocation buildAarCall = fakeAndroidBuilder.capturedBuildAarCalls.single;
+      for (final androidBuildInfo
+          in buildAarCall.namedArguments[#androidBuildInfo] as Set<AndroidBuildInfo>) {
+        // The property is piped to the aar gradle build for consistency (defaulting to
+        // false in this PR), but the Flutter Gradle Plugin only consumes it for application
+        // projects: injecting into a module (aar) manifest would conflict
+        // with an explicit value in the add-to-app host's manifest and fail
+        // the host build in the manifest merger.
+        expect(androidBuildInfo.buildInfo.androidEnableHcpp, isFalse);
+      }
+    }, overrides: <Type, Generator>{AndroidBuilder: () => fakeAndroidBuilder});
+
+    testUsingContext('does not define --enable-hcpp', () async {
+      final String projectPath = await createProject(
+        tempDir,
+        arguments: <String>['--no-pub', '--template=module'],
+      );
+      // HCPP for add-to-app is controlled by the host app's manifest; an aar
+      // level flag would be a silent no-op, so the command must reject it.
+      await expectLater(
+        runBuildAar(projectPath, arguments: <String>['--no-pub', '--no-enable-hcpp']),
+        throwsA(isA<UsageException>()),
+      );
     }, overrides: <Type, Generator>{AndroidBuilder: () => fakeAndroidBuilder});
   });
 
@@ -369,6 +395,30 @@ void main() {
           tempDir,
           arguments: <String>['--no-pub', '--template=module'],
         );
+        final AndroidSdk androidSdk = globals.androidSdk!;
+        final List<String> installedNdkVersions =
+            androidSdk.directory
+                .childDirectory('ndk')
+                .listSync()
+                .whereType<Directory>()
+                .map((Directory dir) => dir.basename)
+                .where(
+                  (String version) => androidSdk.directory
+                      .childDirectory('ndk')
+                      .childDirectory(version)
+                      .childFile('source.properties')
+                      .existsSync(),
+                )
+                .toList()
+              ..sort();
+        final ndkProvisioningProperties = <String>[
+          '-Pflutter.androidSdkRoot=${androidSdk.directory.path}',
+          '-Pflutter.installedNdkVersions=${installedNdkVersions.join(',')}',
+          if (androidSdk.sdkManagerPath != null &&
+              androidSdk.cmdlineToolsAvailable &&
+              androidSdk.licensesAvailable)
+            '-Pflutter.sdkManagerPath=${androidSdk.sdkManagerPath!}',
+        ];
 
         processManager.addCommand(
           FakeCommand(
@@ -381,11 +431,22 @@ void main() {
               '-PbuildNumber=1.0',
               '-q',
               '-Ptarget=${globals.fs.path.join('lib', 'main.dart')}',
-              '-Pdart-defines=RkxVVFRFUl9WRVJTSU9OPTAuMC4w,RkxVVFRFUl9DSEFOTkVMPW1hc3Rlcg==,RkxVVFRFUl9HSVRfVVJMPWh0dHBzOi8vZ2l0aHViLmNvbS9mbHV0dGVyL2ZsdXR0ZXIuZ2l0,RkxVVFRFUl9GUkFNRVdPUktfUkVWSVNJT049MTExMTE=,RkxVVFRFUl9FTkdJTkVfUkVWSVNJT049YWJjZGU=,RkxVVFRFUl9EQVJUX1ZFUlNJT049MTI=',
+              '-Pdart-defines=${encodeDartDefinesMap(<String, String>{
+                'FLUTTER_BUILD_NAME': '1.0.0',
+                'FLUTTER_BUILD_NUMBER': '1',
+                'FLUTTER_VERSION': '0.0.0', //
+                'FLUTTER_CHANNEL': 'master',
+                'FLUTTER_GIT_URL': 'https://github.com/flutter/flutter.git',
+                'FLUTTER_FRAMEWORK_REVISION': '11111',
+                'FLUTTER_ENGINE_REVISION': 'abcde',
+                'FLUTTER_DART_VERSION': '12',
+              })}',
               '-Pdart-obfuscation=false',
               '-Pextra-front-end-options=foo,bar',
               '-Ptrack-widget-creation=true',
               '-Ptree-shake-icons=true',
+              '-Penable-hcpp=false',
+              ...ndkProvisioningProperties,
               '-Ptarget-platform=android-arm,android-arm64,android-x64',
               'assembleAarRelease',
             ],
@@ -508,7 +569,7 @@ void main() {
       );
 
       testUsingContext(
-        'EnableImpeller="false" reports an disabled event',
+        'EnableImpeller="false" reports a disabled event',
         () async {
           final String projectPath = await createProject(
             tempDir,
@@ -548,7 +609,7 @@ void main() {
 ///
 /// Calls to [buildAar] are stored as [capturedBuildAarCalls], other calls are rejected.
 final class _CapturingFakeAndroidBuilder extends Fake implements AndroidBuilder {
-  final List<Invocation> capturedBuildAarCalls = <Invocation>[];
+  final capturedBuildAarCalls = <Invocation>[];
 
   @override
   Object? noSuchMethod(Invocation invocation) {
@@ -567,4 +628,19 @@ final class _FakeAndroidSdk with Fake implements AndroidSdk {
 final class _FakeAndroidStudio extends Fake implements AndroidStudio {
   @override
   String get javaPath => 'java';
+}
+
+class FakePub extends Fake implements Pub {
+  @override
+  Future<void> get({
+    PubContext? context,
+    required FlutterProject project,
+    bool upgrade = false,
+    bool offline = false,
+    String? flutterRootOverride,
+    bool checkUpToDate = false,
+    bool shouldSkipThirdPartyGenerator = true,
+    bool enforceLockfile = false,
+    PubOutputMode outputMode = PubOutputMode.all,
+  }) async {}
 }

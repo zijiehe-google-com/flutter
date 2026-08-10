@@ -147,8 +147,10 @@ abstract class BoxBorder extends ShapeBorder {
   /// animation, and then bringing `b`'s lateral edges _from_ [BorderSide.none]
   /// over the second half of the animation.
   ///
-  /// For a more flexible approach, consider [ShapeBorder.lerp], which would
-  /// instead [add] the two sets of sides and interpolate them simultaneously.
+  /// Other [BoxBorder] subclasses can support this method by overriding
+  /// [lerpFrom] or [lerpTo] to return a [BoxBorder]. If neither border can
+  /// interpolate the other, this returns `a` before `t=0.5` and `b` after
+  /// `t=0.5`.
   ///
   /// {@macro dart.ui.shadow.lerp}
   static BoxBorder? lerp(BoxBorder? a, BoxBorder? b, double t) {
@@ -203,18 +205,8 @@ abstract class BoxBorder extends ShapeBorder {
         bottom: BorderSide.lerp(a.bottom, b.bottom, t),
       );
     }
-    throw FlutterError.fromParts(<DiagnosticsNode>[
-      ErrorSummary('BoxBorder.lerp can only interpolate Border and BorderDirectional classes.'),
-      ErrorDescription(
-        'BoxBorder.lerp() was called with two objects of type ${a.runtimeType} and ${b.runtimeType}:\n'
-        '  $a\n'
-        '  $b\n'
-        'However, only Border and BorderDirectional classes are supported by this method.',
-      ),
-      ErrorHint(
-        'For a more general interpolation method, consider using ShapeBorder.lerp instead.',
-      ),
-    ]);
+    final ShapeBorder? result = b?.lerpFrom(a, t) ?? a?.lerpTo(b, t);
+    return result as BoxBorder? ?? (t < 0.5 ? a : b);
   }
 
   @override
@@ -233,6 +225,11 @@ abstract class BoxBorder extends ShapeBorder {
       'The textDirection argument to $runtimeType.getOuterPath must not be null.',
     );
     return Path()..addRect(rect);
+  }
+
+  @override
+  bool hitTest(Rect rect, Offset position, {TextDirection? textDirection}) {
+    return rect.contains(position);
   }
 
   @override
@@ -284,7 +281,7 @@ abstract class BoxBorder extends ShapeBorder {
     BorderRadius borderRadius,
   ) {
     assert(side.style != BorderStyle.none);
-    final Paint paint = Paint()..color = side.color;
+    final paint = Paint()..color = side.color;
     final double width = side.width;
     if (width == 0.0) {
       paint
@@ -332,63 +329,23 @@ abstract class BoxBorder extends ShapeBorder {
           Radius.circular(rect.width),
         );
     }
-    final Paint paint = Paint()..color = color;
-    final RRect inner = _deflateRRect(
-      borderRect,
-      EdgeInsets.fromLTRB(left.strokeInset, top.strokeInset, right.strokeInset, bottom.strokeInset),
-    );
-    final RRect outer = _inflateRRect(
-      borderRect,
-      EdgeInsets.fromLTRB(
-        left.strokeOutset,
-        top.strokeOutset,
-        right.strokeOutset,
-        bottom.strokeOutset,
-      ),
-    );
+    final paint = Paint()..color = color;
+
+    final RRect inner = EdgeInsets.fromLTRB(
+      left.strokeInset,
+      top.strokeInset,
+      right.strokeInset,
+      bottom.strokeInset,
+    ).deflateRRect(borderRect);
+
+    final RRect outer = EdgeInsets.fromLTRB(
+      left.strokeOutset,
+      top.strokeOutset,
+      right.strokeOutset,
+      bottom.strokeOutset,
+    ).inflateRRect(borderRect);
+
     canvas.drawDRRect(outer, inner, paint);
-  }
-
-  static RRect _inflateRRect(RRect rect, EdgeInsets insets) {
-    return RRect.fromLTRBAndCorners(
-      rect.left - insets.left,
-      rect.top - insets.top,
-      rect.right + insets.right,
-      rect.bottom + insets.bottom,
-      topLeft: (rect.tlRadius + Radius.elliptical(insets.left, insets.top)).clamp(
-        minimum: Radius.zero,
-      ),
-      topRight: (rect.trRadius + Radius.elliptical(insets.right, insets.top)).clamp(
-        minimum: Radius.zero,
-      ),
-      bottomRight: (rect.brRadius + Radius.elliptical(insets.right, insets.bottom)).clamp(
-        minimum: Radius.zero,
-      ),
-      bottomLeft: (rect.blRadius + Radius.elliptical(insets.left, insets.bottom)).clamp(
-        minimum: Radius.zero,
-      ),
-    );
-  }
-
-  static RRect _deflateRRect(RRect rect, EdgeInsets insets) {
-    return RRect.fromLTRBAndCorners(
-      rect.left + insets.left,
-      rect.top + insets.top,
-      rect.right - insets.right,
-      rect.bottom - insets.bottom,
-      topLeft: (rect.tlRadius - Radius.elliptical(insets.left, insets.top)).clamp(
-        minimum: Radius.zero,
-      ),
-      topRight: (rect.trRadius - Radius.elliptical(insets.right, insets.top)).clamp(
-        minimum: Radius.zero,
-      ),
-      bottomRight: (rect.brRadius - Radius.elliptical(insets.right, insets.bottom)).clamp(
-        minimum: Radius.zero,
-      ),
-      bottomLeft: (rect.blRadius - Radius.elliptical(insets.left, insets.bottom)).clamp(
-        minimum: Radius.zero,
-      ),
-    );
   }
 
   static void _paintUniformBorderWithCircle(Canvas canvas, Rect rect, BorderSide side) {
@@ -509,12 +466,7 @@ class Border extends BoxBorder {
     BorderStyle style = BorderStyle.solid,
     double strokeAlign = BorderSide.strokeAlignInside,
   }) {
-    final BorderSide side = BorderSide(
-      color: color,
-      width: width,
-      style: style,
-      strokeAlign: strokeAlign,
-    );
+    final side = BorderSide(color: color, width: width, style: style, strokeAlign: strokeAlign);
     return Border.fromBorderSide(side);
   }
 
@@ -809,7 +761,7 @@ class Border extends BoxBorder {
     if (isUniform) {
       return '${objectRuntimeType(this, 'Border')}.all($top)';
     }
-    final List<String> arguments = <String>[
+    final arguments = <String>[
       if (top != BorderSide.none) 'top: $top',
       if (right != BorderSide.none) 'right: $right',
       if (bottom != BorderSide.none) 'bottom: $bottom',
@@ -1173,7 +1125,7 @@ class BorderDirectional extends BoxBorder {
 
   @override
   String toString() {
-    final List<String> arguments = <String>[
+    final arguments = <String>[
       if (top != BorderSide.none) 'top: $top',
       if (start != BorderSide.none) 'start: $start',
       if (end != BorderSide.none) 'end: $end',

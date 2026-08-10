@@ -13,14 +13,13 @@
 #include "gmock/gmock.h"
 #include "impeller/core/runtime_types.h"
 
-// CREATE_NATIVE_ENTRY is leaky by design
+// CREATE_FFI_LAMBDA is leaky by design
 // NOLINTBEGIN(clang-analyzer-core.StackAddressEscape)
 
 namespace flutter {
 
 namespace {
 
-using ::testing::Invoke;
 using ::testing::ReturnRef;
 
 fml::AutoResetWaitableEvent native_latch;
@@ -57,6 +56,11 @@ class MockDelegate : public Engine::Delegate {
               OnEngineUpdateSemantics,
               (int64_t, SemanticsNodeUpdates, CustomAccessibilityActionUpdates),
               (override));
+  MOCK_METHOD(void,
+              OnEngineSetApplicationLocale,
+              (const std::string),
+              (override));
+  MOCK_METHOD(void, OnEngineSetSemanticsTreeEnabled, (bool), (override));
   MOCK_METHOD(void,
               OnEngineHandlePlatformMessage,
               (std::unique_ptr<PlatformMessage>),
@@ -280,28 +284,27 @@ TEST_F(EngineAnimatorTest, AnimatorAcceptsMultipleRenders) {
       .WillOnce(ReturnRef(platform_message_handler));
   fml::AutoResetWaitableEvent draw_latch;
   EXPECT_CALL(animator_delegate, OnAnimatorDraw)
-      .WillOnce(
-          Invoke([&draw_latch](const std::shared_ptr<FramePipeline>& pipeline) {
-            auto status =
-                pipeline->Consume([&](std::unique_ptr<FrameItem> item) {
-                  auto tasks = Sorted(item->layer_tree_tasks);
-                  EXPECT_EQ(tasks.size(), 2u);
-                  EXPECT_EQ(tasks[0]->view_id, 1);
-                  EXPECT_EQ(tasks[1]->view_id, 2);
-                });
-            EXPECT_EQ(status, PipelineConsumeResult::Done);
-            draw_latch.Signal();
-          }));
+      .WillOnce([&draw_latch](const std::shared_ptr<FramePipeline>& pipeline) {
+        auto status = pipeline->Consume([&](std::unique_ptr<FrameItem> item) {
+          auto tasks = Sorted(item->layer_tree_tasks);
+          EXPECT_EQ(tasks.size(), 2u);
+          EXPECT_EQ(tasks[0]->view_id, 1);
+          EXPECT_EQ(tasks[1]->view_id, 2);
+        });
+        EXPECT_EQ(status, PipelineConsumeResult::Done);
+        draw_latch.Signal();
+      });
   EXPECT_CALL(animator_delegate, OnAnimatorBeginFrame)
-      .WillOnce(Invoke([&engine_context](fml::TimePoint frame_target_time,
-                                         uint64_t frame_number) {
+      .WillOnce([&engine_context](fml::TimePoint frame_target_time,
+                                  uint64_t frame_number) {
         engine_context->EngineTaskSync([&](Engine& engine) {
           engine.BeginFrame(frame_target_time, frame_number);
         });
-      }));
+      });
 
   native_latch.Reset();
-  AddNativeCallback("NotifyNative", [](auto args) { native_latch.Signal(); });
+  AddFfiNativeCallback("NotifyNative",
+                       CREATE_FFI_LAMBDA([]() { native_latch.Signal(); }));
 
   std::unique_ptr<Animator> animator;
   PostSync(task_runners_.GetUITaskRunner(),
@@ -343,25 +346,23 @@ TEST_F(EngineAnimatorTest, IgnoresOutOfFrameRenders) {
       .WillOnce(ReturnRef(platform_message_handler));
   fml::AutoResetWaitableEvent draw_latch;
   EXPECT_CALL(animator_delegate, OnAnimatorDraw)
-      .WillOnce(
-          Invoke([&draw_latch](const std::shared_ptr<FramePipeline>& pipeline) {
-            auto status =
-                pipeline->Consume([&](std::unique_ptr<FrameItem> item) {
-                  // View 1 is rendered before the frame, and is ignored.
-                  // View 2 is rendered within the frame, and is accepted.
-                  EXPECT_EQ(item->layer_tree_tasks.size(), 1u);
-                  EXPECT_EQ(item->layer_tree_tasks[0]->view_id, 2);
-                });
-            EXPECT_EQ(status, PipelineConsumeResult::Done);
-            draw_latch.Signal();
-          }));
+      .WillOnce([&draw_latch](const std::shared_ptr<FramePipeline>& pipeline) {
+        auto status = pipeline->Consume([&](std::unique_ptr<FrameItem> item) {
+          // View 1 is rendered before the frame, and is ignored.
+          // View 2 is rendered within the frame, and is accepted.
+          EXPECT_EQ(item->layer_tree_tasks.size(), 1u);
+          EXPECT_EQ(item->layer_tree_tasks[0]->view_id, 2);
+        });
+        EXPECT_EQ(status, PipelineConsumeResult::Done);
+        draw_latch.Signal();
+      });
   EXPECT_CALL(animator_delegate, OnAnimatorBeginFrame)
-      .WillOnce(Invoke([&engine_context](fml::TimePoint frame_target_time,
-                                         uint64_t frame_number) {
+      .WillOnce([&engine_context](fml::TimePoint frame_target_time,
+                                  uint64_t frame_number) {
         engine_context->EngineTaskSync([&](Engine& engine) {
           engine.BeginFrame(frame_target_time, frame_number);
         });
-      }));
+      });
 
   std::unique_ptr<Animator> animator;
   PostSync(task_runners_.GetUITaskRunner(),
@@ -395,8 +396,7 @@ TEST_F(EngineAnimatorTest, IgnoresDuplicateRenders) {
   std::unique_ptr<EngineContext> engine_context;
 
   std::vector<std::shared_ptr<Layer>> benchmark_layers;
-  auto capture_root_layer = [&benchmark_layers](Dart_NativeArguments args) {
-    auto handle = Dart_GetNativeArgument(args, 0);
+  auto capture_root_layer = [&benchmark_layers](Dart_Handle handle) {
     intptr_t peer = 0;
     Dart_Handle result = Dart_GetNativeInstanceField(
         handle, tonic::DartWrappable::kPeerIndex, &peer);
@@ -415,8 +415,8 @@ TEST_F(EngineAnimatorTest, IgnoresDuplicateRenders) {
       .WillOnce(ReturnRef(platform_message_handler));
   fml::AutoResetWaitableEvent draw_latch;
   EXPECT_CALL(animator_delegate, OnAnimatorDraw)
-      .WillOnce(Invoke([&draw_latch, &benchmark_layers](
-                           const std::shared_ptr<FramePipeline>& pipeline) {
+      .WillOnce([&draw_latch, &benchmark_layers](
+                    const std::shared_ptr<FramePipeline>& pipeline) {
         auto status = pipeline->Consume([&](std::unique_ptr<FrameItem> item) {
           EXPECT_EQ(item->layer_tree_tasks.size(), 1u);
           EXPECT_EQ(item->layer_tree_tasks[0]->view_id, kFlutterImplicitViewId);
@@ -429,17 +429,17 @@ TEST_F(EngineAnimatorTest, IgnoresDuplicateRenders) {
         });
         EXPECT_EQ(status, PipelineConsumeResult::Done);
         draw_latch.Signal();
-      }));
+      });
   EXPECT_CALL(animator_delegate, OnAnimatorBeginFrame)
-      .WillOnce(Invoke([&engine_context](fml::TimePoint frame_target_time,
-                                         uint64_t frame_number) {
+      .WillOnce([&engine_context](fml::TimePoint frame_target_time,
+                                  uint64_t frame_number) {
         engine_context->EngineTaskSync([&](Engine& engine) {
           engine.BeginFrame(frame_target_time, frame_number);
         });
-      }));
+      });
 
-  AddNativeCallback("CaptureRootLayer",
-                    CREATE_NATIVE_ENTRY(capture_root_layer));
+  AddFfiNativeCallback("CaptureRootLayer",
+                       CREATE_FFI_LAMBDA(capture_root_layer));
 
   std::unique_ptr<Animator> animator;
   PostSync(task_runners_.GetUITaskRunner(),
@@ -477,22 +477,22 @@ TEST_F(EngineAnimatorTest, AnimatorSubmitsImplicitViewBeforeDrawFrameEnds) {
 
   bool rasterization_started = false;
   EXPECT_CALL(animator_delegate, OnAnimatorDraw)
-      .WillOnce(Invoke([&rasterization_started](
-                           const std::shared_ptr<FramePipeline>& pipeline) {
+      .WillOnce([&rasterization_started](
+                    const std::shared_ptr<FramePipeline>& pipeline) {
         rasterization_started = true;
         auto status = pipeline->Consume([&](std::unique_ptr<FrameItem> item) {
           EXPECT_EQ(item->layer_tree_tasks.size(), 1u);
           EXPECT_EQ(item->layer_tree_tasks[0]->view_id, kFlutterImplicitViewId);
         });
         EXPECT_EQ(status, PipelineConsumeResult::Done);
-      }));
+      });
   EXPECT_CALL(animator_delegate, OnAnimatorBeginFrame)
-      .WillRepeatedly(Invoke([&engine_context](fml::TimePoint frame_target_time,
-                                               uint64_t frame_number) {
+      .WillRepeatedly([&engine_context](fml::TimePoint frame_target_time,
+                                        uint64_t frame_number) {
         engine_context->EngineTaskSync([&](Engine& engine) {
           engine.BeginFrame(frame_target_time, frame_number);
         });
-      }));
+      });
 
   std::unique_ptr<Animator> animator;
   PostSync(task_runners_.GetUITaskRunner(),
@@ -506,11 +506,11 @@ TEST_F(EngineAnimatorTest, AnimatorSubmitsImplicitViewBeforeDrawFrameEnds) {
 
   native_latch.Reset();
   // The native_latch is signaled at the end of handleDrawFrame.
-  AddNativeCallback("NotifyNative",
-                    CREATE_NATIVE_ENTRY([&rasterization_started](auto args) {
-                      EXPECT_EQ(rasterization_started, true);
-                      native_latch.Signal();
-                    }));
+  AddFfiNativeCallback("NotifyNative",
+                       CREATE_FFI_LAMBDA([&rasterization_started]() {
+                         EXPECT_EQ(rasterization_started, true);
+                         native_latch.Signal();
+                       }));
 
   engine_context = EngineContext::Create(delegate_, settings_, task_runners_,
                                          std::move(animator));
@@ -542,24 +542,23 @@ TEST_F(EngineAnimatorTest, AnimatorSubmitWarmUpImplicitView) {
   fml::AutoResetWaitableEvent continuation_ready_latch;
   fml::AutoResetWaitableEvent draw_latch;
   EXPECT_CALL(animator_delegate, OnAnimatorDraw)
-      .WillOnce(Invoke([&draw_latch](
-                           const std::shared_ptr<FramePipeline>& pipeline) {
+      .WillOnce([&draw_latch](const std::shared_ptr<FramePipeline>& pipeline) {
         auto status = pipeline->Consume([&](std::unique_ptr<FrameItem> item) {
           EXPECT_EQ(item->layer_tree_tasks.size(), 1u);
           EXPECT_EQ(item->layer_tree_tasks[0]->view_id, kFlutterImplicitViewId);
         });
         EXPECT_EQ(status, PipelineConsumeResult::Done);
         draw_latch.Signal();
-      }));
+      });
   EXPECT_CALL(animator_delegate, OnAnimatorBeginFrame)
       .WillRepeatedly(
-          Invoke([&engine_context, &continuation_ready_latch](
-                     fml::TimePoint frame_target_time, uint64_t frame_number) {
+          [&engine_context, &continuation_ready_latch](
+              fml::TimePoint frame_target_time, uint64_t frame_number) {
             continuation_ready_latch.Signal();
             engine_context->EngineTaskSync([&](Engine& engine) {
               engine.BeginFrame(frame_target_time, frame_number);
             });
-          }));
+          });
 
   std::unique_ptr<Animator> animator;
   PostSync(task_runners_.GetUITaskRunner(),
@@ -609,27 +608,25 @@ TEST_F(EngineAnimatorTest, AnimatorSubmitPartialViewsForWarmUp) {
   fml::AutoResetWaitableEvent continuation_ready_latch;
   fml::AutoResetWaitableEvent draw_latch;
   EXPECT_CALL(animator_delegate, OnAnimatorDraw)
-      .WillOnce(
-          Invoke([&draw_latch](const std::shared_ptr<FramePipeline>& pipeline) {
-            auto status =
-                pipeline->Consume([&](std::unique_ptr<FrameItem> item) {
-                  auto tasks = Sorted(item->layer_tree_tasks);
-                  EXPECT_EQ(tasks.size(), 2u);
-                  EXPECT_EQ(tasks[0]->view_id, 1);
-                  EXPECT_EQ(tasks[1]->view_id, 2);
-                });
-            EXPECT_EQ(status, PipelineConsumeResult::Done);
-            draw_latch.Signal();
-          }));
+      .WillOnce([&draw_latch](const std::shared_ptr<FramePipeline>& pipeline) {
+        auto status = pipeline->Consume([&](std::unique_ptr<FrameItem> item) {
+          auto tasks = Sorted(item->layer_tree_tasks);
+          EXPECT_EQ(tasks.size(), 2u);
+          EXPECT_EQ(tasks[0]->view_id, 1);
+          EXPECT_EQ(tasks[1]->view_id, 2);
+        });
+        EXPECT_EQ(status, PipelineConsumeResult::Done);
+        draw_latch.Signal();
+      });
   EXPECT_CALL(animator_delegate, OnAnimatorBeginFrame)
       .WillRepeatedly(
-          Invoke([&engine_context, &continuation_ready_latch](
-                     fml::TimePoint frame_target_time, uint64_t frame_number) {
+          [&engine_context, &continuation_ready_latch](
+              fml::TimePoint frame_target_time, uint64_t frame_number) {
             continuation_ready_latch.Signal();
             engine_context->EngineTaskSync([&](Engine& engine) {
               engine.BeginFrame(frame_target_time, frame_number);
             });
-          }));
+          });
 
   std::unique_ptr<Animator> animator;
   PostSync(task_runners_.GetUITaskRunner(),

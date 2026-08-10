@@ -5,7 +5,7 @@
 #ifndef FLUTTER_IMPELLER_GEOMETRY_ROUND_SUPERELLIPSE_PARAM_H_
 #define FLUTTER_IMPELLER_GEOMETRY_ROUND_SUPERELLIPSE_PARAM_H_
 
-#include "flutter/impeller/geometry/path_builder.h"
+#include "flutter/impeller/geometry/path_source.h"
 #include "flutter/impeller/geometry/point.h"
 #include "flutter/impeller/geometry/rect.h"
 #include "flutter/impeller/geometry/rounding_radii.h"
@@ -49,6 +49,8 @@ struct RoundSuperellipseParam {
     Point circle_center;
     // The angular span of the circular arc, measured in radians.
     Radians circle_max_angle;
+
+    Scalar circle_radius;
   };
 
   // Parameters for drawing a rounded superellipse with equal radius size for
@@ -94,11 +96,20 @@ struct RoundSuperellipseParam {
   // If true, all corners are the same and only `top_right` is popularized.
   bool all_corners_same;
 
+  Scalar top_split;
+  Scalar bottom_split;
+  Scalar left_split;
+  Scalar right_split;
+
   // Create a param for a rounded superellipse with the specific bounds and
   // radii.
   [[nodiscard]] static RoundSuperellipseParam MakeBoundsRadii(
       const Rect& bounds,
       const RoundingRadii& radii);
+
+  [[nodiscard]] static RoundSuperellipseParam MakeBoundsRadius(
+      const Rect& bounds,
+      Scalar radius);
 
   // Returns whether this rounded superellipse contains the point.
   //
@@ -106,8 +117,8 @@ struct RoundSuperellipseParam {
   // with the bounds, which is recommended for callers.
   bool Contains(const Point& point) const;
 
-  // Add a path of this rounded superellipse to the provided path builder.
-  void AddToPath(PathBuilder& path) const;
+  // Dispatch the path operations of this rounded superellipse to the receiver.
+  void Dispatch(PathReceiver& receiver) const;
 
   // A factor used to calculate the "gap", defined as the distance from the
   // midpoint of the curved corners to the nearest sides of the bounding box.

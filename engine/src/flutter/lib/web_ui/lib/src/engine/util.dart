@@ -2,88 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
 import 'package:ui/ui.dart' as ui;
-import 'package:ui/ui_web/src/ui_web.dart' as ui_web;
 
 import 'browser_detection.dart' show isIOS15, isMacOrIOS;
 import 'dom.dart';
-import 'safe_browser_api.dart';
-import 'services.dart';
 import 'vector_math.dart';
-
-/// Generic callback signature, used by [_futurize].
-typedef Callback<T> = void Function(T result);
-
-/// Signature for a method that receives a [_Callback].
-///
-/// Return value should be null on success, and a string error message on
-/// failure.
-typedef Callbacker<T> = String? Function(Callback<T> callback);
-
-/// Converts a method that receives a value-returning callback to a method that
-/// returns a Future.
-///
-/// Return a [String] to cause an [Exception] to be synchronously thrown with
-/// that string as a message.
-///
-/// If the callback is called with null, the future completes with an error.
-///
-/// Example usage:
-///
-/// ```dart
-/// typedef IntCallback = void Function(int result);
-///
-/// String _doSomethingAndCallback(IntCallback callback) {
-///   Timer(const Duration(seconds: 1), () { callback(1); });
-/// }
-///
-/// Future<int> doSomething() {
-///   return futurize(_doSomethingAndCallback);
-/// }
-/// ```
-// Keep this in sync with _futurize in lib/ui/fixtures/ui_test.dart.
-Future<T> futurize<T>(Callbacker<T> callbacker) {
-  final Completer<T> completer = Completer<T>.sync();
-  // If the callback synchronously throws an error, then synchronously
-  // rethrow that error instead of adding it to the completer. This
-  // prevents the Zone from receiving an uncaught exception.
-  bool isSync = true;
-  final String? error = callbacker((T? t) {
-    if (t == null) {
-      if (isSync) {
-        throw Exception('operation failed');
-      } else {
-        completer.completeError(Exception('operation failed'));
-      }
-    } else {
-      completer.complete(t);
-    }
-  });
-  isSync = false;
-  if (error != null) {
-    throw Exception(error);
-  }
-  return completer.future;
-}
 
 /// Converts [matrix] to CSS transform value.
 String matrix4ToCssTransform(Matrix4 matrix) {
   return float64ListToCssTransform(matrix.storage);
-}
-
-/// Applies a transform to the [element].
-///
-/// See [float64ListToCssTransform] for details on how the CSS value is chosen.
-void setElementTransform(DomElement element, Float32List matrix4) {
-  element.style
-    ..transformOrigin = '0 0 0'
-    ..transform = float64ListToCssTransform(matrix4);
 }
 
 /// Converts [matrix] to CSS transform value.
@@ -129,7 +62,7 @@ enum TransformKind {
 /// Detects the kind of transform the [matrix] performs.
 TransformKind transformKindOf(List<double> matrix) {
   assert(matrix.length == 16);
-  final List<double> m = matrix;
+  final m = matrix;
 
   // If matrix contains scaling, rotation, z translation or
   // perspective transform, it is not considered simple.
@@ -190,7 +123,7 @@ String float64ListToCssTransform2d(List<double> matrix) {
 /// Converts [matrix] to a 3D CSS transform value.
 String float64ListToCssTransform3d(List<double> matrix) {
   assert(matrix.length == 16);
-  final List<double> m = matrix;
+  final m = matrix;
   if (m[0] == 1.0 &&
       m[1] == 0.0 &&
       m[2] == 0.0 &&
@@ -355,7 +288,7 @@ String colorValueToCssString(int value) {
     };
   } else {
     final double alpha = ((value >> 24) & 0xFF) / 255.0;
-    final StringBuffer sb = StringBuffer();
+    final sb = StringBuffer();
     sb.write('rgba(');
     sb.write(((value >> 16) & 0xFF).toString());
     sb.write(',');
@@ -369,55 +302,49 @@ String colorValueToCssString(int value) {
   }
 }
 
-/// Converts color components to a CSS compatible attribute value.
-String colorComponentsToCssString(int r, int g, int b, int a) {
-  if (a == 255) {
-    return 'rgb($r,$g,$b)';
-  } else {
-    final double alphaRatio = a / 255;
-    return 'rgba($r,$g,$b,${alphaRatio.toStringAsFixed(2)})';
+bool _isGenericFont(String? fontFamily) {
+  // From: https://developer.mozilla.org/en-US/docs/Web/CSS/font-family#Syntax
+  //
+  // Generic font families are a fallback mechanism, a means of preserving some
+  // of the style sheet author's intent when none of the specified fonts are
+  // available. Generic family names are keywords and must not be quoted. A
+  // generic font family should be the last item in the list of font family
+  // names.
+  return fontFamily != null &&
+      (fontFamily == 'serif' ||
+          fontFamily == 'sans-serif' ||
+          fontFamily == 'monospace' ||
+          fontFamily == 'cursive' ||
+          fontFamily == 'fantasy' ||
+          fontFamily == 'system-ui' ||
+          fontFamily == 'math' ||
+          fontFamily == 'emoji' ||
+          fontFamily == 'fangsong');
+}
+
+bool _isAppleFont(String? fontFamily) {
+  return isMacOrIOS &&
+      fontFamily != null &&
+      (fontFamily == '.SF Pro Text' ||
+          fontFamily == '.SF Pro Display' ||
+          fontFamily == '.SF UI Text' ||
+          fontFamily == '.SF UI Display');
+}
+
+const _iOS15Fallbacks = <String>['BlinkMacSystemFont'];
+const _macOrIOSFallbacks = <String>['-apple-system', 'BlinkMacSystemFont'];
+
+List<String> get _appleFallbacks {
+  if (isIOS15) {
+    return _iOS15Fallbacks;
   }
+  if (isMacOrIOS) {
+    return _macOrIOSFallbacks;
+  }
+  throw StateError('Should only be called on Mac or iOS.');
 }
 
-/// Determines if the (dynamic) exception passed in is a NS_ERROR_FAILURE
-/// (from Firefox).
-///
-/// NS_ERROR_FAILURE (0x80004005) is the most general of all the (Firefox)
-/// errors and occurs for all errors for which a more specific error code does
-/// not apply. (https://developer.mozilla.org/en-US/docs/Mozilla/Errors)
-///
-/// Other browsers do not throw this exception.
-///
-/// In Flutter, this exception happens when we try to perform some operations on
-/// a Canvas when the application is rendered in a display:none iframe.
-///
-/// We need this in [BitmapCanvas] and [RecordingCanvas] to swallow this
-/// Firefox exception without interfering with others (potentially useful
-/// for the programmer).
-bool isNsErrorFailureException(Object e) {
-  return getJsProperty<dynamic>(e, 'name') == 'NS_ERROR_FAILURE';
-}
-
-/// From: https://developer.mozilla.org/en-US/docs/Web/CSS/font-family#Syntax
-///
-/// Generic font families are a fallback mechanism, a means of preserving some
-/// of the style sheet author's intent when none of the specified fonts are
-/// available. Generic family names are keywords and must not be quoted. A
-/// generic font family should be the last item in the list of font family
-/// names.
-const Set<String> _genericFontFamilies = <String>{
-  'serif',
-  'sans-serif',
-  'monospace',
-  'cursive',
-  'fantasy',
-  'system-ui',
-  'math',
-  'emoji',
-  'fangsong',
-};
-
-/// A default fallback font family in case an unloaded font has been requested.
+/// Platform-specific fallback font families in case an unloaded font has been requested.
 ///
 /// -apple-system targets San Francisco in Safari (on Mac OS X and iOS),
 /// and it targets Neue Helvetica and Lucida Grande on older versions of
@@ -426,89 +353,117 @@ const Set<String> _genericFontFamilies = <String>{
 ///
 /// For iOS, default to -apple-system, where it should be available, otherwise
 /// default to Arial. BlinkMacSystemFont is used for Chrome on iOS.
-String get _fallbackFontFamily {
+List<String> get _platformFallbackFontFamilies {
   if (isIOS15) {
     // Remove the "-apple-system" fallback font because it causes a crash in
     // iOS 15.
     //
     // See github issue: https://github.com/flutter/flutter/issues/90705
     // See webkit bug: https://bugs.webkit.org/show_bug.cgi?id=231686
-    return 'BlinkMacSystemFont';
+    return _iOS15Fallbacks;
   }
   if (isMacOrIOS) {
-    return '-apple-system, BlinkMacSystemFont';
+    return _appleFallbacks;
   }
-  return 'Arial';
+  return const <String>['Arial'];
 }
 
 /// Create a font-family string appropriate for CSS.
 ///
 /// If the given [fontFamily] is a generic font-family, then just return it.
 /// Otherwise, wrap the family name in quotes and add a fallback font family.
-String? canonicalizeFontFamily(String? fontFamily) {
-  if (_genericFontFamilies.contains(fontFamily)) {
-    return fontFamily;
-  }
-  if (isMacOrIOS) {
-    // Unlike Safari, Chrome on iOS does not correctly fallback to cupertino
-    // on sans-serif.
-    // Map to San Francisco Text/Display fonts, use -apple-system,
-    // BlinkMacSystemFont.
-    if (fontFamily == '.SF Pro Text' ||
-        fontFamily == '.SF Pro Display' ||
-        fontFamily == '.SF UI Text' ||
-        fontFamily == '.SF UI Display') {
-      return _fallbackFontFamily;
+String? canonicalizeFontFamily(String? fontFamily, [List<String>? fontFamilyFallback]) {
+  final buffer = StringBuffer();
+
+  // The main `fontFamily`.
+  _processFontFamily(fontFamily, buffer);
+
+  // Generic and Apple fonts don't need platform fallbacks.
+  final bool needsFallbacks = !_isGenericFont(fontFamily) && !_isAppleFont(fontFamily);
+
+  if (needsFallbacks) {
+    // The fallback font families provided by the caller.
+    if (fontFamilyFallback != null && fontFamilyFallback.isNotEmpty) {
+      for (final String fontFamily in fontFamilyFallback) {
+        _processFontFamily(fontFamily, buffer);
+      }
+    }
+
+    final bool hasGenericFont = fontFamilyFallback?.any(_isGenericFont) ?? false;
+    final bool hasAppleFont = fontFamilyFallback?.any(_isAppleFont) ?? false;
+
+    final bool needsPlatformFallbacks = !hasGenericFont && !hasAppleFont;
+
+    if (needsPlatformFallbacks) {
+      // The platform-dependent fallback font families (e.g., -apple-system).
+      for (final String fontFamily in _platformFallbackFontFamilies) {
+        if (buffer.isNotEmpty) {
+          buffer.write(',');
+        }
+        // These font families are already canonicalized, so we don't need to process them.
+        buffer.write(fontFamily);
+      }
+
+      // The generic fallback font family.
+      if (buffer.isNotEmpty) {
+        buffer.write(',');
+      }
+      buffer.write('sans-serif');
     }
   }
-  return '"$fontFamily", $_fallbackFontFamily, sans-serif';
+
+  return buffer.toString();
+}
+
+/// Processes a font family and adds it to the buffer.
+///
+/// Returns true if at least one font family was added, false otherwise.
+bool _processFontFamily(String? fontFamily, StringBuffer buffer) {
+  // No font family.
+  if (fontFamily == null || fontFamily.isEmpty) {
+    return false;
+  }
+
+  // A generic font family, don't quote them.
+  if (_isGenericFont(fontFamily)) {
+    if (buffer.isNotEmpty) {
+      buffer.write(',');
+    }
+    buffer.write(fontFamily);
+    return true;
+  }
+
+  // Unlike Safari, Chrome on iOS does not correctly fallback to cupertino
+  // on sans-serif.
+  // Map to San Francisco Text/Display fonts, use -apple-system,
+  // BlinkMacSystemFont.
+  if (_isAppleFont(fontFamily)) {
+    for (final String fontFamily in _appleFallbacks) {
+      if (buffer.isNotEmpty) {
+        buffer.write(',');
+      }
+      buffer.write(fontFamily);
+    }
+    return true;
+  }
+
+  // Everything else should be quoted.
+  if (buffer.isNotEmpty) {
+    buffer.write(',');
+  }
+  buffer.write('"$fontFamily"');
+  return true;
 }
 
 /// Converts a list of [Offset] to a typed array of floats.
 Float32List offsetListToFloat32List(List<ui.Offset> offsetList) {
   final int length = offsetList.length;
-  final Float32List floatList = Float32List(length * 2);
-  for (int i = 0, destIndex = 0; i < length; i++, destIndex += 2) {
+  final floatList = Float32List(length * 2);
+  for (var i = 0, destIndex = 0; i < length; i++, destIndex += 2) {
     floatList[destIndex] = offsetList[i].dx;
     floatList[destIndex + 1] = offsetList[i].dy;
   }
   return floatList;
-}
-
-/// Apply this function to container elements in the HTML render tree (this is
-/// not relevant to semantics tree).
-///
-/// On WebKit browsers this will apply `z-order: 0` to ensure that clips are
-/// applied correctly. Otherwise, the browser will refuse to clip its contents.
-///
-/// Other possible fixes that were rejected:
-///
-/// * Use 3D transform instead of 2D: this does not work because it causes text
-///   blurriness: https://github.com/flutter/flutter/issues/32274
-void applyWebkitClipFix(DomElement? containerElement) {
-  if (ui_web.browser.browserEngine == ui_web.BrowserEngine.webkit) {
-    containerElement!.style.zIndex = '0';
-  }
-}
-
-/// Roughly the inverse of [ui.Shadow.convertRadiusToSigma].
-///
-/// This does not inverse [ui.Shadow.convertRadiusToSigma] exactly, because on
-/// the Web the difference between sigma and blur radius is different from
-/// Flutter mobile.
-double convertSigmaToRadius(double sigma) {
-  return sigma * 2.0;
-}
-
-int clampInt(int value, int min, int max) {
-  assert(min <= max);
-  if (value < min) {
-    return min;
-  } else if (value > max) {
-    return max;
-  } else {
-    return value;
-  }
 }
 
 /// Prints a warning message to the console.
@@ -516,20 +471,6 @@ int clampInt(int value, int min, int max) {
 /// This function can be overridden in tests. This could be useful, for example,
 /// to verify that warnings are printed under certain circumstances.
 void Function(String) printWarning = domWindow.console.warn;
-
-/// Converts a 4x4 matrix into a human-readable String.
-String matrixString(List<num> matrix) {
-  final StringBuffer sb = StringBuffer();
-  for (int i = 0; i < 16; i++) {
-    sb.write(matrix[i]);
-    if ((i + 1) % 4 == 0) {
-      sb.write('\n');
-    } else {
-      sb.write(' ');
-    }
-  }
-  return sb.toString();
-}
 
 /// Determines if lists [a] and [b] are deep equivalent.
 ///
@@ -543,7 +484,7 @@ bool listEquals<T>(List<T>? a, List<T>? b) {
   if (b == null || a.length != b.length) {
     return false;
   }
-  for (int index = 0; index < a.length; index += 1) {
+  for (var index = 0; index < a.length; index += 1) {
     if (a[index] != b[index]) {
       return false;
     }
@@ -582,7 +523,7 @@ bool unorderedListEqual<T>(List<T>? a, List<T>? b) {
   }
 
   // Complex cases.
-  final Map<T, int> wordCounts = <T, int>{};
+  final wordCounts = <T, int>{};
   for (final T word in a) {
     final int count = wordCounts[word] ?? 0;
     wordCounts[word] = count + 1;
@@ -602,11 +543,28 @@ bool unorderedListEqual<T>(List<T>? a, List<T>? b) {
   return wordCounts.isEmpty;
 }
 
-// HTML only supports a single radius, but Flutter ImageFilter supports separate
-// horizontal and vertical radii. The best approximation we can provide is to
-// average the two radii together for a single compromise value.
-String blurSigmasToCssString(double sigmaX, double sigmaY) {
-  return 'blur(${(sigmaX + sigmaY) * 0.5}px)';
+bool paintEquals(ui.Paint? a, ui.Paint? b) {
+  if (identical(a, b)) {
+    // They are both the same instance or both null.
+    return true;
+  }
+  if (a == null || b == null) {
+    return false;
+  }
+  return a.blendMode == b.blendMode &&
+      a.color == b.color &&
+      a.colorFilter == b.colorFilter &&
+      a.filterQuality == b.filterQuality &&
+      a.imageFilter == b.imageFilter &&
+      a.invertColors == b.invertColors &&
+      a.isAntiAlias == b.isAntiAlias &&
+      a.maskFilter == b.maskFilter &&
+      a.shader == b.shader &&
+      a.strokeCap == b.strokeCap &&
+      a.strokeJoin == b.strokeJoin &&
+      a.strokeMiterLimit == b.strokeMiterLimit &&
+      a.strokeWidth == b.strokeWidth &&
+      a.style == b.style;
 }
 
 /// Extensions to [Map] that make it easier to treat it as a JSON object. The
@@ -683,27 +641,6 @@ extension JsonExtensions on Map<dynamic, dynamic> {
   }
 }
 
-/// Extracts view ID from the [MethodCall.arguments] map.
-///
-/// Throws if the view ID is not present or if [arguments] is not a map.
-int readViewId(Object? arguments) {
-  final int? viewId = tryViewId(arguments);
-  if (viewId == null) {
-    throw Exception('Could not find a `viewId` in the arguments: $arguments');
-  }
-  return viewId;
-}
-
-/// Extracts view ID from the [MethodCall.arguments] map.
-///
-/// Returns null if the view ID is not present or if [arguments] is not a map.
-int? tryViewId(Object? arguments) {
-  if (arguments is Map) {
-    return arguments.tryInt('viewId');
-  }
-  return null;
-}
-
 /// Prints a list of bytes in hex format.
 ///
 /// Bytes are separated by one space and are padded on the left to always show
@@ -729,30 +666,14 @@ void setElementStyle(DomElement element, String name, String? value) {
   }
 }
 
-void setClipPath(DomElement element, String? value) {
-  if (ui_web.browser.browserEngine == ui_web.BrowserEngine.webkit) {
-    if (value == null) {
-      element.style.removeProperty('-webkit-clip-path');
-    } else {
-      element.style.setProperty('-webkit-clip-path', value);
-    }
-  }
-  if (value == null) {
-    element.style.removeProperty('clip-path');
-  } else {
-    element.style.setProperty('clip-path', value);
-  }
-}
-
 void setThemeColor(ui.Color? color) {
-  DomHTMLMetaElement? theme = domDocument.querySelector('#flutterweb-theme') as DomHTMLMetaElement?;
+  var theme = domDocument.querySelector('#flutterweb-theme') as DomHTMLMetaElement?;
 
   if (color != null) {
     if (theme == null) {
-      theme =
-          createDomHTMLMetaElement()
-            ..id = 'flutterweb-theme'
-            ..name = 'theme-color';
+      theme = createDomHTMLMetaElement()
+        ..id = 'flutterweb-theme'
+        ..name = 'theme-color';
       domDocument.head!.append(theme);
     }
     theme.content = color.toCssString();
@@ -766,54 +687,10 @@ void ensureMetaTag(String name, String content) {
   final DomElement? existingTag = domDocument.querySelector('meta[name=$name][content=$content]');
 
   if (existingTag == null) {
-    final DomHTMLMetaElement meta =
-        createDomHTMLMetaElement()
-          ..name = name
-          ..content = content;
+    final DomHTMLMetaElement meta = createDomHTMLMetaElement()
+      ..name = name
+      ..content = content;
     domDocument.head!.append(meta);
-  }
-}
-
-bool? _ellipseFeatureDetected;
-
-/// Draws CanvasElement ellipse with fallback.
-void drawEllipse(
-  DomCanvasRenderingContext2D context,
-  double centerX,
-  double centerY,
-  double radiusX,
-  double radiusY,
-  double rotation,
-  double startAngle,
-  double endAngle,
-  bool antiClockwise,
-) {
-  _ellipseFeatureDetected ??= getJsProperty<Object?>(context, 'ellipse') != null;
-  if (_ellipseFeatureDetected!) {
-    context.ellipse(
-      centerX,
-      centerY,
-      radiusX,
-      radiusY,
-      rotation,
-      startAngle,
-      endAngle,
-      antiClockwise,
-    );
-  } else {
-    context.save();
-    context.translate(centerX, centerY);
-    context.rotate(rotation);
-    context.scale(radiusX, radiusY);
-    context.arc(0, 0, 1, startAngle, endAngle, antiClockwise);
-    context.restore();
-  }
-}
-
-/// Removes all children of a DOM node.
-void removeAllChildren(DomNode node) {
-  while (node.lastChild != null) {
-    node.lastChild!.remove();
   }
 }
 
@@ -823,7 +700,7 @@ void removeAllChildren(DomNode node) {
 /// This is mostly useful for iterables containing non-null elements.
 extension FirstWhereOrNull<T> on Iterable<T> {
   T? firstWhereOrNull(bool Function(T element) test) {
-    for (final T element in this) {
+    for (final element in this) {
       if (test(element)) {
         return element;
       }
@@ -927,7 +804,7 @@ class LruCache<K extends Object, V extends Object> {
   }
 
   void _removeLeastRecentlyUsedValue() {
-    final bool didRemove = _itemMap.remove(_itemQueue.last.key) != null;
+    final didRemove = _itemMap.remove(_itemQueue.last.key) != null;
     assert(didRemove);
     _itemQueue.removeLast();
   }
@@ -965,4 +842,25 @@ class BitmapSize {
   bool get isEmpty => width == 0 || height == 0;
 
   static const BitmapSize zero = BitmapSize(0, 0);
+}
+
+String _generateDebugFilename(String filePrefix) {
+  final now = DateTime.now();
+  final String y = now.year.toString().padLeft(4, '0');
+  final String mo = now.month.toString().padLeft(2, '0');
+  final String d = now.day.toString().padLeft(2, '0');
+  final String h = now.hour.toString().padLeft(2, '0');
+  final String mi = now.minute.toString().padLeft(2, '0');
+  final String s = now.second.toString().padLeft(2, '0');
+  return '$filePrefix-$y-$mo-$d-$h-$mi-$s.json';
+}
+
+void downloadDebugInfo(String filePrefix, Map<String, dynamic> json) {
+  final String jsonString = const JsonEncoder.withIndent(' ').convert(json);
+  final DomBlob blob = createDomBlob([jsonString], {'type': 'application/json'});
+  final String url = domWindow.URL.createObjectURL(blob);
+  final DomElement element = domDocument.createElement('a');
+  element.setAttribute('href', url);
+  element.setAttribute('download', _generateDebugFilename(filePrefix));
+  element.click();
 }

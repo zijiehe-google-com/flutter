@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:android_semantics_testing/android_semantics_testing.dart';
 import 'package:android_semantics_testing/main.dart' as app;
 import 'package:android_semantics_testing/test_constants.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -25,25 +26,14 @@ const List<AndroidSemanticsAction> ignoredAccessibilityFocusActions = <AndroidSe
 const MethodChannel kSemanticsChannel = MethodChannel('semantics');
 
 Future<void> setClipboard(String message) async {
-  final Completer<void> completer = Completer<void>();
-  Future<void> completeSetClipboard([Object? _]) async {
-    await kSemanticsChannel.invokeMethod<dynamic>('setClipboard', <String, dynamic>{
-      'message': message,
-    });
-    completer.complete();
-  }
-
-  if (SchedulerBinding.instance.hasScheduledFrame) {
-    SchedulerBinding.instance.addPostFrameCallback(completeSetClipboard);
-  } else {
-    completeSetClipboard();
-  }
-  await completer.future;
+  await kSemanticsChannel.invokeMethod<dynamic>('setClipboard', <String, dynamic>{
+    'message': message,
+  });
 }
 
 Future<AndroidSemanticsNode> getSemantics(Finder finder, WidgetTester tester) async {
   final int id = tester.getSemantics(finder).id;
-  final Completer<String> completer = Completer<String>();
+  final completer = Completer<String>();
   Future<void> completeSemantics([Object? _]) async {
     final dynamic result = await kSemanticsChannel.invokeMethod<dynamic>(
       'getSemanticsNode',
@@ -55,7 +45,7 @@ Future<AndroidSemanticsNode> getSemantics(Finder finder, WidgetTester tester) as
   if (SchedulerBinding.instance.hasScheduledFrame) {
     SchedulerBinding.instance.addPostFrameCallback(completeSemantics);
   } else {
-    completeSemantics();
+    await completeSemantics();
   }
   return AndroidSemanticsNode.deserialize(await completer.future);
 }
@@ -66,19 +56,22 @@ Future<void> main() async {
   group('AccessibilityBridge', () {
     group('TextField', () {
       Future<void> prepareTextField(WidgetTester tester) async {
-        app.main();
-        await tester.pumpAndSettle();
-        await tester.tap(find.text(textFieldRoute));
-        await tester.pumpAndSettle();
-
         // The text selection menu and related semantics vary depending on if
         // the clipboard contents are pasteable. Copy some text into the
         // clipboard to make sure these tests always run with pasteable content
         // in the clipboard.
+        //
+        // This MUST be called before the text field is initialized (before app.main
+        // and navigation) to avoid a race condition with EditableText's initial
+        // asynchronous clipboard status query during initState.
+        //
         // Ideally this should test the case where there is nothing on the
         // clipboard as well, but there is no reliable way to clear the
         // clipboard on Android devices.
         await setClipboard('Hello World');
+        app.main();
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(textFieldRoute));
         await tester.pumpAndSettle();
       }
 
@@ -371,7 +364,7 @@ Future<void> main() async {
       }
 
       testWidgets('Popup Menu has correct Android semantics', (WidgetTester tester) async {
-        final Finder popupButton = find.byKey(const ValueKey<String>(popupButtonKeyValue));
+        final Finder popupButton = find.byTooltip('Show menu');
 
         await preparePopupControls(tester);
         expect(
@@ -395,7 +388,7 @@ Future<void> main() async {
             expect(
               await getSemantics(find.byKey(ValueKey<String>('$popupKeyValue.$item')), tester),
               hasAndroidSemantics(
-                className: AndroidClassName.button,
+                className: AndroidClassName.menuItem,
                 isChecked: false,
                 isCheckable: false,
                 isEnabled: true,
@@ -418,7 +411,7 @@ Future<void> main() async {
             expect(
               await getSemantics(find.byKey(ValueKey<String>('$popupKeyValue.$item')), tester),
               hasAndroidSemantics(
-                className: AndroidClassName.button,
+                className: AndroidClassName.menuItem,
                 isChecked: false,
                 isCheckable: false,
                 isEnabled: true,
@@ -467,7 +460,7 @@ Future<void> main() async {
                 tester,
               ),
               hasAndroidSemantics(
-                className: AndroidClassName.view,
+                className: AndroidClassName.menuItem,
                 isChecked: false,
                 isCheckable: false,
                 isEnabled: true,
@@ -503,7 +496,7 @@ Future<void> main() async {
                 tester,
               ),
               hasAndroidSemantics(
-                className: AndroidClassName.view,
+                className: AndroidClassName.menuItem,
                 isChecked: false,
                 isCheckable: false,
                 isEnabled: true,
@@ -559,7 +552,7 @@ Future<void> main() async {
             reason: "Alert OK button doesn't have the right semantics",
           );
 
-          for (final String item in <String>['Title', 'Body1', 'Body2']) {
+          for (final item in <String>['Title', 'Body1', 'Body2']) {
             expect(
               await getSemantics(find.byKey(ValueKey<String>('$alertKeyValue.$item')), tester),
               hasAndroidSemantics(
@@ -597,7 +590,7 @@ Future<void> main() async {
             reason: "Alert OK button doesn't have the right semantics",
           );
 
-          for (final String item in <String>['Title', 'Body1', 'Body2']) {
+          for (final item in <String>['Title', 'Body1', 'Body2']) {
             expect(
               await getSemantics(find.byKey(ValueKey<String>('$alertKeyValue.$item')), tester),
               hasAndroidSemantics(

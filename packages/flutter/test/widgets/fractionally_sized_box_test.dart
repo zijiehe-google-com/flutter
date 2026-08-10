@@ -24,7 +24,7 @@ void main() {
         ),
       ),
     );
-    final RenderBox box = inner.currentContext!.findRenderObject()! as RenderBox;
+    final box = inner.currentContext!.findRenderObject()! as RenderBox;
     expect(box.size, equals(const Size(50.0, 25.0)));
     expect(box.localToGlobal(Offset.zero), equals(const Offset(25.0, 37.5)));
   });
@@ -42,7 +42,7 @@ void main() {
         ),
       ),
     );
-    final RenderBox box = inner.currentContext!.findRenderObject()! as RenderBox;
+    final box = inner.currentContext!.findRenderObject()! as RenderBox;
     expect(box.size, equals(const Size(400.0, 300.0)));
     expect(
       box.localToGlobal(box.size.center(Offset.zero)),
@@ -63,7 +63,7 @@ void main() {
         ),
       ),
     );
-    final RenderBox box = inner.currentContext!.findRenderObject()! as RenderBox;
+    final box = inner.currentContext!.findRenderObject()! as RenderBox;
     expect(box.size, equals(const Size(400.0, 300.0)));
     expect(
       box.localToGlobal(box.size.center(Offset.zero)),
@@ -92,8 +92,20 @@ void main() {
         ),
       ),
     );
-    final RenderBox box = inner.currentContext!.findRenderObject()! as RenderBox;
+    final box = inner.currentContext!.findRenderObject()! as RenderBox;
     expect(box.size, equals(const Size(50.0, 25.0)));
     expect(box.localToGlobal(Offset.zero), equals(const Offset(25.0, 37.5)));
+  });
+
+  testWidgets('FractionallySizedBox does not crash at zero area', (WidgetTester tester) async {
+    tester.view.physicalSize = Size.zero;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(child: FractionallySizedBox(child: Placeholder())),
+      ),
+    );
+    expect(tester.getSize(find.byType(FractionallySizedBox)), Size.zero);
   });
 }

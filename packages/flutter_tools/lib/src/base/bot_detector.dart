@@ -88,7 +88,7 @@ class AzureDetector {
   AzureDetector({required HttpClientFactory httpClientFactory})
     : _httpClientFactory = httpClientFactory;
 
-  static const String _serviceUrl = 'http://169.254.169.254/metadata/instance';
+  static const _serviceUrl = 'http://169.254.169.254/metadata/instance';
 
   final HttpClientFactory _httpClientFactory;
 
@@ -98,8 +98,8 @@ class AzureDetector {
     if (_isRunningOnAzure != null) {
       return _isRunningOnAzure!;
     }
-    const Duration connectionTimeout = Duration(milliseconds: 250);
-    const Duration requestTimeout = Duration(seconds: 1);
+    const connectionTimeout = Duration(milliseconds: 250);
+    const requestTimeout = Duration(seconds: 1);
     final HttpClient client = _httpClientFactory()..connectionTimeout = connectionTimeout;
     try {
       final HttpClientRequest request = await client
@@ -107,22 +107,17 @@ class AzureDetector {
           .timeout(requestTimeout);
       request.headers.add('Metadata', true);
       await request.close();
-    } on SocketException {
-      // If there is an error on the socket, it probably means that we are not
-      // running on Azure.
-      return _isRunningOnAzure = false;
     } on HttpException {
-      // If the connection gets set up, but encounters an error condition, it
-      // still means we're on Azure.
+      // The connection was established but an HTTP error occurred.
+      // This still indicates we're running on Azure.
       return _isRunningOnAzure = true;
-    } on TimeoutException {
-      // The HttpClient connected to a host, but it did not respond in a timely
-      // fashion. Assume we are not on a bot.
-      return _isRunningOnAzure = false;
-    } on OSError {
-      // The HttpClient might be running in a WSL1 environment.
+    } on Object {
+      // Metadata detection is best-effort. Any other failure (socket errors,
+      // timeouts, malformed redirect URIs, WSL1 networking issues, etc.)
+      // should not prevent Flutter from starting.
       return _isRunningOnAzure = false;
     }
+
     // We got a response. We're running on Azure.
     return _isRunningOnAzure = true;
   }

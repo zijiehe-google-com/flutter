@@ -9,7 +9,9 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:ui' as ui show Image, ImageFilter, SemanticsInputType, TextHeightBehavior;
+import 'dart:ui'
+    as ui
+    show Image, ImageFilter, SemanticsHitTestBehavior, SemanticsInputType, TextHeightBehavior;
 
 import 'package:flutter/animation.dart';
 import 'package:flutter/foundation.dart';
@@ -20,8 +22,10 @@ import 'package:flutter/services.dart';
 import 'binding.dart';
 import 'debug.dart';
 import 'framework.dart';
+import 'indexed_stack.dart';
 import 'localizations.dart';
-import 'visibility.dart';
+import 'media_query.dart';
+import 'view.dart';
 import 'widget_span.dart';
 
 export 'package:flutter/animation.dart';
@@ -46,6 +50,7 @@ export 'package:flutter/rendering.dart'
         FlowPaintingContext,
         FractionalOffsetTween,
         HitTestBehavior,
+        ImageFilterConfig,
         LayerLink,
         MainAxisAlignment,
         MainAxisSize,
@@ -529,7 +534,7 @@ class BackdropGroup extends InheritedWidget {
 ///                sigmaY: 40,
 ///              ),
 ///              child: Container(
-///                color: Colors.black.withOpacity(0.2),
+///                color: Colors.black.withValues(alpha: 0.2),
 ///                height: 200,
 ///                child: const Text('Blur item'),
 ///              ),
@@ -633,14 +638,26 @@ class BackdropFilter extends SingleChildRenderObjectWidget {
   ///
   /// The [blendMode] argument will default to [BlendMode.srcOver] and must not be
   /// null if provided.
+  ///
+  /// Exactly one of [filter] or [filterConfig] must be provided.
+  /// Providing both or neither will result in an assertion error.
   const BackdropFilter({
     super.key,
-    required this.filter,
+    this.filter,
+    this.filterConfig,
     super.child,
     this.blendMode = BlendMode.srcOver,
     this.enabled = true,
     this.backdropGroupKey,
-  }) : _useSharedKey = false;
+  }) : assert(
+         filter != null || filterConfig != null,
+         'Either filter or filterConfig must be provided.',
+       ),
+       assert(
+         filter == null || filterConfig == null,
+         'Cannot provide both a filter and a filterConfig.',
+       ),
+       _useSharedKey = false;
 
   /// Creates a backdrop filter that groups itself with the nearest parent
   /// [BackdropGroup].
@@ -651,20 +668,48 @@ class BackdropFilter extends SingleChildRenderObjectWidget {
   /// This constructor will automatically look up the nearest [BackdropGroup]
   /// and will share the backdrop input with sibling and child [BackdropFilter]
   /// widgets.
+  ///
+  /// Exactly one of [filter] or [filterConfig] must be provided.
+  /// Providing both or neither will result in an assertion error.
   const BackdropFilter.grouped({
     super.key,
-    required this.filter,
+    this.filter,
+    this.filterConfig,
     super.child,
     this.blendMode = BlendMode.srcOver,
     this.enabled = true,
-  }) : backdropGroupKey = null,
+  }) : assert(
+         filter != null || filterConfig != null,
+         'Either filter or filterConfig must be provided.',
+       ),
+       assert(
+         filter == null || filterConfig == null,
+         'Cannot provide both a filter and a filterConfig.',
+       ),
+       backdropGroupKey = null,
        _useSharedKey = true;
 
   /// The image filter to apply to the existing painted content before painting the child.
   ///
   /// For example, consider using [ImageFilter.blur] to create a backdrop
   /// blur effect.
-  final ui.ImageFilter filter;
+  ///
+  /// The [filter] parameter is equivalent to [filterConfig] (with the help of
+  /// the [ImageFilterConfig.new] constructor), except for features only
+  /// supported by [ImageFilterConfig] (such as the `bounds` parameter in
+  /// [ImageFilterConfig.blur]).
+  final ui.ImageFilter? filter;
+
+  /// The configuration for the image filter to apply to the existing painted content.
+  ///
+  /// For example, consider using [ImageFilterConfig.blur] to create a backdrop
+  /// blur effect.
+  ///
+  /// The [filterConfig] parameter is equivalent to [filter] (with the help of
+  /// the [ImageFilterConfig.new] constructor), except for features only
+  /// supported by [ImageFilterConfig] (such as the `bounds` parameter in
+  /// [ImageFilterConfig.blur]).
+  final ImageFilterConfig? filterConfig;
 
   /// The blend mode to use to apply the filtered background content onto the background
   /// surface.
@@ -694,10 +739,14 @@ class BackdropFilter extends SingleChildRenderObjectWidget {
     return backdropGroupKey;
   }
 
+  ImageFilterConfig get _effectiveFilterConfig {
+    return filterConfig ?? ImageFilterConfig(filter!);
+  }
+
   @override
   RenderBackdropFilter createRenderObject(BuildContext context) {
     return RenderBackdropFilter(
-      filter: filter,
+      filterConfig: _effectiveFilterConfig,
       blendMode: blendMode,
       enabled: enabled,
       backdropKey: _getBackdropGroupKey(context),
@@ -707,10 +756,21 @@ class BackdropFilter extends SingleChildRenderObjectWidget {
   @override
   void updateRenderObject(BuildContext context, RenderBackdropFilter renderObject) {
     renderObject
-      ..filter = filter
+      ..filterConfig = _effectiveFilterConfig
       ..enabled = enabled
       ..blendMode = blendMode
       ..backdropKey = _getBackdropGroupKey(context);
+  }
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    super.debugFillProperties(properties);
+    properties.add(DiagnosticsProperty<ui.ImageFilter>('filter', filter, defaultValue: null));
+    properties.add(
+      DiagnosticsProperty<ImageFilterConfig>('filterConfig', filterConfig, defaultValue: null),
+    );
+    properties.add(EnumProperty<BlendMode>('blendMode', blendMode));
+    properties.add(FlagProperty('enabled', value: enabled, ifTrue: 'enabled'));
   }
 }
 
@@ -1709,7 +1769,7 @@ class Transform extends SingleChildRenderObjectWidget {
   }
 
   static Matrix4 _createZRotation(double sin, double cos) {
-    final Matrix4 result = Matrix4.zero();
+    final result = Matrix4.zero();
     result.storage[0] = cos;
     result.storage[1] = sin;
     result.storage[4] = -sin;
@@ -1722,14 +1782,49 @@ class Transform extends SingleChildRenderObjectWidget {
   /// The matrix to transform the child by during painting.
   final Matrix4 transform;
 
-  /// The origin of the coordinate system (relative to the upper left corner of
-  /// this render object) in which to apply the matrix.
+  /// The origin of the coordinate system in which to apply the matrix,
+  /// described relative to the point given by [alignment].
   ///
   /// Setting an origin is equivalent to conjugating the transform matrix by a
   /// translation. This property is provided just for convenience.
+  ///
+  /// This offset is applied in addition to any [alignment] transformation, so in this
+  /// example, the child is rotated about its center, since [alignment]
+  /// in [Transform.rotate] defaults to [Alignment.center]:
+  ///
+  /// ```dart
+  /// Transform.rotate(
+  ///   angle: math.pi,
+  ///   child: Container(
+  ///    width: 150.0,
+  ///    height: 150.0,
+  ///    color: Colors.blue,
+  ///  ),
+  /// )
+  /// ```
+  ///
+  /// However, in this example the [origin] offset is applied after the
+  /// `alignment`, so the child rotates about its bottom-right corner:
+  ///
+  /// ```dart
+  /// Transform.rotate(
+  ///   angle: math.pi,
+  ///   origin: const Offset(75.0, 75.0),
+  ///   child: Container(
+  ///    width: 150.0,
+  ///    height: 150.0,
+  ///    color: Colors.blue,
+  ///  ),
+  /// )
+  /// ```
   final Offset? origin;
 
   /// The alignment of the origin, relative to the size of the box.
+  ///
+  /// When this and [origin] are both null, the origin is the upper-left corner
+  /// of this render object.
+  /// The default for this field is null for some constructors,
+  /// and [Alignment.center] for others.
   ///
   /// This is equivalent to setting an origin based on the size of the box.
   /// If it is specified at the same time as the [origin], both are applied.
@@ -1743,7 +1838,53 @@ class Transform extends SingleChildRenderObjectWidget {
   /// [Directionality.of] returns [TextDirection.rtl].
   final AlignmentGeometry? alignment;
 
-  /// Whether to apply the transformation when performing hit tests.
+  /// Whether to transform registered hits into the child's resulting coordinate system.
+  ///
+  /// When `true`, hit coordinates within the parent's bounds are transformed to match
+  /// where the child appears visually after any transformation such as translation,
+  /// rotation, scaling, or skewing.
+  ///
+  /// When `false`, hit coordinates are not transformed, potentially causing taps to
+  /// register in a different location relative to the child's visual position.
+  ///
+  /// **Important:** Even when [transformHitTests] is true, children cannot
+  /// receive events outside the parent's bounds. Hit testing always starts
+  /// with the parent's own bounds check in [RenderBox.hitTest]. If the pointer
+  /// is outside the parent's bounds, [RenderBox.hitTestChildren] is not
+  /// invoked and the children are not considered for hit testing.
+  ///
+  /// For interactive elements that need to be tappable outside their parent's
+  /// original bounds, consider:
+  /// - Expanding the parent widget's bounds to encompass the transformed child.
+  /// - Using an [OverlayEntry] or [OverlayPortal] to place the widget in an
+  ///   [Overlay].
+  /// - Restructuring the widget hierarchy.
+  ///
+  /// {@tool snippet}
+  /// This example shows a `Container` that is scaled up. Even though it appears
+  /// larger, taps are only registered within the original 100x100 area of the
+  /// parent `SizedBox`.
+  ///
+  /// ```dart
+  /// Center(
+  ///   child: SizedBox(
+  ///     width: 100.0,
+  ///     height: 100.0,
+  ///     child: Transform.scale(
+  ///       scale: 2.0,
+  ///       child: GestureDetector(
+  ///         onTap: () => debugPrint('Tapped!'),
+  ///         child: const ColoredBox(
+  ///           color: Colors.purple,
+  ///         ),
+  ///       ),
+  ///     ),
+  ///   ),
+  /// )
+  /// ```
+  /// {@end-tool}
+  ///
+  /// Defaults to true.
   final bool transformHitTests;
 
   /// The filter quality with which to apply the transform as a bitmap operation.
@@ -1793,10 +1934,15 @@ class Transform extends SingleChildRenderObjectWidget {
 /// The [CompositedTransformTarget] must come earlier in the paint order than
 /// any linked [CompositedTransformFollower]s.
 ///
+/// {@macro flutter.widgets.CompositedTransformFollower.overlayPortal}
+///
 /// See also:
 ///
 ///  * [CompositedTransformFollower], the widget that can target this one.
 ///  * [LeaderLayer], the layer that implements this widget's logic.
+///  * [OverlayPortal.overlayChildLayoutBuilder], which achieves a similar
+///    target-following effect, but also allows the follower to be sized and
+///    positioned dynamically based on the target's size and position.
 class CompositedTransformTarget extends SingleChildRenderObjectWidget {
   /// Creates a composited transform target widget.
   ///
@@ -1844,11 +1990,21 @@ class CompositedTransformTarget extends SingleChildRenderObjectWidget {
 /// this widget is usually used as the root of an [OverlayEntry] in an app-wide
 /// [Overlay] (e.g. as created by the [MaterialApp] widget's [Navigator]).
 ///
+/// {@template flutter.widgets.CompositedTransformFollower.overlayPortal}
+/// [CompositedTransformFollower] and [CompositedTransformTarget] are
+/// incompatible with [OverlayPortal.overlayChildLayoutBuilder] and thus
+/// must not be used together. Consider using
+/// [OverlayPortal.overlayChildLayoutBuilder] instead
+/// {@endtemplate}
+///
 /// See also:
 ///
 ///  * [CompositedTransformTarget], the widget that this widget can target.
 ///  * [FollowerLayer], the layer that implements this widget's logic.
 ///  * [Transform], which applies an arbitrary transform to a child.
+///  * [OverlayPortal.overlayChildLayoutBuilder], which achieves a similar
+///    target-following effect, but also allows the follower to be sized and
+///    positioned dynamically based on the target's size and position.
 class CompositedTransformFollower extends SingleChildRenderObjectWidget {
   /// Creates a composited transform target widget.
   ///
@@ -2467,8 +2623,7 @@ class LayoutId extends ParentDataWidget<MultiChildLayoutParentData> {
   @override
   void applyParentData(RenderObject renderObject) {
     assert(renderObject.parentData is MultiChildLayoutParentData);
-    final MultiChildLayoutParentData parentData =
-        renderObject.parentData! as MultiChildLayoutParentData;
+    final parentData = renderObject.parentData! as MultiChildLayoutParentData;
     if (parentData.id != id) {
       parentData.id = id;
       renderObject.parent?.markNeedsLayout();
@@ -2540,14 +2695,10 @@ class CustomMultiChildLayout extends MultiChildRenderObjectWidget {
 
 /// A box with a specified size.
 ///
-/// If given a child, this widget forces it to have a specific width and/or height.
-/// These values will be ignored if this widget's parent does not permit them.
-/// For example, this happens if the parent is the screen (forces the child to
-/// be the same size as the parent), or another [SizedBox] (forces its child to
-/// have a specific width and/or height). This can be remedied by wrapping the
-/// child [SizedBox] in a widget that does permit it to be any size up to the
-/// size of the parent, such as [Center] or [Align].
+/// {@youtube 560 315 https://www.youtube.com/watch?v=EHPu_DzRfqA}
 ///
+/// If given a child, this widget will try to size its child as close to the
+/// specified [height] and [width] as possible given the parent's constraints.
 /// If either the width or height is null, this widget will try to size itself to
 /// match the child's size in that dimension. If the child's size depends on the
 /// size of its parent, the height and width must be provided.
@@ -2559,8 +2710,6 @@ class CustomMultiChildLayout extends MultiChildRenderObjectWidget {
 /// The [SizedBox.expand] constructor can be used to make a [SizedBox] that
 /// sizes itself to fit the parent. It is equivalent to setting [width] and
 /// [height] to [double.infinity].
-///
-/// {@youtube 560 315 https://www.youtube.com/watch?v=EHPu_DzRfqA}
 ///
 /// {@tool snippet}
 ///
@@ -2575,6 +2724,36 @@ class CustomMultiChildLayout extends MultiChildRenderObjectWidget {
 /// )
 /// ```
 /// {@end-tool}
+///
+/// ## Troubleshooting
+///
+/// ### Why is my [SizedBox] ignored?
+///
+/// In Flutter's layout protocol constraints go down, and sizes go up.
+/// A widget must respect the constraints passed by its parent. This can cause a
+/// [SizedBox]'s values to be ignored:
+///
+/// {@tool snippet}
+///
+/// This snippet makes the [ColoredBox] size 200x200. The 100x100 size is
+/// ignored because it is incompatible with its parent constraints of exactly
+/// 200x200:
+///
+/// ```dart
+/// const SizedBox(
+///   width: 200.0,
+///   height: 200.0,
+///   child: SizedBox( // Ignored!
+///     width: 100.0,
+///     height: 100.0,
+///     child: ColoredBox(color: Colors.green),
+///   ),
+/// )
+/// ```
+/// {@end-tool}
+///
+/// This can be fixed by wrapping the child [SizedBox] in a widget that lets
+/// it be any size up to the size of the parent, such as [Center] or [Align].
 ///
 /// See also:
 ///
@@ -2939,10 +3118,9 @@ class ConstraintsTransformBox extends SingleChildRenderObjectWidget {
     properties.add(DiagnosticsProperty<AlignmentGeometry>('alignment', alignment));
     properties.add(EnumProperty<TextDirection>('textDirection', textDirection, defaultValue: null));
 
-    final String? debugTransformLabel =
-        _debugTransformLabel.isNotEmpty
-            ? _debugTransformLabel
-            : _debugKnownTransforms[constraintsTransform];
+    final String? debugTransformLabel = _debugTransformLabel.isNotEmpty
+        ? _debugTransformLabel
+        : _debugKnownTransforms[constraintsTransform];
 
     if (debugTransformLabel != null) {
       properties.add(DiagnosticsProperty<String>('constraints transform', debugTransformLabel));
@@ -3846,6 +4024,512 @@ class SliverPadding extends SingleChildRenderObjectWidget {
   }
 }
 
+/// An abstract class for building widgets that annotate their subtree with a
+/// description of the meaning of the widgets.
+///
+/// {@template flutter.widgets.SemanticsBase}
+/// Used by assistive technologies, search engines, and other semantic analysis
+/// software to determine the meaning of the application.
+///
+/// See also:
+///
+///  * [SemanticsProperties], which contains a complete documentation for each
+///    of the constructor parameters that belongs to semantics properties.
+///  * [RenderObject.describeSemanticsConfiguration], the rendering library API
+///    through which the [Semantics] widget and [SliverSemantics] sliver are
+///    actually implemented.
+///  * [SemanticsNode], the object used by the rendering library to represent
+///    semantics in the semantics tree.
+///  * [SemanticsDebugger], an overlay to help visualize the semantics tree. Can
+///    be enabled using [WidgetsApp.showSemanticsDebugger],
+///    [MaterialApp.showSemanticsDebugger], or [CupertinoApp.showSemanticsDebugger].
+///  * [MergeSemantics], a widget which marks a subtree as being a single node for
+///    accessibility purposes.
+///  * [ExcludeSemantics], a widget which excludes a subtree from the semantics tree
+///    (which might be useful if it is, e.g., totally decorative and not
+///    important to the user).
+/// {@endtemplate}
+@immutable
+sealed class _SemanticsBase extends SingleChildRenderObjectWidget {
+  /// Creates a semantic annotation.
+  ///
+  /// To create a `const` instance of [_SemanticsBase], use the
+  /// [_SemanticsBase.fromProperties] constructor.
+  ///
+  /// {@template flutter.widgets.SemanticsBase.constructor}
+  /// See also:
+  ///
+  ///  * [SemanticsProperties], which contains a complete documentation for each
+  ///    of the constructor parameters that belongs to semantics properties.
+  ///  * [SemanticsSortKey] for a class that determines accessibility traversal
+  ///    order.
+  /// {@endtemplate}
+  // Properties added to this constructor should be marked required
+  // to enforce its subclasses add it to their constructors.
+  _SemanticsBase({
+    Key? key,
+    Widget? child,
+    required bool container,
+    required bool explicitChildNodes,
+    required bool excludeSemantics,
+    required bool blockUserActions,
+    required bool? enabled,
+    required bool? checked,
+    required bool? mixed,
+    required bool? selected,
+    required bool? toggled,
+    required bool? button,
+    required bool? slider,
+    required bool? keyboardKey,
+    required bool? link,
+    required Uri? linkUrl,
+    required bool? header,
+    required int? headingLevel,
+    required bool? textField,
+    required bool? readOnly,
+    required bool? focusable,
+    required bool? focused,
+    required AccessibilityFocusBlockType? accessibilityFocusBlockType,
+    required bool? inMutuallyExclusiveGroup,
+    required bool? obscured,
+    required bool? multiline,
+    required bool? scopesRoute,
+    required bool? namesRoute,
+    required bool? hidden,
+    required bool? image,
+    required bool? liveRegion,
+    required bool? expanded,
+    required bool? isRequired,
+    required int? maxValueLength,
+    required int? currentValueLength,
+    required String? identifier,
+    required Object? traversalParentIdentifier,
+    required Object? traversalChildIdentifier,
+    required String? label,
+    required AttributedString? attributedLabel,
+    required String? value,
+    required AttributedString? attributedValue,
+    required String? increasedValue,
+    required AttributedString? attributedIncreasedValue,
+    required String? decreasedValue,
+    required AttributedString? attributedDecreasedValue,
+    required String? hint,
+    required AttributedString? attributedHint,
+    required String? tooltip,
+    required String? onTapHint,
+    required String? onLongPressHint,
+    required TextDirection? textDirection,
+    required SemanticsSortKey? sortKey,
+    required SemanticsTag? tagForChildren,
+    required VoidCallback? onTap,
+    required VoidCallback? onLongPress,
+    required VoidCallback? onScrollLeft,
+    required VoidCallback? onScrollRight,
+    required VoidCallback? onScrollUp,
+    required VoidCallback? onScrollDown,
+    required VoidCallback? onIncrease,
+    required VoidCallback? onDecrease,
+    required VoidCallback? onCopy,
+    required VoidCallback? onCut,
+    required VoidCallback? onPaste,
+    required VoidCallback? onDismiss,
+    required MoveCursorHandler? onMoveCursorForwardByCharacter,
+    required MoveCursorHandler? onMoveCursorBackwardByCharacter,
+    required SetSelectionHandler? onSetSelection,
+    required SetTextHandler? onSetText,
+    required VoidCallback? onDidGainAccessibilityFocus,
+    required VoidCallback? onDidLoseAccessibilityFocus,
+    required VoidCallback? onFocus,
+    required VoidCallback? onExpand,
+    required VoidCallback? onCollapse,
+    required Map<CustomSemanticsAction, VoidCallback>? customSemanticsActions,
+    required SemanticsRole? role,
+    required Set<String>? controlsNodes,
+    required SemanticsValidationResult validationResult,
+    required ui.SemanticsHitTestBehavior? hitTestBehavior,
+    required ui.SemanticsInputType? inputType,
+    required Locale? localeForSubtree,
+    required String? minValue,
+    required String? maxValue,
+  }) : this.fromProperties(
+         key: key,
+         child: child,
+         container: container,
+         explicitChildNodes: explicitChildNodes,
+         excludeSemantics: excludeSemantics,
+         blockUserActions: blockUserActions,
+         localeForSubtree: localeForSubtree,
+         properties: SemanticsProperties(
+           enabled: enabled,
+           checked: checked,
+           mixed: mixed,
+           expanded: expanded,
+           toggled: toggled,
+           selected: selected,
+           button: button,
+           slider: slider,
+           keyboardKey: keyboardKey,
+           link: link,
+           linkUrl: linkUrl,
+           header: header,
+           headingLevel: headingLevel,
+           textField: textField,
+           readOnly: readOnly,
+           focusable: focusable,
+           focused: focused,
+           accessibilityFocusBlockType: accessibilityFocusBlockType,
+           inMutuallyExclusiveGroup: inMutuallyExclusiveGroup,
+           obscured: obscured,
+           multiline: multiline,
+           scopesRoute: scopesRoute,
+           namesRoute: namesRoute,
+           hidden: hidden,
+           image: image,
+           liveRegion: liveRegion,
+           isRequired: isRequired,
+           maxValueLength: maxValueLength,
+           currentValueLength: currentValueLength,
+           identifier: identifier,
+           traversalParentIdentifier: traversalParentIdentifier,
+           traversalChildIdentifier: traversalChildIdentifier,
+           label: label,
+           attributedLabel: attributedLabel,
+           value: value,
+           attributedValue: attributedValue,
+           increasedValue: increasedValue,
+           attributedIncreasedValue: attributedIncreasedValue,
+           decreasedValue: decreasedValue,
+           attributedDecreasedValue: attributedDecreasedValue,
+           hint: hint,
+           attributedHint: attributedHint,
+           tooltip: tooltip,
+           textDirection: textDirection,
+           sortKey: sortKey,
+           tagForChildren: tagForChildren,
+           onTap: onTap,
+           onLongPress: onLongPress,
+           onScrollLeft: onScrollLeft,
+           onScrollRight: onScrollRight,
+           onScrollUp: onScrollUp,
+           onScrollDown: onScrollDown,
+           onIncrease: onIncrease,
+           onDecrease: onDecrease,
+           onCopy: onCopy,
+           onCut: onCut,
+           onPaste: onPaste,
+           onMoveCursorForwardByCharacter: onMoveCursorForwardByCharacter,
+           onMoveCursorBackwardByCharacter: onMoveCursorBackwardByCharacter,
+           onDidGainAccessibilityFocus: onDidGainAccessibilityFocus,
+           onDidLoseAccessibilityFocus: onDidLoseAccessibilityFocus,
+           onFocus: onFocus,
+           onDismiss: onDismiss,
+           onSetSelection: onSetSelection,
+           onSetText: onSetText,
+           onExpand: onExpand,
+           onCollapse: onCollapse,
+           customSemanticsActions: customSemanticsActions,
+           hintOverrides: onTapHint != null || onLongPressHint != null
+               ? SemanticsHintOverrides(onTapHint: onTapHint, onLongPressHint: onLongPressHint)
+               : null,
+           role: role,
+           controlsNodes: controlsNodes,
+           validationResult: validationResult,
+           hitTestBehavior: hitTestBehavior,
+           inputType: inputType,
+           minValue: minValue,
+           maxValue: maxValue,
+         ),
+       );
+
+  /// {@template flutter.widgets.SemanticsBase.fromProperties}
+  /// Creates a semantic annotation using [SemanticsProperties].
+  /// {@endtemplate}
+  // Properties added to this constructor should be marked required
+  // to enforce its subclasses add it to their constructors.
+  const _SemanticsBase.fromProperties({
+    super.key,
+    super.child,
+    required this.container,
+    required this.explicitChildNodes,
+    required this.excludeSemantics,
+    required this.blockUserActions,
+    required this.localeForSubtree,
+    required this.properties,
+  });
+
+  /// Contains properties used by assistive technologies to make the application
+  /// more accessible.
+  final SemanticsProperties properties;
+
+  /// If [container] is true, this widget will introduce a new
+  /// node in the semantics tree. Otherwise, the semantics will be
+  /// merged with the semantics of any ancestors (if the ancestor allows that).
+  ///
+  /// Setting [SemanticsProperties.identifier] also implicitly introduces a new
+  /// node, even if [container] is false.
+  ///
+  /// Whether descendants of this widget can add their semantic information to the
+  /// [SemanticsNode] introduced by this configuration is controlled by
+  /// [explicitChildNodes].
+  final bool container;
+
+  /// Whether descendants of this widget are allowed to add semantic information
+  /// to the [SemanticsNode] annotated by this widget.
+  ///
+  /// When set to false descendants are allowed to annotate [SemanticsNode]s of
+  /// their parent with the semantic information they want to contribute to the
+  /// semantic tree.
+  /// When set to true the only way for descendants to contribute semantic
+  /// information to the semantic tree is to introduce new explicit
+  /// [SemanticsNode]s to the tree.
+  ///
+  /// If the semantics properties of this node include
+  /// [SemanticsProperties.scopesRoute] set to true, then [explicitChildNodes]
+  /// must be true also.
+  ///
+  /// This setting is often used in combination with [SemanticsConfiguration.isSemanticBoundary]
+  /// to create semantic boundaries that are either writable or not for children.
+  final bool explicitChildNodes;
+
+  /// The [Locale] for widgets in the subtree.
+  ///
+  /// If null, the subtree will inherit the locale form ancestor widget.
+  final Locale? localeForSubtree;
+
+  /// Whether to replace all child semantics with this node.
+  ///
+  /// Defaults to false.
+  ///
+  /// When this flag is set to true, all child semantics nodes are ignored.
+  /// This can be used as a convenience for cases where a child is wrapped in
+  /// an [ExcludeSemantics] widget and then another [Semantics] widget.
+  final bool excludeSemantics;
+
+  /// Whether to block user interactions for the rendering subtree.
+  ///
+  /// Setting this to true will prevent users from interacting with The
+  /// rendering object configured by this widget and its subtree through
+  /// pointer-related [SemanticsAction]s in assistive technologies.
+  ///
+  /// The [SemanticsNode] created from this widget is still focusable by
+  /// assistive technologies. Only pointer-related [SemanticsAction]s, such as
+  /// [SemanticsAction.tap] or its friends, are blocked.
+  ///
+  /// If this widget is merged into a parent semantics node, only the
+  /// [SemanticsAction]s of this widget and the widgets in the subtree are
+  /// blocked.
+  ///
+  /// For example using [Semantics]:
+  /// ```dart
+  /// void _myTap() { }
+  /// void _myLongPress() { }
+  ///
+  /// Widget build(BuildContext context) {
+  ///   return Semantics(
+  ///     onTap: _myTap,
+  ///     child: Semantics(
+  ///       blockUserActions: true,
+  ///       onLongPress: _myLongPress,
+  ///       child: const Text('label'),
+  ///     ),
+  ///   );
+  /// }
+  /// ```
+  ///
+  /// The result semantics node will still have `_myTap`, but the `_myLongPress`
+  /// will be blocked.
+  ///
+  /// and similarly using [SliverSemantics]:
+  /// ```dart
+  /// void _myTap() { }
+  /// void _myLongPress() { }
+  ///
+  /// Widget build(BuildContext context) {
+  ///   return CustomScrollView(
+  ///     slivers: <Widget>[
+  ///       SliverSemantics(
+  ///         onTap: _myTap,
+  ///         sliver: SliverSemantics(
+  ///           blockUserActions: true,
+  ///           onLongPress: _myLongPress,
+  ///           sliver: const SliverToBoxAdapter(
+  ///             child: Text('label'),
+  ///           ),
+  ///         ),
+  ///       ),
+  ///     ],
+  ///   );
+  /// }
+  /// ```
+  ///
+  /// The result semantics node will still have `_myTap`, but the `_myLongPress`
+  /// will be blocked.
+  final bool blockUserActions;
+
+  TextDirection? _getTextDirection(BuildContext context) {
+    if (properties.textDirection != null) {
+      return properties.textDirection;
+    }
+
+    final bool containsText =
+        properties.label != null ||
+        properties.attributedLabel != null ||
+        properties.value != null ||
+        properties.attributedValue != null ||
+        properties.increasedValue != null ||
+        properties.attributedIncreasedValue != null ||
+        properties.decreasedValue != null ||
+        properties.attributedDecreasedValue != null ||
+        properties.hint != null ||
+        properties.attributedHint != null ||
+        properties.tooltip != null;
+
+    if (!containsText) {
+      return null;
+    }
+
+    return Directionality.maybeOf(context);
+  }
+}
+
+/// A sliver that annotates its subtree with a description of the meaning of
+/// the slivers.
+///
+/// {@macro flutter.widgets.SemanticsBase}
+///  * [Semantics], the widget variant of this sliver.
+@immutable
+class SliverSemantics extends _SemanticsBase {
+  /// Creates a semantic annotation.
+  ///
+  /// To create a `const` instance of [SliverSemantics], use the
+  /// [SliverSemantics.fromProperties] constructor.
+  ///
+  /// {@macro flutter.widgets.SemanticsBase.constructor}
+  SliverSemantics({
+    super.key,
+    required Widget sliver,
+    super.container = false,
+    super.explicitChildNodes = false,
+    super.excludeSemantics = false,
+    super.blockUserActions = false,
+    super.enabled,
+    super.checked,
+    super.mixed,
+    super.selected,
+    super.toggled,
+    super.button,
+    super.slider,
+    super.keyboardKey,
+    super.link,
+    super.linkUrl,
+    super.header,
+    super.headingLevel,
+    super.textField,
+    super.readOnly,
+    super.focusable,
+    super.focused,
+    super.accessibilityFocusBlockType,
+    super.inMutuallyExclusiveGroup,
+    super.obscured,
+    super.multiline,
+    super.scopesRoute,
+    super.namesRoute,
+    super.hidden,
+    super.image,
+    super.liveRegion,
+    super.expanded,
+    super.isRequired,
+    super.maxValueLength,
+    super.currentValueLength,
+    super.identifier,
+    super.traversalParentIdentifier,
+    super.traversalChildIdentifier,
+    super.label,
+    super.attributedLabel,
+    super.value,
+    super.attributedValue,
+    super.increasedValue,
+    super.attributedIncreasedValue,
+    super.decreasedValue,
+    super.attributedDecreasedValue,
+    super.hint,
+    super.attributedHint,
+    super.tooltip,
+    super.onTapHint,
+    super.onLongPressHint,
+    super.textDirection,
+    super.sortKey,
+    super.tagForChildren,
+    super.onTap,
+    super.onLongPress,
+    super.onScrollLeft,
+    super.onScrollRight,
+    super.onScrollUp,
+    super.onScrollDown,
+    super.onIncrease,
+    super.onDecrease,
+    super.onCopy,
+    super.onCut,
+    super.onPaste,
+    super.onDismiss,
+    super.onMoveCursorForwardByCharacter,
+    super.onMoveCursorBackwardByCharacter,
+    super.onSetSelection,
+    super.onSetText,
+    super.onDidGainAccessibilityFocus,
+    super.onDidLoseAccessibilityFocus,
+    super.onFocus,
+    super.onExpand,
+    super.onCollapse,
+    super.customSemanticsActions,
+    super.role,
+    super.controlsNodes,
+    super.validationResult = SemanticsValidationResult.none,
+    super.hitTestBehavior,
+    super.inputType,
+    super.localeForSubtree,
+    super.minValue,
+    super.maxValue,
+  }) : super(child: sliver);
+
+  /// {@macro flutter.widgets.SemanticsBase.fromProperties}
+  const SliverSemantics.fromProperties({
+    super.key,
+    super.child,
+    super.container = false,
+    super.explicitChildNodes = false,
+    super.excludeSemantics = false,
+    super.blockUserActions = false,
+    super.localeForSubtree,
+    required super.properties,
+  }) : super.fromProperties();
+
+  @override
+  RenderSliverSemanticsAnnotations createRenderObject(BuildContext context) {
+    return RenderSliverSemanticsAnnotations(
+      container: container,
+      explicitChildNodes: explicitChildNodes,
+      excludeSemantics: excludeSemantics,
+      blockUserActions: blockUserActions,
+      properties: properties,
+      localeForSubtree: localeForSubtree,
+      textDirection: _getTextDirection(context),
+    );
+  }
+
+  @override
+  void updateRenderObject(BuildContext context, RenderSliverSemanticsAnnotations renderObject) {
+    renderObject
+      ..container = container
+      ..explicitChildNodes = explicitChildNodes
+      ..excludeSemantics = excludeSemantics
+      ..blockUserActions = blockUserActions
+      ..properties = properties
+      ..textDirection = _getTextDirection(context)
+      ..localeForSubtree = localeForSubtree;
+  }
+}
+
 // LAYOUT NODES
 
 /// Returns the [AxisDirection] in the given [Axis] in the current
@@ -4118,6 +4802,10 @@ class Stack extends MultiChildRenderObjectWidget {
   /// To clip children whose geometry does not overflow the stack, consider
   /// using a [ClipRect] widget.
   ///
+  /// Even when this is set to [Clip.none], the stack itself does not extend its
+  /// hit-test region: pointer events that fall outside the stack's own bounds
+  /// will not reach a child even if that child is painted in that area.
+  ///
   /// Defaults to [Clip.hardEdge].
   final Clip clipBehavior;
 
@@ -4127,10 +4815,9 @@ class Stack extends MultiChildRenderObjectWidget {
         debugCheckHasDirectionality(
           context,
           why: "to resolve the 'alignment' argument",
-          hint:
-              alignment == AlignmentDirectional.topStart
-                  ? "The default value for 'alignment' is AlignmentDirectional.topStart, which requires a text direction."
-                  : null,
+          hint: alignment == AlignmentDirectional.topStart
+              ? "The default value for 'alignment' is AlignmentDirectional.topStart, which requires a text direction."
+              : null,
           alternative:
               "Instead of providing a Directionality widget, another solution would be passing a non-directional 'alignment', or an explicit 'textDirection', to the $runtimeType.",
         ),
@@ -4167,152 +4854,6 @@ class Stack extends MultiChildRenderObjectWidget {
     properties.add(EnumProperty<TextDirection>('textDirection', textDirection, defaultValue: null));
     properties.add(EnumProperty<StackFit>('fit', fit));
     properties.add(EnumProperty<Clip>('clipBehavior', clipBehavior, defaultValue: Clip.hardEdge));
-  }
-}
-
-/// A [Stack] that shows a single child from a list of children.
-///
-/// The displayed child is the one with the given [index]. The stack is
-/// always as big as the largest child.
-///
-/// If value is null, then nothing is displayed.
-///
-/// {@youtube 560 315 https://www.youtube.com/watch?v=_O0PPD1Xfbk}
-///
-/// {@tool dartpad}
-/// This example shows a [IndexedStack] widget being used to lay out one card
-/// at a time from a series of cards, each keeping their respective states.
-///
-/// ** See code in examples/api/lib/widgets/basic/indexed_stack.0.dart **
-/// {@end-tool}
-///
-/// See also:
-///
-///  * [Stack], for more details about stacks.
-///  * The [catalog of layout widgets](https://flutter.dev/widgets/layout/).
-class IndexedStack extends StatelessWidget {
-  /// Creates a [Stack] widget that paints a single child.
-  const IndexedStack({
-    super.key,
-    this.alignment = AlignmentDirectional.topStart,
-    this.textDirection,
-    this.clipBehavior = Clip.hardEdge,
-    this.sizing = StackFit.loose,
-    this.index = 0,
-    this.children = const <Widget>[],
-  });
-
-  /// How to align the non-positioned and partially-positioned children in the
-  /// stack.
-  ///
-  /// Defaults to [AlignmentDirectional.topStart].
-  ///
-  /// See [Stack.alignment] for more information.
-  final AlignmentGeometry alignment;
-
-  /// The text direction with which to resolve [alignment].
-  ///
-  /// Defaults to the ambient [Directionality].
-  final TextDirection? textDirection;
-
-  /// {@macro flutter.material.Material.clipBehavior}
-  ///
-  /// Defaults to [Clip.hardEdge].
-  final Clip clipBehavior;
-
-  /// How to size the non-positioned children in the stack.
-  ///
-  /// Defaults to [StackFit.loose].
-  ///
-  /// See [Stack.fit] for more information.
-  final StackFit sizing;
-
-  /// The index of the child to show.
-  ///
-  /// If this is null, none of the children will be shown.
-  final int? index;
-
-  /// The child widgets of the stack.
-  ///
-  /// Only the child at index [index] will be shown.
-  ///
-  /// See [Stack.children] for more information.
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    final List<Widget> wrappedChildren = List<Widget>.generate(children.length, (int i) {
-      return Visibility.maintain(visible: i == index, child: children[i]);
-    });
-    return _RawIndexedStack(
-      alignment: alignment,
-      textDirection: textDirection,
-      clipBehavior: clipBehavior,
-      sizing: sizing,
-      index: index,
-      children: wrappedChildren,
-    );
-  }
-}
-
-/// The render object widget that backs [IndexedStack].
-class _RawIndexedStack extends Stack {
-  /// Creates a [Stack] widget that paints a single child.
-  const _RawIndexedStack({
-    super.alignment,
-    super.textDirection,
-    super.clipBehavior,
-    StackFit sizing = StackFit.loose,
-    this.index = 0,
-    super.children,
-  }) : super(fit: sizing);
-
-  /// The index of the child to show.
-  final int? index;
-
-  @override
-  RenderIndexedStack createRenderObject(BuildContext context) {
-    assert(_debugCheckHasDirectionality(context));
-    return RenderIndexedStack(
-      index: index,
-      fit: fit,
-      clipBehavior: clipBehavior,
-      alignment: alignment,
-      textDirection: textDirection ?? Directionality.maybeOf(context),
-    );
-  }
-
-  @override
-  void updateRenderObject(BuildContext context, RenderIndexedStack renderObject) {
-    assert(_debugCheckHasDirectionality(context));
-    renderObject
-      ..index = index
-      ..fit = fit
-      ..clipBehavior = clipBehavior
-      ..alignment = alignment
-      ..textDirection = textDirection ?? Directionality.maybeOf(context);
-  }
-
-  @override
-  MultiChildRenderObjectElement createElement() {
-    return _IndexedStackElement(this);
-  }
-}
-
-class _IndexedStackElement extends MultiChildRenderObjectElement {
-  _IndexedStackElement(_RawIndexedStack super.widget);
-
-  @override
-  _RawIndexedStack get widget => super.widget as _RawIndexedStack;
-
-  @override
-  void debugVisitOnstageChildren(ElementVisitor visitor) {
-    final int? index = widget.index;
-    // If the index is null, no child is onstage. Otherwise, only the child at
-    // the selected index is.
-    if (index != null && children.isNotEmpty) {
-      visitor(children.elementAt(index));
-    }
   }
 }
 
@@ -4513,8 +5054,8 @@ class Positioned extends ParentDataWidget<StackParentData> {
   @override
   void applyParentData(RenderObject renderObject) {
     assert(renderObject.parentData is StackParentData);
-    final StackParentData parentData = renderObject.parentData! as StackParentData;
-    bool needsLayout = false;
+    final parentData = renderObject.parentData! as StackParentData;
+    var needsLayout = false;
 
     if (parentData.left != left) {
       parentData.left = left;
@@ -5411,8 +5952,8 @@ class Flexible extends ParentDataWidget<FlexParentData> {
   @override
   void applyParentData(RenderObject renderObject) {
     assert(renderObject.parentData is FlexParentData);
-    final FlexParentData parentData = renderObject.parentData! as FlexParentData;
-    bool needsLayout = false;
+    final parentData = renderObject.parentData! as FlexParentData;
+    var needsLayout = false;
 
     if (parentData.flex != flex) {
       parentData.flex = flex;
@@ -5868,7 +6409,11 @@ class Flow extends MultiChildRenderObjectWidget {
 ///
 /// Text displayed in a [RichText] widget must be explicitly styled. When
 /// picking which style to use, consider using [DefaultTextStyle.of] the current
-/// [BuildContext] to provide defaults. For more details on how to style text in
+/// [BuildContext] to provide defaults. [MediaQuery.maybeBoldTextOf],
+/// [MediaQuery.maybeLineHeightScaleFactorOverrideOf],
+/// [MediaQuery.maybeLetterSpacingOverrideOf], [MediaQuery.maybeWordSpacingOverrideOf],
+/// and [MediaQuery.maybeParagraphSpacingOverrideOf] can also be used to ensure the styling
+/// for your text is accessible. For more details on how to style text in
 /// a [RichText] widget, see the documentation for [TextStyle].
 ///
 /// Consider using the [Text] widget to integrate with the [DefaultTextStyle]
@@ -5905,9 +6450,14 @@ class Flow extends MultiChildRenderObjectWidget {
 /// subtree of a [SelectionArea] or [SelectableRegion] and a
 /// [SelectionRegistrar] needs to be assigned to the
 /// [RichText.selectionRegistrar]. One can use
-/// [SelectionContainer.maybeOf] to get the [SelectionRegistrar] from a
-/// context. This enables users to select the text in [RichText]s with mice or
-/// touch events.
+/// [SelectionContainer.maybeOf] to get the [SelectionRegistrar] from a context
+/// that is below the [SelectionArea] or [SelectableRegion] in the widget tree.
+/// This enables users to select the text in [RichText]s with mice or touch
+/// events.
+///
+/// If the same build method creates both the [SelectionArea] and the
+/// [RichText], use a [Builder] so that [SelectionContainer.maybeOf] is called
+/// with a [BuildContext] below the [SelectionArea] in the widget tree.
 ///
 /// The [selectionColor] also needs to be set if the selection is enabled to
 /// draw the selection highlights.
@@ -5920,10 +6470,16 @@ class Flow extends MultiChildRenderObjectWidget {
 /// ![](https://flutter.github.io/assets-for-api-docs/assets/widgets/rich_text.png)
 ///
 /// ```dart
-/// RichText(
-///   text: const TextSpan(text: 'Hello'),
-///   selectionRegistrar: SelectionContainer.maybeOf(context),
-///   selectionColor: const Color(0xAF6694e8),
+/// SelectionArea(
+///   child: Builder(
+///     builder: (BuildContext context) {
+///       return RichText(
+///         text: const TextSpan(text: 'Hello'),
+///         selectionRegistrar: SelectionContainer.maybeOf(context),
+///         selectionColor: const Color(0xAF6694e8),
+///       );
+///     },
+///   ),
 /// )
 /// ```
 /// {@end-tool}
@@ -6075,6 +6631,9 @@ class RichText extends MultiChildRenderObjectWidget {
   /// widgets.
   final Color? selectionColor;
 
+  double _getDevicePixelRatio(BuildContext context) =>
+      MediaQuery.maybeDevicePixelRatioOf(context) ?? View.maybeOf(context)?.devicePixelRatio ?? 1.0;
+
   @override
   RenderParagraph createRenderObject(BuildContext context) {
     assert(textDirection != null || debugCheckHasDirectionality(context));
@@ -6092,6 +6651,7 @@ class RichText extends MultiChildRenderObjectWidget {
       locale: locale ?? Localizations.maybeLocaleOf(context),
       registrar: selectionRegistrar,
       selectionColor: selectionColor,
+      devicePixelRatio: _getDevicePixelRatio(context),
     );
   }
 
@@ -6111,7 +6671,8 @@ class RichText extends MultiChildRenderObjectWidget {
       ..textHeightBehavior = textHeightBehavior
       ..locale = locale ?? Localizations.maybeLocaleOf(context)
       ..registrar = selectionRegistrar
-      ..selectionColor = selectionColor;
+      ..selectionColor = selectionColor
+      ..devicePixelRatio = _getDevicePixelRatio(context);
   }
 
   @override
@@ -6192,6 +6753,7 @@ class RawImage extends LeafRenderObjectWidget {
     this.invertColors = false,
     this.filterQuality = FilterQuality.medium,
     this.isAntiAlias = false,
+    this.blendMode = BlendMode.srcOver,
   });
 
   /// The image to display.
@@ -6326,6 +6888,16 @@ class RawImage extends LeafRenderObjectWidget {
   /// Anti-aliasing alleviates the sawtooth artifact when the image is rotated.
   final bool isAntiAlias;
 
+  /// Used to combine the image with the destination when painting onto the
+  /// canvas. This is forwarded to [paintImage].
+  ///
+  /// Defaults to [BlendMode.srcOver].
+  ///
+  /// See also:
+  ///
+  ///  * [BlendMode], which includes an illustration of the effect of each blend mode.
+  final BlendMode blendMode;
+
   @override
   RenderImage createRenderObject(BuildContext context) {
     assert((!matchTextDirection && alignment is Alignment) || debugCheckHasDirectionality(context));
@@ -6348,11 +6920,13 @@ class RawImage extends LeafRenderObjectWidget {
       repeat: repeat,
       centerSlice: centerSlice,
       matchTextDirection: matchTextDirection,
-      textDirection:
-          matchTextDirection || alignment is! Alignment ? Directionality.of(context) : null,
+      textDirection: matchTextDirection || alignment is! Alignment
+          ? Directionality.of(context)
+          : null,
       invertColors: invertColors,
       isAntiAlias: isAntiAlias,
       filterQuality: filterQuality,
+      blendMode: blendMode,
     );
   }
 
@@ -6377,11 +6951,13 @@ class RawImage extends LeafRenderObjectWidget {
       ..repeat = repeat
       ..centerSlice = centerSlice
       ..matchTextDirection = matchTextDirection
-      ..textDirection =
-          matchTextDirection || alignment is! Alignment ? Directionality.of(context) : null
+      ..textDirection = matchTextDirection || alignment is! Alignment
+          ? Directionality.of(context)
+          : null
       ..invertColors = invertColors
       ..isAntiAlias = isAntiAlias
-      ..filterQuality = filterQuality;
+      ..filterQuality = filterQuality
+      ..blendMode = blendMode;
   }
 
   @override
@@ -6411,6 +6987,7 @@ class RawImage extends LeafRenderObjectWidget {
     );
     properties.add(DiagnosticsProperty<bool>('invertColors', invertColors));
     properties.add(EnumProperty<FilterQuality>('filterQuality', filterQuality));
+    properties.add(EnumProperty<BlendMode>('blendMode', blendMode, defaultValue: BlendMode.srcOver));
   }
 }
 
@@ -6483,8 +7060,8 @@ class DefaultAssetBundle extends InheritedWidget {
   /// AssetBundle bundle = DefaultAssetBundle.of(context);
   /// ```
   static AssetBundle of(BuildContext context) {
-    final DefaultAssetBundle? result =
-        context.dependOnInheritedWidgetOfExactType<DefaultAssetBundle>();
+    final DefaultAssetBundle? result = context
+        .dependOnInheritedWidgetOfExactType<DefaultAssetBundle>();
     return result?.bundle ?? rootBundle;
   }
 
@@ -6676,7 +7253,7 @@ class Listener extends SingleChildRenderObjectWidget {
   @override
   void debugFillProperties(DiagnosticPropertiesBuilder properties) {
     super.debugFillProperties(properties);
-    final List<String> listeners = <String>[
+    final listeners = <String>[
       if (onPointerDown != null) 'down',
       if (onPointerMove != null) 'move',
       if (onPointerUp != null) 'up',
@@ -6914,7 +7491,7 @@ class MouseRegion extends SingleChildRenderObjectWidget {
   @override
   void debugFillProperties(DiagnosticPropertiesBuilder properties) {
     super.debugFillProperties(properties);
-    final List<String> listeners = <String>[
+    final listeners = <String>[
       if (onEnter != null) 'enter',
       if (onExit != null) 'exit',
       if (onHover != null) 'hover',
@@ -6977,7 +7554,7 @@ class MouseRegion extends SingleChildRenderObjectWidget {
 ///  * [debugRepaintRainbowEnabled], a debugging flag to help visually monitor
 ///    render tree repaints in a running app.
 ///  * [debugProfilePaintsEnabled], a debugging flag to show render tree
-///    repaints in the observatory's timeline view.
+///    repaints in Flutter DevTools' timeline view.
 class RepaintBoundary extends SingleChildRenderObjectWidget {
   /// Creates a widget that isolates repaints.
   const RepaintBoundary({super.key, super.child});
@@ -7276,283 +7853,116 @@ class MetaData extends SingleChildRenderObjectWidget {
 /// A widget that annotates the widget tree with a description of the meaning of
 /// the widgets.
 ///
-/// Used by assistive technologies, search engines, and other semantic analysis
-/// software to determine the meaning of the application.
-///
 /// {@youtube 560 315 https://www.youtube.com/watch?v=NvtMt_DtFrQ}
 ///
-/// See also:
-///
-///  * [SemanticsProperties], which contains a complete documentation for each
-///    of the constructor parameters that belongs to semantics properties.
-///  * [MergeSemantics], which marks a subtree as being a single node for
-///    accessibility purposes.
-///  * [ExcludeSemantics], which excludes a subtree from the semantics tree
-///    (which might be useful if it is, e.g., totally decorative and not
-///    important to the user).
-///  * [RenderObject.describeSemanticsConfiguration], the rendering library API
-///    through which the [Semantics] widget is actually implemented.
-///  * [SemanticsNode], the object used by the rendering library to represent
-///    semantics in the semantics tree.
-///  * [SemanticsDebugger], an overlay to help visualize the semantics tree. Can
-///    be enabled using [WidgetsApp.showSemanticsDebugger],
-///    [MaterialApp.showSemanticsDebugger], or [CupertinoApp.showSemanticsDebugger].
+/// {@macro flutter.widgets.SemanticsBase}
+///  * [SliverSemantics], the sliver variant of this widget.
 @immutable
-class Semantics extends SingleChildRenderObjectWidget {
+class Semantics extends _SemanticsBase {
   /// Creates a semantic annotation.
   ///
   /// To create a `const` instance of [Semantics], use the
   /// [Semantics.fromProperties] constructor.
   ///
-  /// See also:
-  ///
-  ///  * [SemanticsProperties], which contains a complete documentation for each
-  ///    of the constructor parameters that belongs to semantics properties.
-  ///  * [SemanticsSortKey] for a class that determines accessibility traversal
-  ///    order.
+  /// {@macro flutter.widgets.SemanticsBase}
   Semantics({
-    Key? key,
-    Widget? child,
-    bool container = false,
-    bool explicitChildNodes = false,
-    bool excludeSemantics = false,
-    bool blockUserActions = false,
-    bool? enabled,
-    bool? checked,
-    bool? mixed,
-    bool? selected,
-    bool? toggled,
-    bool? button,
-    bool? slider,
-    bool? keyboardKey,
-    bool? link,
-    Uri? linkUrl,
-    bool? header,
-    int? headingLevel,
-    bool? textField,
-    bool? readOnly,
-    bool? focusable,
-    bool? focused,
-    bool? inMutuallyExclusiveGroup,
-    bool? obscured,
-    bool? multiline,
-    bool? scopesRoute,
-    bool? namesRoute,
-    bool? hidden,
-    bool? image,
-    bool? liveRegion,
-    bool? expanded,
-    bool? isRequired,
-    int? maxValueLength,
-    int? currentValueLength,
-    String? identifier,
-    String? label,
-    AttributedString? attributedLabel,
-    String? value,
-    AttributedString? attributedValue,
-    String? increasedValue,
-    AttributedString? attributedIncreasedValue,
-    String? decreasedValue,
-    AttributedString? attributedDecreasedValue,
-    String? hint,
-    AttributedString? attributedHint,
-    String? tooltip,
-    String? onTapHint,
-    String? onLongPressHint,
-    TextDirection? textDirection,
-    SemanticsSortKey? sortKey,
-    SemanticsTag? tagForChildren,
-    VoidCallback? onTap,
-    VoidCallback? onLongPress,
-    VoidCallback? onScrollLeft,
-    VoidCallback? onScrollRight,
-    VoidCallback? onScrollUp,
-    VoidCallback? onScrollDown,
-    VoidCallback? onIncrease,
-    VoidCallback? onDecrease,
-    VoidCallback? onCopy,
-    VoidCallback? onCut,
-    VoidCallback? onPaste,
-    VoidCallback? onDismiss,
-    MoveCursorHandler? onMoveCursorForwardByCharacter,
-    MoveCursorHandler? onMoveCursorBackwardByCharacter,
-    SetSelectionHandler? onSetSelection,
-    SetTextHandler? onSetText,
-    VoidCallback? onDidGainAccessibilityFocus,
-    VoidCallback? onDidLoseAccessibilityFocus,
-    VoidCallback? onFocus,
-    Map<CustomSemanticsAction, VoidCallback>? customSemanticsActions,
-    SemanticsRole? role,
-    Set<String>? controlsNodes,
-    SemanticsValidationResult validationResult = SemanticsValidationResult.none,
-    ui.SemanticsInputType? inputType,
-  }) : this.fromProperties(
-         key: key,
-         child: child,
-         container: container,
-         explicitChildNodes: explicitChildNodes,
-         excludeSemantics: excludeSemantics,
-         blockUserActions: blockUserActions,
-         properties: SemanticsProperties(
-           enabled: enabled,
-           checked: checked,
-           mixed: mixed,
-           expanded: expanded,
-           toggled: toggled,
-           selected: selected,
-           button: button,
-           slider: slider,
-           keyboardKey: keyboardKey,
-           link: link,
-           linkUrl: linkUrl,
-           header: header,
-           headingLevel: headingLevel,
-           textField: textField,
-           readOnly: readOnly,
-           focusable: focusable,
-           focused: focused,
-           inMutuallyExclusiveGroup: inMutuallyExclusiveGroup,
-           obscured: obscured,
-           multiline: multiline,
-           scopesRoute: scopesRoute,
-           namesRoute: namesRoute,
-           hidden: hidden,
-           image: image,
-           liveRegion: liveRegion,
-           isRequired: isRequired,
-           maxValueLength: maxValueLength,
-           currentValueLength: currentValueLength,
-           identifier: identifier,
-           label: label,
-           attributedLabel: attributedLabel,
-           value: value,
-           attributedValue: attributedValue,
-           increasedValue: increasedValue,
-           attributedIncreasedValue: attributedIncreasedValue,
-           decreasedValue: decreasedValue,
-           attributedDecreasedValue: attributedDecreasedValue,
-           hint: hint,
-           attributedHint: attributedHint,
-           tooltip: tooltip,
-           textDirection: textDirection,
-           sortKey: sortKey,
-           tagForChildren: tagForChildren,
-           onTap: onTap,
-           onLongPress: onLongPress,
-           onScrollLeft: onScrollLeft,
-           onScrollRight: onScrollRight,
-           onScrollUp: onScrollUp,
-           onScrollDown: onScrollDown,
-           onIncrease: onIncrease,
-           onDecrease: onDecrease,
-           onCopy: onCopy,
-           onCut: onCut,
-           onPaste: onPaste,
-           onMoveCursorForwardByCharacter: onMoveCursorForwardByCharacter,
-           onMoveCursorBackwardByCharacter: onMoveCursorBackwardByCharacter,
-           onDidGainAccessibilityFocus: onDidGainAccessibilityFocus,
-           onDidLoseAccessibilityFocus: onDidLoseAccessibilityFocus,
-           onFocus: onFocus,
-           onDismiss: onDismiss,
-           onSetSelection: onSetSelection,
-           onSetText: onSetText,
-           customSemanticsActions: customSemanticsActions,
-           hintOverrides:
-               onTapHint != null || onLongPressHint != null
-                   ? SemanticsHintOverrides(onTapHint: onTapHint, onLongPressHint: onLongPressHint)
-                   : null,
-           role: role,
-           controlsNodes: controlsNodes,
-           validationResult: validationResult,
-           inputType: inputType,
-         ),
-       );
+    super.key,
+    super.child,
+    super.container = false,
+    super.explicitChildNodes = false,
+    super.excludeSemantics = false,
+    super.blockUserActions = false,
+    super.enabled,
+    super.checked,
+    super.mixed,
+    super.selected,
+    super.toggled,
+    super.button,
+    super.slider,
+    super.keyboardKey,
+    super.link,
+    super.linkUrl,
+    super.header,
+    super.headingLevel,
+    super.textField,
+    super.readOnly,
+    super.focusable,
+    super.focused,
+    super.accessibilityFocusBlockType,
+    super.inMutuallyExclusiveGroup,
+    super.obscured,
+    super.multiline,
+    super.scopesRoute,
+    super.namesRoute,
+    super.hidden,
+    super.image,
+    super.liveRegion,
+    super.expanded,
+    super.isRequired,
+    super.maxValueLength,
+    super.currentValueLength,
+    super.identifier,
+    super.traversalParentIdentifier,
+    super.traversalChildIdentifier,
+    super.label,
+    super.attributedLabel,
+    super.value,
+    super.attributedValue,
+    super.increasedValue,
+    super.attributedIncreasedValue,
+    super.decreasedValue,
+    super.attributedDecreasedValue,
+    super.hint,
+    super.attributedHint,
+    super.tooltip,
+    super.onTapHint,
+    super.onLongPressHint,
+    super.textDirection,
+    super.sortKey,
+    super.tagForChildren,
+    super.onTap,
+    super.onLongPress,
+    super.onScrollLeft,
+    super.onScrollRight,
+    super.onScrollUp,
+    super.onScrollDown,
+    super.onIncrease,
+    super.onDecrease,
+    super.onCopy,
+    super.onCut,
+    super.onPaste,
+    super.onDismiss,
+    super.onMoveCursorForwardByCharacter,
+    super.onMoveCursorBackwardByCharacter,
+    super.onSetSelection,
+    super.onSetText,
+    super.onDidGainAccessibilityFocus,
+    super.onDidLoseAccessibilityFocus,
+    super.onFocus,
+    super.onExpand,
+    super.onCollapse,
+    super.customSemanticsActions,
+    super.role,
+    super.controlsNodes,
+    super.validationResult = SemanticsValidationResult.none,
+    super.hitTestBehavior,
+    super.inputType,
+    super.localeForSubtree,
+    super.minValue,
+    super.maxValue,
+  });
 
-  /// Creates a semantic annotation using [SemanticsProperties].
+  /// {@macro flutter.widgets.SemanticsBase.fromProperties}
   const Semantics.fromProperties({
     super.key,
     super.child,
-    this.container = false,
-    this.explicitChildNodes = false,
-    this.excludeSemantics = false,
-    this.blockUserActions = false,
-    required this.properties,
-  });
-
-  /// Contains properties used by assistive technologies to make the application
-  /// more accessible.
-  final SemanticsProperties properties;
-
-  /// If [container] is true, this widget will introduce a new
-  /// node in the semantics tree. Otherwise, the semantics will be
-  /// merged with the semantics of any ancestors (if the ancestor allows that).
-  ///
-  /// Whether descendants of this widget can add their semantic information to the
-  /// [SemanticsNode] introduced by this configuration is controlled by
-  /// [explicitChildNodes].
-  final bool container;
-
-  /// Whether descendants of this widget are allowed to add semantic information
-  /// to the [SemanticsNode] annotated by this widget.
-  ///
-  /// When set to false descendants are allowed to annotate [SemanticsNode]s of
-  /// their parent with the semantic information they want to contribute to the
-  /// semantic tree.
-  /// When set to true the only way for descendants to contribute semantic
-  /// information to the semantic tree is to introduce new explicit
-  /// [SemanticsNode]s to the tree.
-  ///
-  /// If the semantics properties of this node include
-  /// [SemanticsProperties.scopesRoute] set to true, then [explicitChildNodes]
-  /// must be true also.
-  ///
-  /// This setting is often used in combination with [SemanticsConfiguration.isSemanticBoundary]
-  /// to create semantic boundaries that are either writable or not for children.
-  final bool explicitChildNodes;
-
-  /// Whether to replace all child semantics with this node.
-  ///
-  /// Defaults to false.
-  ///
-  /// When this flag is set to true, all child semantics nodes are ignored.
-  /// This can be used as a convenience for cases where a child is wrapped in
-  /// an [ExcludeSemantics] widget and then another [Semantics] widget.
-  final bool excludeSemantics;
-
-  /// Whether to block user interactions for the rendering subtree.
-  ///
-  /// Setting this to true will prevent users from interacting with The
-  /// rendering object configured by this widget and its subtree through
-  /// pointer-related [SemanticsAction]s in assistive technologies.
-  ///
-  /// The [SemanticsNode] created from this widget is still focusable by
-  /// assistive technologies. Only pointer-related [SemanticsAction]s, such as
-  /// [SemanticsAction.tap] or its friends, are blocked.
-  ///
-  /// If this widget is merged into a parent semantics node, only the
-  /// [SemanticsAction]s of this widget and the widgets in the subtree are
-  /// blocked.
-  ///
-  /// For example:
-  /// ```dart
-  /// void _myTap() { }
-  /// void _myLongPress() { }
-  ///
-  /// Widget build(BuildContext context) {
-  ///   return Semantics(
-  ///     onTap: _myTap,
-  ///     child: Semantics(
-  ///       blockUserActions: true,
-  ///       onLongPress: _myLongPress,
-  ///       child: const Text('label'),
-  ///     ),
-  ///   );
-  /// }
-  /// ```
-  ///
-  /// The result semantics node will still have `_myTap`, but the `_myLongPress`
-  /// will be blocked.
-  final bool blockUserActions;
+    super.container = false,
+    super.explicitChildNodes = false,
+    super.excludeSemantics = false,
+    super.blockUserActions = false,
+    super.localeForSubtree,
+    required super.properties,
+  }) : super.fromProperties();
 
   @override
   RenderSemanticsAnnotations createRenderObject(BuildContext context) {
@@ -7562,33 +7972,9 @@ class Semantics extends SingleChildRenderObjectWidget {
       excludeSemantics: excludeSemantics,
       blockUserActions: blockUserActions,
       properties: properties,
+      localeForSubtree: localeForSubtree,
       textDirection: _getTextDirection(context),
     );
-  }
-
-  TextDirection? _getTextDirection(BuildContext context) {
-    if (properties.textDirection != null) {
-      return properties.textDirection;
-    }
-
-    final bool containsText =
-        properties.label != null ||
-        properties.attributedLabel != null ||
-        properties.value != null ||
-        properties.attributedValue != null ||
-        properties.increasedValue != null ||
-        properties.attributedIncreasedValue != null ||
-        properties.decreasedValue != null ||
-        properties.attributedDecreasedValue != null ||
-        properties.hint != null ||
-        properties.attributedHint != null ||
-        properties.tooltip != null;
-
-    if (!containsText) {
-      return null;
-    }
-
-    return Directionality.maybeOf(context);
   }
 
   @override
@@ -7599,7 +7985,8 @@ class Semantics extends SingleChildRenderObjectWidget {
       ..excludeSemantics = excludeSemantics
       ..blockUserActions = blockUserActions
       ..properties = properties
-      ..textDirection = _getTextDirection(context);
+      ..textDirection = _getTextDirection(context)
+      ..localeForSubtree = localeForSubtree;
   }
 
   @override
@@ -7790,7 +8177,10 @@ class IndexedSemantics extends SingleChildRenderObjectWidget {
 ///
 /// Useful for attaching a key to an existing widget.
 class KeyedSubtree extends StatelessWidget {
-  /// Creates a widget that builds its child.
+  /// Creates a widget that builds its child while assigning it a key.
+  ///
+  /// This is useful when you want to preserve the state of a widget when it moves
+  /// around in the widget tree by associating it with a consistent key.
   const KeyedSubtree({super.key, required this.child});
 
   /// Creates a KeyedSubtree for child with a key that's based on the child's existing key or childIndex.
@@ -7809,7 +8199,7 @@ class KeyedSubtree extends StatelessWidget {
       return items;
     }
 
-    final List<Widget> itemsWithUniqueKeys = <Widget>[
+    final itemsWithUniqueKeys = <Widget>[
       for (final (int i, Widget item) in items.indexed) KeyedSubtree.wrap(item, baseIndex + i),
     ];
 
@@ -7953,17 +8343,17 @@ typedef StatefulWidgetBuilder = Widget Function(BuildContext context, StateSette
 ///     return AlertDialog(
 ///       content: StatefulBuilder(
 ///         builder: (BuildContext context, StateSetter setState) {
-///           return Column(
-///             mainAxisSize: MainAxisSize.min,
-///             children: List<Widget>.generate(4, (int index) {
-///               return Radio<int>(
-///                 value: index,
-///                 groupValue: selectedRadio,
-///                 onChanged: (int? value) {
-///                   setState(() => selectedRadio = value);
-///                 },
-///               );
-///             }),
+///           return RadioGroup<int>(
+///             groupValue: selectedRadio,
+///             onChanged: (int? value) {
+///               setState(() => selectedRadio = value);
+///             },
+///             child: Column(
+///               mainAxisSize: MainAxisSize.min,
+///               children: List<Widget>.generate(4, (int index) {
+///                 return Radio<int>(value: index);
+///               }),
+///             ),
 ///           );
 ///         },
 ///       ),
@@ -8002,31 +8392,59 @@ class _StatefulBuilderState extends State<StatefulBuilder> {
 /// child on top of that color.
 class ColoredBox extends SingleChildRenderObjectWidget {
   /// Creates a widget that paints its area with the specified [Color].
-  const ColoredBox({required this.color, super.child, super.key});
+  const ColoredBox({required this.color, this.isAntiAlias = true, super.child, super.key});
 
   /// The color to paint the background area with.
   final Color color;
 
+  /// {@template flutter.widgets.ColoredBox.isAntiAlias}
+  /// Whether to apply anti-aliasing when painting the box.
+  ///
+  /// Defaults to `true`.
+  ///
+  /// When `true`, the painted box will have smooth edges. This is crucial for
+  /// animations and transformations (such as rotation or scaling) where the
+  /// widget's edges may not align perfectly with the physical pixel grid.
+  /// Anti-aliasing allows for sub-pixel rendering, which prevents a 'jagged'
+  /// appearance during motion and ensures visually smooth transitions.
+  ///
+  /// Set this to `false` for specific use cases where multiple `ColoredBox`
+  /// widgets are positioned adjacent to each other to form a larger, seamless
+  /// area of solid color. With anti-aliasing enabled (`true`), faint seams or
+  /// gaps might appear between the boxes due to the semi-transparent pixels at
+  /// their edges. Disabling anti-aliasing ensures that the boxes align perfectly
+  /// without such visual artifacts.
+  ///
+  /// See also:
+  ///
+  ///  * [Paint.isAntiAlias], the underlying property that this controls.
+  /// {@endtemplate}
+  final bool isAntiAlias;
+
   @override
   RenderObject createRenderObject(BuildContext context) {
-    return _RenderColoredBox(color: color);
+    return _RenderColoredBox(color: color, isAntiAlias: isAntiAlias);
   }
 
   @override
   void updateRenderObject(BuildContext context, RenderObject renderObject) {
-    (renderObject as _RenderColoredBox).color = color;
+    (renderObject as _RenderColoredBox)
+      ..color = color
+      ..isAntiAlias = isAntiAlias;
   }
 
   @override
   void debugFillProperties(DiagnosticPropertiesBuilder properties) {
     super.debugFillProperties(properties);
     properties.add(DiagnosticsProperty<Color>('color', color));
+    properties.add(DiagnosticsProperty<bool>('isAntiAlias', isAntiAlias, defaultValue: true));
   }
 }
 
 class _RenderColoredBox extends RenderProxyBoxWithHitTestBehavior {
-  _RenderColoredBox({required Color color})
+  _RenderColoredBox({required Color color, required bool isAntiAlias})
     : _color = color,
+      _isAntiAlias = isAntiAlias,
       super(behavior: HitTestBehavior.opaque);
 
   /// The fill color for this render object.
@@ -8040,6 +8458,16 @@ class _RenderColoredBox extends RenderProxyBoxWithHitTestBehavior {
     markNeedsPaint();
   }
 
+  bool get isAntiAlias => _isAntiAlias;
+  bool _isAntiAlias;
+  set isAntiAlias(bool value) {
+    if (value == _isAntiAlias) {
+      return;
+    }
+    _isAntiAlias = value;
+    markNeedsPaint();
+  }
+
   @override
   void paint(PaintingContext context, Offset offset) {
     // It's tempting to want to optimize out this `drawRect()` call if the
@@ -8047,7 +8475,12 @@ class _RenderColoredBox extends RenderProxyBoxWithHitTestBehavior {
     // https://github.com/flutter/flutter/pull/72526#issuecomment-749185938 for
     // a good description of why.
     if (size > Size.zero) {
-      context.canvas.drawRect(offset & size, Paint()..color = color);
+      context.canvas.drawRect(
+        offset & size,
+        Paint()
+          ..isAntiAlias = isAntiAlias
+          ..color = color,
+      );
     }
     if (child != null) {
       context.paintChild(child!, offset);

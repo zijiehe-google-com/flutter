@@ -15,8 +15,7 @@
 
 namespace impeller {
 
-class Tessellator;
-
+[[maybe_unused]]
 static constexpr Scalar kMinStrokeSize = 1.0f;
 
 struct GeometryResult {
@@ -53,15 +52,12 @@ class Geometry {
   virtual ~Geometry() {}
 
   static std::unique_ptr<Geometry> MakeFillPath(
-      const Path& path,
+      const flutter::DlPath& path,
       std::optional<Rect> inner_rect = std::nullopt);
 
   static std::unique_ptr<Geometry> MakeStrokePath(
-      const Path& path,
-      Scalar stroke_width = 0.0,
-      Scalar miter_limit = 4.0,
-      Cap stroke_cap = Cap::kButt,
-      Join stroke_join = Join::kMiter);
+      const flutter::DlPath& path,
+      const StrokeParameters& stroke = {});
 
   static std::unique_ptr<Geometry> MakeCover();
 
@@ -80,6 +76,17 @@ class Geometry {
                                                      Scalar radius,
                                                      Scalar stroke_width);
 
+  static std::unique_ptr<Geometry> MakeFilledArc(const Rect& oval_bounds,
+                                                 Degrees start,
+                                                 Degrees sweep,
+                                                 bool include_center);
+
+  static std::unique_ptr<Geometry> MakeStrokedArc(
+      const Rect& oval_bounds,
+      Degrees start,
+      Degrees sweep,
+      const StrokeParameters& stroke);
+
   static std::unique_ptr<Geometry> MakeRoundRect(const Rect& rect,
                                                  const Size& radii);
 
@@ -92,6 +99,8 @@ class Geometry {
 
   virtual GeometryResult::Mode GetResultMode() const;
 
+  /// @brief The coverage rectangle of this geometry, transformed by the
+  ///        `transform` argument.
   virtual std::optional<Rect> GetCoverage(const Matrix& transform) const = 0;
 
   /// @brief Compute an alpha value to simulate lower coverage of fractional
@@ -100,16 +109,24 @@ class Geometry {
                                            Scalar stroke_width);
 
   /// @brief    Determines if this geometry, transformed by the given
-  ///           `transform`, will completely cover all surface area of the given
-  ///           `rect`.
+  ///           `transform`, will completely cover all of the pixels
+  ///           within the given integer `rect`.
   ///
-  ///           This is a conservative estimate useful for certain
-  ///           optimizations.
+  ///           The integer `rect`, by definition, will contain all of
+  ///           the area covered by any pixel within its boundary.
   ///
-  /// @returns  `true` if the transformed geometry is guaranteed to cover the
-  ///           given `rect`. May return `false` in many undetected cases where
+  ///           The return value can be a conservative estimate which
+  ///           will still be useful for certain optimizations. It may
+  ///           return `false` for obscure cases that might actually contain
+  ///           all of the pixels if it is too computationally costly
+  ///           to prove containment, but it should never return 'true'
+  ///           unless the implementation can prove that all pixels are
+  ///           fully covered (rendered) by the geometry.
+  ///
+  /// @returns  `true` if the transformed geometry is guaranteed to cover
+  ///           the given `rect`. May return `false` in some cases where
   ///           the transformed geometry does in fact cover the `rect`.
-  virtual bool CoversArea(const Matrix& transform, const Rect& rect) const;
+  virtual bool CoversArea(const Matrix& transform, const IRect& rect) const;
 
   virtual bool IsAxisAlignedRect() const;
 

@@ -137,5 +137,68 @@ TEST(SwapchainTest, CachesRenderPassOnSwapchainImage) {
   }
 }
 
+TEST(SwapchainTest, NoFenceWaitAfterAcquireNextImageFailure) {
+  bool wait_for_fences_called = false;
+  auto const context =
+      MockVulkanContextBuilder()
+          .SetAcquireNextImageCallback(
+              [](VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence,
+                 uint32_t*) -> VkResult { return VK_ERROR_SURFACE_LOST_KHR; })
+          .SetWaitForFencesCallback([&](VkDevice, uint32_t, const VkFence*,
+                                        VkBool32, uint64_t) -> VkResult {
+            wait_for_fences_called = true;
+            return VK_SUCCESS;
+          })
+          .Build();
+
+  auto surface = CreateSurface(*context);
+  SetSwapchainImageSize(ISize{1, 1});
+  auto swapchain =
+      KHRSwapchainVK::Create(context, std::move(surface), ISize{1, 1},
+                             /*enable_msaa=*/false);
+  auto image = swapchain->AcquireNextDrawable();
+  EXPECT_FALSE(image);
+
+  swapchain->AcquireNextDrawable();
+  EXPECT_FALSE(wait_for_fences_called);
+}
+
+TEST(SwapchainTest, SwapchainSizeChangeDoesNotAcquireDrawable) {
+  int acquire_call_count = 0;
+  auto const context =
+      MockVulkanContextBuilder()
+          .SetAcquireNextImageCallback([&](VkDevice, VkSwapchainKHR, uint64_t,
+                                           VkSemaphore, VkFence,
+                                           uint32_t* pImageIndex) -> VkResult {
+            *pImageIndex = 0;
+            acquire_call_count++;
+            return VK_SUCCESS;
+          })
+          .Build();
+
+  auto surface = CreateSurface(*context);
+  ISize original_size(1, 1);
+  SetSwapchainImageSize(original_size);
+  auto swapchain =
+      KHRSwapchainVK::Create(context, std::move(surface), original_size,
+                             /*enable_msaa=*/false);
+  auto image = swapchain->AcquireNextDrawable();
+  ASSERT_NE(image, nullptr);
+  EXPECT_EQ(image->GetSize(), original_size);
+
+  ISize new_size(100, 100);
+  SetSwapchainImageSize(new_size);
+  swapchain->UpdateSurfaceSize(new_size);
+
+  acquire_call_count = 0;
+  image = swapchain->AcquireNextDrawable();
+  ASSERT_NE(image, nullptr);
+  EXPECT_EQ(image->GetSize(), new_size);
+
+  // Verify that the call to AcquireNextDrawable after the resize did not make
+  // any extra calls to the underlying Vulkan API.
+  EXPECT_EQ(acquire_call_count, 1);
+}
+
 }  // namespace testing
 }  // namespace impeller

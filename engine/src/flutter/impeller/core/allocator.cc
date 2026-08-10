@@ -46,8 +46,13 @@ std::shared_ptr<DeviceBuffer> Allocator::CreateBuffer(
   return OnCreateBuffer(desc);
 }
 
-std::shared_ptr<Texture> Allocator::CreateTexture(
-    const TextureDescriptor& desc) {
+std::shared_ptr<Texture> Allocator::CreateTexture(const TextureDescriptor& desc,
+                                                  bool threadsafe) {
+  if (const absl::Status status = desc.Validate(); !status.ok()) {
+    VALIDATION_LOG << "The texture descriptor is invalid. " << status.message();
+    return nullptr;
+  }
+
   const auto max_size = GetMaxTextureSizeSupported();
   if (desc.size.width > max_size.width || desc.size.height > max_size.height) {
     VALIDATION_LOG << "Requested texture size " << desc.size
@@ -55,15 +60,28 @@ std::shared_ptr<Texture> Allocator::CreateTexture(
     return nullptr;
   }
 
+  if (IsCompressed(desc.format)) {
+    // Block-compressed textures are sample-only. They cannot be rendered to,
+    // written from a shader, or allocated as transient attachments.
+    if (desc.usage & TextureUsage::kRenderTarget ||
+        desc.usage & TextureUsage::kShaderWrite ||
+        desc.storage_mode == StorageMode::kDeviceTransient) {
+      VALIDATION_LOG << "Compressed texture format "
+                     << PixelFormatToString(desc.format)
+                     << " can only be used as a sample-only texture.";
+      return nullptr;
+    }
+  }
+
   if (desc.mip_count > desc.size.MipCount()) {
     VALIDATION_LOG << "Requested mip_count " << desc.mip_count
                    << " exceeds maximum supported for size " << desc.size;
     TextureDescriptor corrected_desc = desc;
     corrected_desc.mip_count = desc.size.MipCount();
-    return OnCreateTexture(corrected_desc);
+    return OnCreateTexture(corrected_desc, threadsafe);
   }
 
-  return OnCreateTexture(desc);
+  return OnCreateTexture(desc, threadsafe);
 }
 
 uint16_t Allocator::MinimumBytesPerRow(PixelFormat format) const {

@@ -7,7 +7,9 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
 
+#include "GLES3/gl3.h"
 #include "flutter/fml/logging.h"
 #include "flutter/fml/mapping.h"
 #include "impeller/renderer/backend/gles/capabilities_gles.h"
@@ -19,16 +21,17 @@
 
 namespace impeller {
 
-const char* GLErrorToString(GLenum value);
+std::string_view GLErrorToString(GLenum value);
 bool GLErrorIsFatal(GLenum value);
 
 struct AutoErrorCheck {
   const PFNGLGETERRORPROC error_fn;
 
-  // TODO(135922) Change to string_view.
-  const char* name;
+  /// Name of the GL call being wrapped.
+  /// should not be stored beyond the caller's lifetime.
+  std::string_view name;
 
-  AutoErrorCheck(PFNGLGETERRORPROC error, const char* name)
+  AutoErrorCheck(PFNGLGETERRORPROC error, std::string_view name)
       : error_fn(error), name(name) {}
 
   ~AutoErrorCheck() {
@@ -48,9 +51,21 @@ struct AutoErrorCheck {
   }
 };
 
+template <typename Type>
+struct ArgLogger {
+  static void log(std::stringstream& stream, Type arg) { stream << arg; }
+};
+
+template <typename R, typename... Args>
+struct ArgLogger<R (*)(Args...)> {
+  static void log(std::stringstream& stream, R (*val)(Args...)) {
+    stream << reinterpret_cast<void*>(val);
+  }
+};
+
 template <class Type>
 void BuildGLArgumentsStream(std::stringstream& stream, Type arg) {
-  stream << arg;
+  ArgLogger<Type>::log(stream, arg);
 }
 
 constexpr void BuildGLArgumentsStream(std::stringstream& stream) {}
@@ -80,8 +95,7 @@ struct GLProc {
   //----------------------------------------------------------------------------
   /// The name of the GL function.
   ///
-  // TODO(135922) Change to string_view.
-  const char* name = nullptr;
+  std::string_view name = {};
 
   //----------------------------------------------------------------------------
   /// The pointer to the GL function.
@@ -118,8 +132,7 @@ struct GLProc {
     FML_CHECK(IsAvailable()) << "GL function " << name << " is not available. "
                              << "This is likely due to a missing extension.";
     if (log_calls) {
-      FML_LOG(IMPORTANT) << name
-                         << BuildGLArguments(std::forward<Args>(args)...);
+      FML_LOG(IMPORTANT) << name << BuildGLArguments(args...);
     }
 #endif  // defined(IMPELLER_DEBUG) && !defined(NDEBUG)
     return function(std::forward<Args>(args)...);
@@ -211,6 +224,8 @@ struct GLProc {
   PROC(StencilOpSeparate);                   \
   PROC(TexImage2D);                          \
   PROC(TexSubImage2D);                       \
+  PROC(CompressedTexImage2D);                \
+  PROC(CompressedTexSubImage2D);             \
   PROC(TexParameteri);                       \
   PROC(TexParameterfv);                      \
   PROC(Uniform1fv);                          \
@@ -218,6 +233,8 @@ struct GLProc {
   PROC(Uniform2fv);                          \
   PROC(Uniform3fv);                          \
   PROC(Uniform4fv);                          \
+  PROC(UniformMatrix2fv);                    \
+  PROC(UniformMatrix3fv);                    \
   PROC(UniformMatrix4fv);                    \
   PROC(UseProgram);                          \
   PROC(VertexAttribPointer);                 \
@@ -250,11 +267,24 @@ void(glDepthRange)(GLdouble n, GLdouble f);
   PROC(UniformBlockBinding);               \
   PROC(BindBufferRange);                   \
   PROC(WaitSync);                          \
-  PROC(RenderbufferStorageMultisample)     \
-  PROC(BlitFramebuffer);
+  PROC(RenderbufferStorageMultisample);    \
+  PROC(BlitFramebuffer);                   \
+  PROC(InvalidateFramebuffer);
+
+// 3D texture entry points, used by 2D array textures. These are core on
+// GL/GLES 3.0 and also reachable below it: desktop GL 2.x exposes these exact
+// entry points through GL_EXT_texture_array, and OpenGL ES 2.0 exposes them
+// through GL_NV_texture_array under *NV-suffixed names (resolved as aliases
+// into these procs). See ProcTableGLES setup.
+#define FOR_EACH_IMPELLER_TEXTURE_ARRAY_PROC(PROC) \
+  PROC(TexImage3D);                                \
+  PROC(TexSubImage3D);                             \
+  PROC(CompressedTexImage3D);                      \
+  PROC(CompressedTexSubImage3D);
 
 #define FOR_EACH_IMPELLER_EXT_PROC(PROC)    \
   PROC(DebugMessageControlKHR);             \
+  PROC(DebugMessageCallbackKHR);            \
   PROC(DiscardFramebufferEXT);              \
   PROC(FramebufferTexture2DMultisampleEXT); \
   PROC(PushDebugGroupKHR);                  \
@@ -266,7 +296,14 @@ void(glDepthRange)(GLdouble n, GLdouble f);
   PROC(GetQueryObjectui64vEXT);             \
   PROC(BeginQueryEXT);                      \
   PROC(EndQueryEXT);                        \
-  PROC(GetQueryObjectuivEXT);
+  PROC(GetQueryObjectuivEXT);               \
+  PROC(BlitFramebufferANGLE);               \
+  PROC(VertexAttribDivisor);                \
+  PROC(VertexAttribDivisorEXT);             \
+  PROC(DrawArraysInstanced);                \
+  PROC(DrawArraysInstancedEXT);             \
+  PROC(DrawElementsInstanced);              \
+  PROC(DrawElementsInstancedEXT);
 
 enum class DebugResourceType {
   kTexture,
@@ -293,6 +330,7 @@ class ProcTableGLES {
   FOR_EACH_IMPELLER_ES_ONLY_PROC(IMPELLER_PROC);
   FOR_EACH_IMPELLER_DESKTOP_ONLY_PROC(IMPELLER_PROC);
   FOR_EACH_IMPELLER_GLES3_PROC(IMPELLER_PROC);
+  FOR_EACH_IMPELLER_TEXTURE_ARRAY_PROC(IMPELLER_PROC);
   FOR_EACH_IMPELLER_EXT_PROC(IMPELLER_PROC);
 
 #undef IMPELLER_PROC
@@ -315,6 +353,11 @@ class ProcTableGLES {
   std::string DescribeCurrentFramebuffer() const;
 
   std::string GetProgramInfoLogString(GLuint program) const;
+
+  // Only check framebuffer status in debug builds.
+  // Prefer this if possible to direct calls to CheckFramebufferStatus,
+  // which can cause CPU<->GPU round-trips.
+  GLenum CheckFramebufferStatusDebug(GLenum target) const;
 
   bool IsCurrentFramebufferComplete() const;
 

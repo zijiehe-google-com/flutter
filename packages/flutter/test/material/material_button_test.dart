@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import '../widgets/semantics_tester.dart';
 
 void main() {
   setUp(() {
@@ -104,7 +104,7 @@ void main() {
   });
 
   testWidgets('Does MaterialButton work with hover', (WidgetTester tester) async {
-    const Color hoverColor = Color(0xff001122);
+    const hoverColor = Color(0xff001122);
 
     await tester.pumpWidget(
       Directionality(
@@ -129,9 +129,9 @@ void main() {
   });
 
   testWidgets('Does MaterialButton work with focus', (WidgetTester tester) async {
-    const Color focusColor = Color(0xff001122);
+    const focusColor = Color(0xff001122);
 
-    final FocusNode focusNode = FocusNode(debugLabel: 'MaterialButton Node');
+    final focusNode = FocusNode(debugLabel: 'MaterialButton Node');
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
@@ -159,20 +159,20 @@ void main() {
   testWidgets('MaterialButton elevation and colors have proper precedence', (
     WidgetTester tester,
   ) async {
-    const double elevation = 10.0;
-    const double focusElevation = 11.0;
-    const double hoverElevation = 12.0;
-    const double highlightElevation = 13.0;
-    const Color focusColor = Color(0xff001122);
-    const Color hoverColor = Color(0xff112233);
-    const Color highlightColor = Color(0xff223344);
+    const elevation = 10.0;
+    const focusElevation = 11.0;
+    const hoverElevation = 12.0;
+    const highlightElevation = 13.0;
+    const focusColor = Color(0xff001122);
+    const hoverColor = Color(0xff112233);
+    const highlightColor = Color(0xff223344);
 
     final Finder rawButtonMaterial = find.descendant(
       of: find.byType(MaterialButton),
       matching: find.byType(Material),
     );
 
-    final FocusNode focusNode = FocusNode(debugLabel: 'MaterialButton Node');
+    final focusNode = FocusNode(debugLabel: 'MaterialButton Node');
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
@@ -211,7 +211,7 @@ void main() {
     // Hover elevation overrides focus
     TestGesture? gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer();
-    addTearDown(() => gesture?.removePointer());
+    addTearDown(gesture.removePointer);
     await gesture.moveTo(tester.getCenter(find.byType(MaterialButton)));
     await tester.pumpAndSettle();
     material = tester.widget<Material>(rawButtonMaterial);
@@ -308,7 +308,7 @@ void main() {
   );
 
   testWidgets('MaterialButton gets focus when autofocus is set.', (WidgetTester tester) async {
-    final FocusNode focusNode = FocusNode(debugLabel: 'MaterialButton');
+    final focusNode = FocusNode(debugLabel: 'MaterialButton');
     await tester.pumpWidget(
       MaterialApp(
         home: Center(
@@ -398,8 +398,8 @@ void main() {
   testWidgets('MaterialButton onPressed and onLongPress callbacks are distinctly recognized', (
     WidgetTester tester,
   ) async {
-    bool didPressButton = false;
-    bool didLongPressButton = false;
+    var didPressButton = false;
+    var didLongPressButton = false;
 
     await tester.pumpWidget(
       Directionality(
@@ -465,7 +465,7 @@ void main() {
 
     expect(
       RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1),
-      SystemMouseCursors.click,
+      kIsWeb ? SystemMouseCursors.click : SystemMouseCursors.basic,
     );
 
     // Test default cursor when disabled
@@ -490,8 +490,8 @@ void main() {
   testWidgets('MaterialButton with explicit splashColor and highlightColor', (
     WidgetTester tester,
   ) async {
-    const Color directSplashColor = Color(0xFF000011);
-    const Color directHighlightColor = Color(0xFF000011);
+    const directSplashColor = Color(0xFF000011);
+    const directHighlightColor = Color(0xFF000011);
 
     Widget buttonWidget = Center(
       child: MaterialButton(
@@ -524,9 +524,9 @@ void main() {
 
     // Painter is translated to the center by the Center widget and not
     // the Material widget.
-    const Rect expectedClipRect = Rect.fromLTRB(0.0, 0.0, 88.0, 36.0);
-    final Path expectedClipPath =
-        Path()..addRRect(RRect.fromRectAndRadius(expectedClipRect, const Radius.circular(2.0)));
+    const expectedClipRect = Rect.fromLTRB(0.0, 0.0, 88.0, 36.0);
+    final expectedClipPath = Path()
+      ..addRRect(RRect.fromRectAndRadius(expectedClipRect, const Radius.circular(2.0)));
     expect(
       Material.of(tester.element(find.byType(InkWell))),
       paints
@@ -540,8 +540,8 @@ void main() {
         ..rect(color: directHighlightColor),
     );
 
-    const Color themeSplashColor1 = Color(0xFF001100);
-    const Color themeHighlightColor1 = Color(0xFF001100);
+    const themeSplashColor1 = Color(0xFF001100);
+    const themeHighlightColor1 = Color(0xFF001100);
 
     buttonWidget = Center(
       child: MaterialButton(
@@ -580,8 +580,8 @@ void main() {
         ..rect(color: themeHighlightColor1),
     );
 
-    const Color themeSplashColor2 = Color(0xFF002200);
-    const Color themeHighlightColor2 = Color(0xFF002200);
+    const themeSplashColor2 = Color(0xFF002200);
+    const themeHighlightColor2 = Color(0xFF002200);
 
     await tester.pumpWidget(
       Directionality(
@@ -635,15 +635,13 @@ void main() {
   testWidgets(
     'Disabled MaterialButton has same semantic size as enabled and exposes disabled semantics',
     (WidgetTester tester) async {
-      final SemanticsTester semantics = SemanticsTester(tester);
-
-      const Rect expectedButtonSize = Rect.fromLTRB(0.0, 0.0, 116.0, 48.0);
-      // Button is in center of screen
-      final Matrix4 expectedButtonTransform =
-          Matrix4.identity()..translate(
-            TestSemantics.fullScreen.width / 2 - expectedButtonSize.width / 2,
-            TestSemantics.fullScreen.height / 2 - expectedButtonSize.height / 2,
-          );
+      const expectedButtonSize = Size(116.0, 48.0);
+      // Button is in center of the 800x600 test screen.
+      final expectedButtonTransform = Matrix4.diagonal3Values(
+        tester.view.devicePixelRatio,
+        tester.view.devicePixelRatio,
+        1.0,
+      )..translate(400.0 - expectedButtonSize.width / 2, 300.0 - expectedButtonSize.height / 2);
 
       // enabled button
       await tester.pumpWidget(
@@ -663,28 +661,21 @@ void main() {
         ),
       );
 
+      final SemanticsNode enabledSemantics = tester.getSemantics(find.byType(MaterialButton));
       expect(
-        semantics,
-        hasSemantics(
-          TestSemantics.root(
-            children: <TestSemantics>[
-              TestSemantics.rootChild(
-                id: 1,
-                rect: expectedButtonSize,
-                transform: expectedButtonTransform,
-                label: 'Button',
-                actions: <SemanticsAction>[SemanticsAction.tap, SemanticsAction.focus],
-                flags: <SemanticsFlag>[
-                  SemanticsFlag.hasEnabledState,
-                  SemanticsFlag.isButton,
-                  SemanticsFlag.isEnabled,
-                  SemanticsFlag.isFocusable,
-                ],
-              ),
-            ],
-          ),
+        enabledSemantics,
+        matchesSemantics(
+          label: 'Button',
+          hasTapAction: true,
+          hasFocusAction: true,
+          hasEnabledState: true,
+          isButton: true,
+          isEnabled: true,
+          isFocusable: true,
+          size: expectedButtonSize,
         ),
       );
+      expect(enabledSemantics.transform, expectedButtonTransform);
 
       // disabled button
       await tester.pumpWidget(
@@ -702,29 +693,22 @@ void main() {
         ),
       );
 
+      final SemanticsNode disabledSemantics = tester.getSemantics(find.byType(MaterialButton));
       expect(
-        semantics,
-        hasSemantics(
-          TestSemantics.root(
-            children: <TestSemantics>[
-              TestSemantics.rootChild(
-                id: 1,
-                rect: expectedButtonSize,
-                transform: expectedButtonTransform,
-                label: 'Button',
-                flags: <SemanticsFlag>[
-                  SemanticsFlag.hasEnabledState,
-                  SemanticsFlag.isButton,
-                  SemanticsFlag.isFocusable,
-                ],
-                actions: <SemanticsAction>[SemanticsAction.focus],
-              ),
-            ],
-          ),
+        disabledSemantics,
+        matchesSemantics(
+          label: 'Button',
+          hasFocusAction: true,
+          hasEnabledState: true,
+          isButton: true,
+          isFocusable: true,
+          size: expectedButtonSize,
         ),
       );
-
-      semantics.dispose();
+      expect(disabledSemantics.transform, expectedButtonTransform);
+      final SemanticsData semanticsData = disabledSemantics.getSemanticsData();
+      expect(semanticsData.hasFlag(SemanticsFlag.isEnabled), isFalse);
+      expect(semanticsData.hasAction(SemanticsAction.tap), isFalse);
     },
   );
 
@@ -859,8 +843,8 @@ void main() {
   });
 
   testWidgets('MaterialButton responds to density changes.', (WidgetTester tester) async {
-    const Key key = Key('test');
-    const Key childKey = Key('test child');
+    const key = Key('test');
+    const childKey = Key('test child');
 
     Future<void> buildTest(VisualDensity visualDensity, {bool useText = false}) async {
       return tester.pumpWidget(
@@ -873,15 +857,14 @@ void main() {
                 visualDensity: visualDensity,
                 key: key,
                 onPressed: () {},
-                child:
-                    useText
-                        ? const Text('Text', key: childKey)
-                        : Container(
-                          key: childKey,
-                          width: 100,
-                          height: 100,
-                          color: const Color(0xffff0000),
-                        ),
+                child: useText
+                    ? const Text('Text', key: childKey)
+                    : Container(
+                        key: childKey,
+                        width: 100,
+                        height: 100,
+                        color: const Color(0xffff0000),
+                      ),
               ),
             ),
           ),

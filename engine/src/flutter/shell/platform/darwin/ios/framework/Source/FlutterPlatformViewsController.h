@@ -18,6 +18,7 @@
 #import "flutter/shell/platform/darwin/common/framework/Headers/FlutterChannels.h"
 #import "flutter/shell/platform/darwin/ios/framework/Headers/FlutterPlatformViews.h"
 #import "flutter/shell/platform/darwin/ios/framework/Headers/FlutterPlugin.h"
+#import "flutter/shell/platform/darwin/ios/framework/Source/FlutterFMLTaskRunner.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/FlutterViewResponder.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/overlay_layer_pool.h"
 #import "flutter/shell/platform/darwin/ios/ios_context.h"
@@ -32,7 +33,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)init NS_DESIGNATED_INITIALIZER;
 
 /// The task runner used to post rendering tasks to the platform thread.
-@property(nonatomic, assign) const fml::RefPtr<fml::TaskRunner>& taskRunner;
+@property(nonatomic, strong) FlutterFMLTaskRunner* taskRunner;
 
 /// The flutter view.
 @property(nonatomic, weak) UIView* _Nullable flutterView;
@@ -47,7 +48,7 @@ NS_ASSUME_NONNULL_BEGIN
         (FlutterPlatformViewGestureRecognizersBlockingPolicy)gestureRecognizerBlockingPolicy;
 
 /// @brief Mark the beginning of a frame and record the size of the onscreen.
-- (void)beginFrameWithSize:(SkISize)frameSize;
+- (void)beginFrameWithSize:(flutter::DlISize)frameSize;
 
 /// @brief Cancel the current frame, indicating that no platform views are composited.
 ///
@@ -67,19 +68,6 @@ NS_ASSUME_NONNULL_BEGIN
 /// Returns nil if there is no platform view with the provided id. Called
 /// from the platform thread.
 - (FlutterTouchInterceptingView*)flutterTouchInterceptingViewForId:(int64_t)viewId;
-
-/// @brief Determine if thread merging is required after prerolling platform views.
-///
-/// Called from the raster thread.
-- (flutter::PostPrerollResult)postPrerollActionWithThreadMerger:
-    (const fml::RefPtr<fml::RasterThreadMerger>&)rasterThreadMerger;
-
-/// @brief Mark the end of a compositor frame.
-///
-/// May determine changes are required to the thread merging state.
-/// Called from the raster thread.
-- (void)endFrameWithResubmit:(BOOL)shouldResubmitFrame
-                threadMerger:(const fml::RefPtr<fml::RasterThreadMerger>&)rasterThreadMerger;
 
 /// @brief Returns the Canvas for the overlay slice for the given platform view.
 ///
@@ -109,10 +97,26 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// @brief Pushes backdrop filter mutation to the mutator stack of each visited platform view.
 - (void)pushFilterToVisitedPlatformViews:(const std::shared_ptr<flutter::DlImageFilter>&)filter
-                                withRect:(const SkRect&)filterRect;
+                                withRect:(const flutter::DlRect&)filterRect;
 
 /// @brief Pushes the view id of a visted platform view to the list of visied platform views.
 - (void)pushVisitedPlatformViewId:(int64_t)viewId;
+
+/// @brief Pushes the outstanding rectangular clips to the mutator stack of each visited platform
+/// view
+- (void)pushClipRectToVisitedPlatformViews:(const flutter::DlRect&)clipRect;
+
+/// @brief Pushes the outstanding rounded rectangular clips to the mutator stack of each visited
+/// platform view
+- (void)pushClipRRectToVisitedPlatformViews:(const flutter::DlRoundRect&)clipRRect;
+
+/// @brief Pushes the outstanding round super elliptical clips to the mutator stack of each visited
+/// platform view
+- (void)pushClipRSuperellipseToVisitedPlatformViews:(const flutter::DlRoundSuperellipse&)clipRse;
+
+/// @brief Pushes the outstanding path clips to the mutator stack of each visited platform
+/// view
+- (void)pushClipPathToVisitedPlatformViews:(const flutter::DlPath&)clipPath;
 
 @end
 
@@ -139,7 +143,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (const flutter::EmbeddedViewParams&)compositionParamsForView:(int64_t)viewId;
 
-- (std::vector<int64_t>&)previousCompositionOrder;
+/// @brief The composition order from the previous frame.
+///
+/// Only accessed from the platform thread.
+- (NSArray<NSNumber*>*)previousCompositionOrder;
 
 @end
 

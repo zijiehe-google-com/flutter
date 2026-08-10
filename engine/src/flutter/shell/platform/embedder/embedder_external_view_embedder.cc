@@ -12,6 +12,10 @@
 #include "flutter/shell/platform/embedder/embedder_render_target.h"
 #include "third_party/skia/include/gpu/ganesh/GrDirectContext.h"
 
+#ifdef IMPELLER_SUPPORTS_RENDERING
+#include "impeller/display_list/dl_dispatcher.h"  // nogncheck
+#endif                                            // IMPELLER_SUPPORTS_RENDERING
+
 namespace flutter {
 
 static const auto kRootViewIdentifier = EmbedderExternalView::ViewIdentifier{};
@@ -38,9 +42,9 @@ void EmbedderExternalViewEmbedder::SetSurfaceTransformationCallback(
   surface_transformation_callback_ = std::move(surface_transformation_callback);
 }
 
-SkMatrix EmbedderExternalViewEmbedder::GetSurfaceTransformation() const {
+DlMatrix EmbedderExternalViewEmbedder::GetSurfaceTransformation() const {
   if (!surface_transformation_callback_) {
-    return SkMatrix{};
+    return DlMatrix{};
   }
 
   return surface_transformation_callback_();
@@ -63,7 +67,7 @@ void EmbedderExternalViewEmbedder::BeginFrame(
 
 // |ExternalViewEmbedder|
 void EmbedderExternalViewEmbedder::PrepareFlutterView(
-    SkISize frame_size,
+    DlISize frame_size,
     double device_pixel_ratio) {
   Reset();
 
@@ -119,13 +123,13 @@ DlCanvas* EmbedderExternalViewEmbedder::CompositeEmbeddedView(int64_t view_id) {
 
 static FlutterBackingStoreConfig MakeBackingStoreConfig(
     int64_t view_id,
-    const SkISize& backing_store_size) {
+    const DlISize& backing_store_size) {
   FlutterBackingStoreConfig config = {};
 
   config.struct_size = sizeof(config);
 
-  config.size.width = backing_store_size.width();
-  config.size.height = backing_store_size.height();
+  config.size.width = backing_store_size.width;
+  config.size.height = backing_store_size.height;
   config.view_id = view_id;
 
   return config;
@@ -145,7 +149,7 @@ struct PlatformView {
     view_identifier = view->GetViewIdentifier();
     params = view->GetEmbeddedViewParams();
 
-    DlRect clip = ToDlRect(view->GetEmbeddedViewParams()->finalBoundingRect());
+    DlRect clip = view->GetEmbeddedViewParams()->finalBoundingRect();
     DlMatrix matrix;
     for (auto i = params->mutatorsStack().Begin();
          i != params->mutatorsStack().End(); ++i) {
@@ -177,6 +181,10 @@ struct PlatformView {
         }
         case MutatorType::kOpacity:
         case MutatorType::kBackdropFilter:
+        case MutatorType::kBackdropClipRect:
+        case MutatorType::kBackdropClipRRect:
+        case MutatorType::kBackdropClipRSuperellipse:
+        case MutatorType::kBackdropClipPath:
           break;
       }
     }
@@ -250,15 +258,24 @@ class Layer {
 
   /// Renders this layer Flutter contents to the render target previously
   /// assigned with SetRenderTarget.
-  void RenderFlutterContents() {
+  void RenderFlutterContents(bool frame_boundary) {
     FML_DCHECK(has_flutter_contents());
-    if (render_target_) {
-      bool clear_surface = true;
-      for (auto c : flutter_contents_) {
-        c->Render(*render_target_, clear_surface);
-        clear_surface = false;
-      }
+    if (!render_target_) {
+      return;
     }
+
+#ifdef IMPELLER_SUPPORTS_RENDERING
+    if (render_target_->GetImpellerRenderTarget()) {
+      RenderFlutterContentsImpeller(frame_boundary);
+      return;
+    }
+#endif  // IMPELLER_SUPPORTS_RENDERING
+
+#if SLIMPELLER
+    FML_LOG(FATAL) << "Impeller opt-out unavailable.";
+#else   // SLIMPELLER
+    RenderFlutterContentsSkia();
+#endif  // SLIMPELLER
   }
 
   /// Returns platform views for this layer. In Z-order the platform views are
@@ -274,6 +291,98 @@ class Layer {
   }
 
  private:
+#if !SLIMPELLER
+  // TODO(https://github.com/flutter/flutter/issues/151670): Implement this
+  // for Impeller as well.
+  static void InvalidateApiState(SkSurface& skia_surface) {
+    auto recording_context = skia_surface.recordingContext();
+
+    // Should never happen.
+    FML_DCHECK(recording_context) << "Recording context was null.";
+
+    auto direct_context = recording_context->asDirectContext();
+    if (direct_context == nullptr) {
+      // Can happen when using software rendering.
+      // Print an error but otherwise continue in that case.
+      FML_LOG(ERROR) << "Embedder asked to invalidate cached graphics API "
+                        "state but Flutter is not using a graphics API.";
+    } else {
+      direct_context->resetContext(kAll_GrBackendState);
+    }
+  }
+
+  void RenderFlutterContentsSkia() {
+    auto skia_surface = render_target_->GetSkiaSurface();
+    if (!skia_surface) {
+      return;
+    }
+
+    auto [ok, invalidate_api_state] = render_target_->MaybeMakeCurrent();
+
+    if (invalidate_api_state) {
+      InvalidateApiState(*skia_surface);
+    }
+    if (!ok) {
+      FML_LOG(ERROR) << "Could not make the surface current.";
+      return;
+    }
+
+    // Clear the current render target (most likely EGLSurface) at the
+    // end of this scope.
+    fml::ScopedCleanupClosure clear_current_surface([&]() {
+      auto [ok, invalidate_api_state] = render_target_->MaybeClearCurrent();
+      if (invalidate_api_state) {
+        InvalidateApiState(*skia_surface);
+      }
+      if (!ok) {
+        FML_LOG(ERROR) << "Could not clear the current surface.";
+      }
+    });
+
+    auto canvas = skia_surface->getCanvas();
+    if (!canvas) {
+      return;
+    }
+
+    DlSkCanvasAdapter dl_canvas(canvas);
+    bool clear_surface = true;
+    for (auto c : flutter_contents_) {
+      FML_DCHECK(render_target_->GetRenderTargetSize() ==
+                 c->GetRenderSurfaceSize());
+      c->Render(dl_canvas, clear_surface);
+      clear_surface = false;
+    }
+    dl_canvas.Flush();
+  }
+#endif  //  !SLIMPELLER
+
+#ifdef IMPELLER_SUPPORTS_RENDERING
+  void RenderFlutterContentsImpeller(bool frame_boundary) {
+    auto dl_builder = DisplayListBuilder();
+    bool clear_surface = true;
+    for (auto c : flutter_contents_) {
+      FML_DCHECK(render_target_->GetRenderTargetSize() ==
+                 c->GetRenderSurfaceSize());
+      c->Render(dl_builder, clear_surface);
+      clear_surface = false;
+    }
+    auto display_list = dl_builder.Build();
+
+    auto* impeller_target = render_target_->GetImpellerRenderTarget();
+    auto aiks_context = render_target_->GetAiksContext();
+    auto cull_rect =
+        impeller::Rect::MakeSize(impeller_target->GetRenderTargetSize());
+
+    impeller::RenderToTarget(aiks_context->GetContentContext(),     //
+                             *impeller_target,                      //
+                             display_list,                          //
+                             cull_rect,                             //
+                             /*reset_host_buffer=*/frame_boundary,  //
+                             /*is_onscreen=*/false                  //
+    );
+  }
+#endif  // IMPELLER_SUPPORTS_RENDERING
+
   std::vector<PlatformView> platform_views_;
   std::vector<EmbedderExternalView*> flutter_contents_;
   DlRegion flutter_contents_region_;
@@ -293,9 +402,9 @@ class LayerBuilder {
  public:
   using RenderTargetProvider =
       std::function<std::unique_ptr<EmbedderRenderTarget>(
-          const SkISize& frame_size)>;
+          const DlISize& frame_size)>;
 
-  explicit LayerBuilder(SkISize frame_size) : frame_size_(frame_size) {
+  explicit LayerBuilder(DlISize frame_size) : frame_size_(frame_size) {
     layers_.push_back(Layer());
   }
 
@@ -326,9 +435,20 @@ class LayerBuilder {
   /// Renders all layers with Flutter contents to their respective render
   /// targets.
   void Render() {
-    for (auto& layer : layers_) {
-      if (layer.has_flutter_contents()) {
-        layer.RenderFlutterContents();
+    // Find the last layer that has Flutter contents.  The frame boundary flag
+    // will be set for this layer.
+    auto last_flutter_layer_rev_iter =
+        std::find_if(layers_.rbegin(), layers_.rend(),
+                     [](const Layer& l) { return l.has_flutter_contents(); });
+    if (last_flutter_layer_rev_iter == layers_.rend()) {
+      return;
+    }
+    auto last_flutter_layer_iter = last_flutter_layer_rev_iter.base() - 1;
+
+    for (auto iter = layers_.begin(); iter != layers_.end(); iter++) {
+      bool frame_boundary = iter == last_flutter_layer_iter;
+      if (iter->has_flutter_contents()) {
+        iter->RenderFlutterContents(frame_boundary);
       }
     }
   }
@@ -414,7 +534,7 @@ class LayerBuilder {
   }
 
   std::vector<Layer> layers_;
-  SkISize frame_size_;
+  DlISize frame_size_;
 };
 
 };  // namespace
@@ -428,18 +548,17 @@ void EmbedderExternalViewEmbedder::SubmitFlutterView(
   // unrecognized.
   EmbedderRenderTargetCache& render_target_cache =
       render_target_caches_[flutter_view_id];
-  SkRect _rect = SkRect::MakeIWH(pending_frame_size_.width(),
-                                 pending_frame_size_.height());
-  pending_surface_transformation_.mapRect(&_rect);
+  DlRect _rect = DlRect::MakeSize(pending_frame_size_)
+                     .TransformAndClipBounds(pending_surface_transformation_);
 
-  LayerBuilder builder(SkISize::Make(_rect.width(), _rect.height()));
+  LayerBuilder builder(DlIRect::RoundOut(_rect).GetSize());
 
   for (auto view_id : composition_order_) {
     auto& view = pending_views_[view_id];
     builder.AddExternalView(view.get());
   }
 
-  builder.PrepareBackingStore([&](const SkISize& frame_size) {
+  builder.PrepareBackingStore([&](const DlISize& frame_size) {
     if (!avoid_backing_store_cache_) {
       std::unique_ptr<EmbedderRenderTarget> target =
           render_target_cache.GetRenderTarget(

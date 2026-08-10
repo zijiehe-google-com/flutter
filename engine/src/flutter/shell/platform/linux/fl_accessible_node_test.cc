@@ -3,15 +3,19 @@
 // found in the LICENSE file.
 
 // Included first as it collides with the X11 headers.
+#include "flutter/shell/platform/linux/testing/linux_test.h"
 #include "gtest/gtest.h"
 
 #include "flutter/shell/platform/linux/fl_accessible_node.h"
+#include "flutter/shell/platform/linux/testing/mock_gtk.h"
+
+class FlAccessibleNodeTest : public flutter::testing::LinuxTest {
+ protected:
+  ::testing::NiceMock<flutter::testing::MockGtk> mock_gtk;
+};
 
 // Checks can build a tree of nodes.
-TEST(FlAccessibleNodeTest, BuildTree) {
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
-
+TEST_F(FlAccessibleNodeTest, BuildTree) {
   int64_t view_id = 123;
   g_autoptr(FlAccessibleNode) root = fl_accessible_node_new(engine, view_id, 0);
   g_autoptr(FlAccessibleNode) child1 =
@@ -46,20 +50,14 @@ TEST(FlAccessibleNodeTest, BuildTree) {
 }
 
 // Checks node name is exposed to ATK.
-TEST(FlAccessibleNodeTest, SetName) {
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
-
+TEST_F(FlAccessibleNodeTest, SetName) {
   g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
   fl_accessible_node_set_name(node, "test");
   EXPECT_STREQ(atk_object_get_name(ATK_OBJECT(node)), "test");
 }
 
 // Checks node extents are exposed to ATK.
-TEST(FlAccessibleNodeTest, SetExtents) {
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
-
+TEST_F(FlAccessibleNodeTest, SetExtents) {
   g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
   fl_accessible_node_set_extents(node, 1, 2, 3, 4);
   gint x, y, width, height;
@@ -71,65 +69,277 @@ TEST(FlAccessibleNodeTest, SetExtents) {
   EXPECT_EQ(height, 4);
 }
 
-// Checks Flutter flags are mapped to appropriate ATK state.
-TEST(FlAccessibleNodeTest, SetFlags) {
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
-
+// Checks the Flutter focused flag are mapped to ATK flags.
+TEST_F(FlAccessibleNodeTest, FocusedFlags) {
   g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
-  fl_accessible_node_set_flags(
-      node, static_cast<FlutterSemanticsFlag>(kFlutterSemanticsFlagIsEnabled |
-                                              kFlutterSemanticsFlagIsFocusable |
-                                              kFlutterSemanticsFlagIsFocused));
 
-  AtkStateSet* state = atk_object_ref_state_set(ATK_OBJECT(node));
-  EXPECT_TRUE(atk_state_set_contains_state(state, ATK_STATE_ENABLED));
-  EXPECT_TRUE(atk_state_set_contains_state(state, ATK_STATE_SENSITIVE));
-  EXPECT_TRUE(atk_state_set_contains_state(state, ATK_STATE_FOCUSABLE));
-  EXPECT_TRUE(atk_state_set_contains_state(state, ATK_STATE_FOCUSED));
-  EXPECT_TRUE(!atk_state_set_contains_state(state, ATK_STATE_CHECKED));
-  g_object_unref(state);
+  FlutterSemanticsFlags flags1 = {};
+  flags1.is_focused = kFlutterTristateNone;
+  fl_accessible_node_set_flags(node, &flags1);
+  AtkStateSet* state1 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_FOCUSABLE));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_FOCUSED));
+  g_object_unref(state1);
+
+  FlutterSemanticsFlags flags2 = {};
+  flags2.is_focused = kFlutterTristateFalse;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_FOCUSABLE, TRUE));
+  fl_accessible_node_set_flags(node, &flags2);
+  AtkStateSet* state2 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state2, ATK_STATE_FOCUSABLE));
+  EXPECT_FALSE(atk_state_set_contains_state(state2, ATK_STATE_FOCUSED));
+  g_object_unref(state2);
+
+  FlutterSemanticsFlags flags3 = {};
+  flags3.is_focused = kFlutterTristateTrue;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_FOCUSED, TRUE));
+  fl_accessible_node_set_flags(node, &flags3);
+  AtkStateSet* state3 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state3, ATK_STATE_FOCUSABLE));
+  EXPECT_TRUE(atk_state_set_contains_state(state3, ATK_STATE_FOCUSED));
+  g_object_unref(state3);
+}
+
+// Checks the Flutter checked and toggled flags are mapped to ATK flags.
+TEST_F(FlAccessibleNodeTest, CheckedAndToggledFlags) {
+  g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
+
+  FlutterSemanticsFlags flags1 = {};
+  flags1.is_checked = kFlutterCheckStateNone;
+  flags1.is_toggled = kFlutterTristateNone;
+  fl_accessible_node_set_flags(node, &flags1);
+  AtkStateSet* state1 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_CHECKABLE));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_CHECKED));
+  g_object_unref(state1);
+
+  FlutterSemanticsFlags flags2 = {};
+  flags2.is_checked = kFlutterCheckStateFalse;
+  flags2.is_toggled = kFlutterTristateFalse;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_CHECKABLE, TRUE));
+  fl_accessible_node_set_flags(node, &flags2);
+  AtkStateSet* state2 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state2, ATK_STATE_CHECKABLE));
+  EXPECT_FALSE(atk_state_set_contains_state(state2, ATK_STATE_CHECKED));
+  g_object_unref(state2);
+
+  FlutterSemanticsFlags flags3 = {};
+  flags3.is_checked = kFlutterCheckStateTrue;
+  flags3.is_toggled = kFlutterTristateTrue;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_CHECKED, TRUE));
+  fl_accessible_node_set_flags(node, &flags3);
+  AtkStateSet* state3 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state3, ATK_STATE_CHECKABLE));
+  EXPECT_TRUE(atk_state_set_contains_state(state3, ATK_STATE_CHECKED));
+  g_object_unref(state3);
+
+  FlutterSemanticsFlags flags4 = {};
+  flags4.is_checked = kFlutterCheckStateTrue;
+  flags4.is_toggled = kFlutterTristateNone;
+  fl_accessible_node_set_flags(node, &flags4);
+  AtkStateSet* state4 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state4, ATK_STATE_CHECKABLE));
+  EXPECT_TRUE(atk_state_set_contains_state(state4, ATK_STATE_CHECKED));
+  g_object_unref(state4);
+
+  FlutterSemanticsFlags flags5 = {};
+  flags5.is_checked = kFlutterCheckStateNone;
+  flags5.is_toggled = kFlutterTristateTrue;
+  fl_accessible_node_set_flags(node, &flags5);
+  AtkStateSet* state5 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state5, ATK_STATE_CHECKABLE));
+  EXPECT_TRUE(atk_state_set_contains_state(state5, ATK_STATE_CHECKED));
+  g_object_unref(state5);
+}
+
+// Checks the Flutter selected flag is mapped to ATK flags.
+TEST_F(FlAccessibleNodeTest, SelectedFlags) {
+  g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
+
+  FlutterSemanticsFlags flags1 = {};
+  flags1.is_selected = kFlutterTristateNone;
+  fl_accessible_node_set_flags(node, &flags1);
+  AtkStateSet* state1 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_SELECTED));
+  g_object_unref(state1);
+
+  FlutterSemanticsFlags flags2 = {};
+  flags2.is_selected = kFlutterTristateFalse;
+  fl_accessible_node_set_flags(node, &flags2);
+  AtkStateSet* state2 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_FALSE(atk_state_set_contains_state(state2, ATK_STATE_SELECTED));
+  g_object_unref(state2);
+
+  FlutterSemanticsFlags flags3 = {};
+  flags3.is_selected = kFlutterTristateTrue;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_SELECTED, TRUE));
+  fl_accessible_node_set_flags(node, &flags3);
+  AtkStateSet* state3 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state3, ATK_STATE_SELECTED));
+  g_object_unref(state3);
+}
+
+// Checks the Flutter enabled flag is mapped to ATK flags.
+TEST_F(FlAccessibleNodeTest, EnabledFlags) {
+  g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
+
+  FlutterSemanticsFlags flags1 = {};
+  flags1.is_enabled = kFlutterTristateNone;
+  fl_accessible_node_set_flags(node, &flags1);
+  AtkStateSet* state1 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_SENSITIVE));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_ENABLED));
+  g_object_unref(state1);
+
+  FlutterSemanticsFlags flags2 = {};
+  flags2.is_enabled = kFlutterTristateFalse;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_SENSITIVE, TRUE));
+  fl_accessible_node_set_flags(node, &flags2);
+  AtkStateSet* state2 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state2, ATK_STATE_SENSITIVE));
+  EXPECT_FALSE(atk_state_set_contains_state(state2, ATK_STATE_ENABLED));
+  g_object_unref(state2);
+
+  FlutterSemanticsFlags flags3 = {};
+  flags3.is_enabled = kFlutterTristateTrue;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_ENABLED, TRUE));
+  fl_accessible_node_set_flags(node, &flags3);
+  AtkStateSet* state3 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state3, ATK_STATE_SENSITIVE));
+  EXPECT_TRUE(atk_state_set_contains_state(state3, ATK_STATE_ENABLED));
+  g_object_unref(state3);
+}
+
+// Checks the Flutter obscured flag is mapped to ATK flags.
+TEST_F(FlAccessibleNodeTest, ObscuredFlags) {
+  g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
+
+  FlutterSemanticsFlags flags1 = {};
+  flags1.is_obscured = true;
+  fl_accessible_node_set_flags(node, &flags1);
+  AtkStateSet* state1 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_SHOWING));
+  g_object_unref(state1);
+
+  FlutterSemanticsFlags flags2 = {};
+  flags2.is_obscured = false;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_SHOWING, TRUE));
+  fl_accessible_node_set_flags(node, &flags2);
+  AtkStateSet* state2 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state2, ATK_STATE_SHOWING));
+  g_object_unref(state2);
+}
+
+// Checks the Flutter hidden flag is mapped to ATK flags.
+TEST_F(FlAccessibleNodeTest, HiddenFlags) {
+  g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
+
+  FlutterSemanticsFlags flags1 = {};
+  flags1.is_hidden = true;
+  fl_accessible_node_set_flags(node, &flags1);
+  AtkStateSet* state1 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_VISIBLE));
+  g_object_unref(state1);
+
+  FlutterSemanticsFlags flags2 = {};
+  flags2.is_hidden = false;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_VISIBLE, TRUE));
+  fl_accessible_node_set_flags(node, &flags2);
+  AtkStateSet* state2 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state2, ATK_STATE_VISIBLE));
+  g_object_unref(state2);
+}
+
+// Checks the Flutter read only flag is mapped to ATK flags.
+TEST_F(FlAccessibleNodeTest, ReadOnlyFlags) {
+  g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
+
+  FlutterSemanticsFlags flags1 = {};
+  flags1.is_read_only = false;
+  fl_accessible_node_set_flags(node, &flags1);
+  AtkStateSet* state1 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_READ_ONLY));
+  g_object_unref(state1);
+
+  FlutterSemanticsFlags flags2 = {};
+  flags2.is_read_only = true;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_READ_ONLY, TRUE));
+  fl_accessible_node_set_flags(node, &flags2);
+  AtkStateSet* state2 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state2, ATK_STATE_READ_ONLY));
+  g_object_unref(state2);
+}
+
+// Checks the Flutter text field flag is mapped to ATK flags.
+TEST_F(FlAccessibleNodeTest, TextFieldFlags) {
+  g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
+
+  FlutterSemanticsFlags flags1 = {};
+  flags1.is_text_field = false;
+  fl_accessible_node_set_flags(node, &flags1);
+  AtkStateSet* state1 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_FALSE(atk_state_set_contains_state(state1, ATK_STATE_EDITABLE));
+  g_object_unref(state1);
+
+  FlutterSemanticsFlags flags2 = {};
+  flags2.is_text_field = true;
+  EXPECT_CALL(mock_gtk, atk_object_notify_state_change(
+                            ::testing::_, ATK_STATE_EDITABLE, TRUE));
+  fl_accessible_node_set_flags(node, &flags2);
+  AtkStateSet* state2 = atk_object_ref_state_set(ATK_OBJECT(node));
+  EXPECT_TRUE(atk_state_set_contains_state(state2, ATK_STATE_EDITABLE));
+  g_object_unref(state2);
 }
 
 // Checks Flutter flags are mapped to appropriate ATK roles.
-TEST(FlAccessibleNodeTest, GetRole) {
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
-
+TEST_F(FlAccessibleNodeTest, GetRole) {
   g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
 
-  fl_accessible_node_set_flags(
-      node, static_cast<FlutterSemanticsFlag>(kFlutterSemanticsFlagIsButton));
+  FlutterSemanticsFlags flags1 = {};
+  flags1.is_button = true;
+  fl_accessible_node_set_flags(node, &flags1);
   EXPECT_EQ(atk_object_get_role(ATK_OBJECT(node)), ATK_ROLE_PUSH_BUTTON);
 
-  fl_accessible_node_set_flags(node, static_cast<FlutterSemanticsFlag>(
-                                         kFlutterSemanticsFlagHasCheckedState));
+  FlutterSemanticsFlags flags2 = {};
+  flags2.is_checked = kFlutterCheckStateFalse;
+  fl_accessible_node_set_flags(node, &flags2);
   EXPECT_EQ(atk_object_get_role(ATK_OBJECT(node)), ATK_ROLE_CHECK_BOX);
 
-  fl_accessible_node_set_flags(
-      node, static_cast<FlutterSemanticsFlag>(
-                kFlutterSemanticsFlagHasCheckedState |
-                kFlutterSemanticsFlagIsInMutuallyExclusiveGroup));
+  FlutterSemanticsFlags flags3 = {};
+  flags3.is_checked = kFlutterCheckStateFalse;
+  flags3.is_in_mutually_exclusive_group = true;
+  fl_accessible_node_set_flags(node, &flags3);
   EXPECT_EQ(atk_object_get_role(ATK_OBJECT(node)), ATK_ROLE_RADIO_BUTTON);
 
-  fl_accessible_node_set_flags(node, static_cast<FlutterSemanticsFlag>(
-                                         kFlutterSemanticsFlagHasToggledState));
+  FlutterSemanticsFlags flags4 = {};
+  flags4.is_toggled = kFlutterTristateFalse;
+  fl_accessible_node_set_flags(node, &flags4);
   EXPECT_EQ(atk_object_get_role(ATK_OBJECT(node)), ATK_ROLE_TOGGLE_BUTTON);
 
-  fl_accessible_node_set_flags(node, kFlutterSemanticsFlagIsTextField);
+  FlutterSemanticsFlags flags5 = {};
+  flags5.is_text_field = true;
+  fl_accessible_node_set_flags(node, &flags5);
   EXPECT_EQ(atk_object_get_role(ATK_OBJECT(node)), ATK_ROLE_TEXT);
 
-  fl_accessible_node_set_flags(
-      node, static_cast<FlutterSemanticsFlag>(kFlutterSemanticsFlagIsTextField |
-                                              kFlutterSemanticsFlagIsObscured));
+  FlutterSemanticsFlags flags6 = {};
+  flags6.is_text_field = true;
+  flags6.is_obscured = true;
+  fl_accessible_node_set_flags(node, &flags6);
   EXPECT_EQ(atk_object_get_role(ATK_OBJECT(node)), ATK_ROLE_PASSWORD_TEXT);
 }
 
 // Checks Flutter actions are mapped to the appropriate ATK actions.
-TEST(FlAccessibleNodeTest, SetActions) {
-  g_autoptr(FlDartProject) project = fl_dart_project_new();
-  g_autoptr(FlEngine) engine = fl_engine_new(project);
-
+TEST_F(FlAccessibleNodeTest, SetActions) {
   g_autoptr(FlAccessibleNode) node = fl_accessible_node_new(engine, 123, 0);
   fl_accessible_node_set_actions(
       node, static_cast<FlutterSemanticsAction>(
@@ -138,4 +348,38 @@ TEST(FlAccessibleNodeTest, SetActions) {
   EXPECT_EQ(atk_action_get_n_actions(ATK_ACTION(node)), 2);
   EXPECT_STREQ(atk_action_get_name(ATK_ACTION(node), 0), "Tap");
   EXPECT_STREQ(atk_action_get_name(ATK_ACTION(node), 1), "LongPress");
+}
+
+// The AT-SPI bridge can keep nodes alive past engine teardown. Accessing a
+// node after its engine is destroyed must not dereference freed memory.
+// https://github.com/flutter/flutter/issues/188660
+TEST_F(FlAccessibleNodeTest, SurvivesEngineDestruction) {
+  g_autoptr(FlDartProject) project = fl_dart_project_new();
+  FlEngine* local_engine = fl_engine_new(project);
+  g_autoptr(FlAccessibleNode) node =
+      fl_accessible_node_new(local_engine, 123, 0);
+  fl_accessible_node_set_actions(node, kFlutterSemanticsActionTap);
+
+  // Destroy the engine while the node is still alive.
+  g_object_unref(local_engine);
+
+  // Performing an action no longer reaches the engine, but does not crash.
+  EXPECT_FALSE(atk_action_do_action(ATK_ACTION(node), 0));
+}
+
+// Accessing a node after its parent is destroyed must not dereference freed
+// memory.
+TEST_F(FlAccessibleNodeTest, SurvivesParentDestruction) {
+  FlAccessibleNode* root = fl_accessible_node_new(engine, 123, 0);
+  g_autoptr(FlAccessibleNode) child = fl_accessible_node_new(engine, 123, 1);
+  fl_accessible_node_set_parent(child, ATK_OBJECT(root), 0);
+
+  // Destroy the parent while the child is still alive.
+  g_object_unref(root);
+
+  // The child no longer reports a parent, but does not crash.
+  EXPECT_EQ(atk_object_get_parent(ATK_OBJECT(child)), nullptr);
+  gint x = 0, y = 0, width = 0, height = 0;
+  atk_component_get_extents(ATK_COMPONENT(child), &x, &y, &width, &height,
+                            ATK_XY_SCREEN);
 }

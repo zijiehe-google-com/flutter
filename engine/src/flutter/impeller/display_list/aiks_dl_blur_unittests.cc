@@ -13,6 +13,8 @@
 #include "flutter/display_list/effects/dl_color_source.h"
 #include "flutter/display_list/effects/dl_image_filter.h"
 #include "flutter/display_list/effects/dl_mask_filter.h"
+#include "flutter/display_list/effects/image_filters/dl_blur_image_filter.h"
+#include "flutter/display_list/geometry/dl_path_builder.h"
 #include "flutter/impeller/display_list/aiks_unittests.h"
 
 #include "gmock/gmock.h"
@@ -365,6 +367,48 @@ TEST_P(AiksTest, CanRenderBackdropBlurHugeSigma) {
   ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
 }
 
+TEST_P(AiksTest, CanRenderBoundedBlur) {
+  auto image = DlImageImpeller::Make(CreateTextureForFixture("kalimba.jpg"));
+
+  DisplayListBuilder builder;
+
+  DlPaint paint;
+  builder.DrawImage(image, DlPoint(0.0, 0.0), DlImageSampling::kNearestNeighbor,
+                    &paint);
+
+  DlPaint save_paint;
+  save_paint.setBlendMode(DlBlendMode::kSrcOver);
+  builder.Save();
+
+  // Subcase 1: The 1st branch of downsampling, where the coverage hint is
+  // non-null but was ignored during snapshotting.
+
+  builder.Scale(1.1, 1.2);
+  builder.Rotate(10);
+  DlRect rect1 = DlRect::MakeLTRB(70, 70, 313, 170);
+  builder.ClipRect(rect1);
+  auto backdrop_filter1 =
+      DlBlurImageFilter::Make(20, 20, DlTileMode::kDecal, /*bounds=*/rect1);
+  builder.SaveLayer(std::nullopt, &save_paint, backdrop_filter1.get());
+  builder.Restore();
+  builder.Restore();
+
+  // Subcase 2: The 2nd branch of downsampling, where the coverage hint is null
+  // or was already used during snapshotting.
+
+  builder.Scale(1.1, 1.2);
+  builder.Rotate(10);
+  DlRect rect2 = DlRect::MakeLTRB(55, 190, 298, 290);
+  builder.ClipRect(rect2);
+  auto backdrop_filter2 =
+      DlBlurImageFilter::Make(20, 20, DlTileMode::kDecal, /*bounds=*/rect2);
+  builder.SaveLayer(std::nullopt, &save_paint, backdrop_filter2.get());
+  builder.Restore();
+  builder.Restore();
+
+  ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
+}
+
 TEST_P(AiksTest, CanRenderClippedBlur) {
   DisplayListBuilder builder;
   builder.ClipRect(DlRect::MakeXYWH(100, 150, 400, 400));
@@ -374,6 +418,56 @@ TEST_P(AiksTest, CanRenderClippedBlur) {
   paint.setImageFilter(DlImageFilter::MakeBlur(20, 20, DlTileMode::kDecal));
   builder.DrawCircle(DlPoint(400, 400), 200, paint);
   builder.Restore();
+
+  ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
+}
+
+TEST_P(AiksTest, ComposePaintBlurOuter) {
+  DisplayListBuilder builder;
+
+  DlPaint background;
+  background.setColor(DlColor(1.0, 0.1, 0.1, 0.1, DlColorSpace::kSRGB));
+  builder.DrawPaint(background);
+
+  DlPaint paint;
+  paint.setColor(DlColor::kGreen());
+  float matrix[] = {
+      0, 1, 0, 0, 0,  //
+      1, 0, 0, 0, 0,  //
+      0, 0, 1, 0, 0,  //
+      0, 0, 0, 1, 0   //
+  };
+  std::shared_ptr<DlImageFilter> color_filter =
+      DlImageFilter::MakeColorFilter(DlColorFilter::MakeMatrix(matrix));
+  std::shared_ptr<DlImageFilter> blur =
+      DlImageFilter::MakeBlur(20, 20, DlTileMode::kDecal);
+  paint.setImageFilter(DlImageFilter::MakeCompose(blur, color_filter));
+  builder.DrawCircle(DlPoint(400, 400), 200, paint);
+
+  ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
+}
+
+TEST_P(AiksTest, ComposePaintBlurInner) {
+  DisplayListBuilder builder;
+
+  DlPaint background;
+  background.setColor(DlColor(1.0, 0.1, 0.1, 0.1, DlColorSpace::kSRGB));
+  builder.DrawPaint(background);
+
+  DlPaint paint;
+  paint.setColor(DlColor::kGreen());
+  float matrix[] = {
+      0, 1, 0, 0, 0,  //
+      1, 0, 0, 0, 0,  //
+      0, 0, 1, 0, 0,  //
+      0, 0, 0, 1, 0   //
+  };
+  std::shared_ptr<DlImageFilter> color_filter =
+      DlImageFilter::MakeColorFilter(DlColorFilter::MakeMatrix(matrix));
+  std::shared_ptr<DlImageFilter> blur =
+      DlImageFilter::MakeBlur(20, 20, DlTileMode::kDecal);
+  paint.setImageFilter(DlImageFilter::MakeCompose(color_filter, blur));
+  builder.DrawCircle(DlPoint(400, 400), 200, paint);
 
   ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
 }
@@ -437,8 +531,8 @@ TEST_P(AiksTest, ClearBlendWithBlur) {
 TEST_P(AiksTest, BlurHasNoEdge) {
   Scalar sigma = 47.6;
   auto callback = [&]() -> sk_sp<DisplayList> {
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Sigma", &sigma, 0, 50);
       ImGui::End();
     }
@@ -471,6 +565,12 @@ TEST_P(AiksTest, MaskBlurWithZeroSigmaIsSkipped) {
 }
 
 TEST_P(AiksTest, MaskBlurOnZeroDimensionIsSkippedWideGamut) {
+  // Must be called before any methods that use the context to ensure that
+  // this test is always run with wide gamut support.
+  if (!EnsureContextSupportsWideGamut()) {
+    GTEST_SKIP() << "This backend doesn't yet support wide gamut.";
+  }
+
   // Making sure this test is run on a wide gamut enabled backend
   EXPECT_EQ(GetContext()->GetCapabilities()->GetDefaultColorFormat(),
             PixelFormat::kB10G10R10A10XR);
@@ -566,7 +666,7 @@ static sk_sp<DisplayList> MaskBlurVariantTest(
     path_builder.LineTo(DlPoint(x + 60, y + 60));
     path_builder.Close();
 
-    builder.DrawPath(DlPath(path_builder), paint);
+    builder.DrawPath(path_builder.TakePath(), paint);
   }
 
   y += y_spacing;
@@ -623,8 +723,7 @@ static const std::map<std::string, MaskBlurTestConfig> kPaintVariations = {
     {"OuterOpaqueWithBlurImageFilter",
      {.style = DlBlurStyle::kOuter,
       .sigma = 8.0f,
-      .image_filter = DlImageFilter::MakeBlur(3, 3, DlTileMode::kClamp)}},
-};
+      .image_filter = DlImageFilter::MakeBlur(3, 3, DlTileMode::kClamp)}}};
 
 #define MASK_BLUR_VARIANT_TEST(config)                              \
   TEST_P(AiksTest, MaskBlurVariantTest##config) {                   \
@@ -662,7 +761,7 @@ TEST_P(AiksTest, GaussianBlurStyleInner) {
   path_builder.LineTo(DlPoint(100, 400));
   path_builder.Close();
 
-  builder.DrawPath(DlPath(path_builder), paint);
+  builder.DrawPath(path_builder.TakePath(), paint);
 
   // Draw another thing to make sure the clip area is reset.
   DlPaint red;
@@ -689,7 +788,7 @@ TEST_P(AiksTest, GaussianBlurStyleOuter) {
   path_builder.LineTo(DlPoint(100, 400));
   path_builder.Close();
 
-  builder.DrawPath(DlPath(path_builder), paint);
+  builder.DrawPath(path_builder.TakePath(), paint);
 
   // Draw another thing to make sure the clip area is reset.
   DlPaint red;
@@ -716,7 +815,7 @@ TEST_P(AiksTest, GaussianBlurStyleSolid) {
   path_builder.LineTo(DlPoint(100, 400));
   path_builder.Close();
 
-  builder.DrawPath(DlPath(path_builder), paint);
+  builder.DrawPath(path_builder.TakePath(), paint);
 
   // Draw another thing to make sure the clip area is reset.
   DlPaint red;
@@ -729,8 +828,8 @@ TEST_P(AiksTest, GaussianBlurStyleSolid) {
 TEST_P(AiksTest, MaskBlurTexture) {
   Scalar sigma = 30;
   auto callback = [&]() -> sk_sp<DisplayList> {
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Sigma", &sigma, 0, 500);
       ImGui::End();
     }
@@ -758,8 +857,8 @@ TEST_P(AiksTest, MaskBlurTexture) {
 TEST_P(AiksTest, MaskBlurDoesntStretchContents) {
   Scalar sigma = 70;
   auto callback = [&]() -> sk_sp<DisplayList> {
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Sigma", &sigma, 0, 500);
       ImGui::End();
     }
@@ -860,8 +959,8 @@ TEST_P(AiksTest, GaussianBlurAnimatedBackdrop) {
   Scalar freq = 0.1;
   Scalar amp = 50.0;
   auto callback = [&]() -> sk_sp<DisplayList> {
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Sigma", &sigma, 0, 200);
       ImGui::SliderFloat("Frequency", &freq, 0.01, 2.0);
       ImGui::SliderFloat("Amplitude", &amp, 1, 100);
@@ -923,7 +1022,7 @@ TEST_P(AiksTest, GaussianBlurStyleInnerGradient) {
   path_builder.LineTo(DlPoint(300, 400));
   path_builder.LineTo(DlPoint(100, 400));
   path_builder.Close();
-  builder.DrawPath(DlPath(path_builder), paint);
+  builder.DrawPath(path_builder.TakePath(), paint);
 
   // Draw another thing to make sure the clip area is reset.
   DlPaint red;
@@ -960,7 +1059,7 @@ TEST_P(AiksTest, GaussianBlurStyleSolidGradient) {
   path_builder.LineTo(DlPoint(300, 400));
   path_builder.LineTo(DlPoint(100, 400));
   path_builder.Close();
-  builder.DrawPath(DlPath(path_builder), paint);
+  builder.DrawPath(path_builder.TakePath(), paint);
 
   // Draw another thing to make sure the clip area is reset.
   DlPaint red;
@@ -996,7 +1095,7 @@ TEST_P(AiksTest, GaussianBlurStyleOuterGradient) {
   path_builder.LineTo(DlPoint(300, 400));
   path_builder.LineTo(DlPoint(100, 400));
   path_builder.Close();
-  builder.DrawPath(DlPath(path_builder), paint);
+  builder.DrawPath(path_builder.TakePath(), paint);
 
   // Draw another thing to make sure the clip area is reset.
   DlPaint red;
@@ -1019,8 +1118,7 @@ TEST_P(AiksTest, GaussianBlurScaledAndClipped) {
   Vector2 center = Vector2(1024, 768) / 2;
   builder.Scale(GetContentScale().x, GetContentScale().y);
 
-  auto rect =
-      Rect::MakeLTRB(center.x, center.y, center.x, center.y).Expand(clip_size);
+  auto rect = Rect::MakeEllipseBounds(center, clip_size);
   builder.ClipRect(DlRect::MakeLTRB(rect.GetLeft(), rect.GetTop(),
                                     rect.GetRight(), rect.GetBottom()));
   builder.Translate(center.x, center.y);
@@ -1050,8 +1148,8 @@ TEST_P(AiksTest, GaussianBlurRotatedAndClippedInteractive) {
     static float scale = 0.6;
     static int selected_tile_mode = 3;
 
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Rotation (degrees)", &rotation, -180, 180);
       ImGui::SliderFloat("Scale", &scale, 0, 2.0);
       ImGui::Combo("Tile mode", &selected_tile_mode, tile_mode_names,
@@ -1130,8 +1228,7 @@ TEST_P(AiksTest, GaussianBlurRotatedAndClipped) {
   Vector2 center = Vector2(1024, 768) / 2;
   builder.Scale(GetContentScale().x, GetContentScale().y);
 
-  auto clip_bounds =
-      Rect::MakeLTRB(center.x, center.y, center.x, center.y).Expand(clip_size);
+  auto clip_bounds = Rect::MakeEllipseBounds(center, clip_size);
   builder.ClipRect(DlRect::MakeLTRB(clip_bounds.GetLeft(), clip_bounds.GetTop(),
                                     clip_bounds.GetRight(),
                                     clip_bounds.GetBottom()));
@@ -1162,8 +1259,8 @@ TEST_P(AiksTest, GaussianBlurRotatedNonUniform) {
     static float scale = 0.6;
     static int selected_tile_mode = 3;
 
-    if (AiksTest::ImGuiBegin("Controls", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (IsPlaygroundEnabled()) {
+      ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::SliderFloat("Rotation (degrees)", &rotation, -180, 180);
       ImGui::SliderFloat("Scale", &scale, 0, 2.0);
       ImGui::Combo("Tile mode", &selected_tile_mode, tile_mode_names,
@@ -1185,7 +1282,7 @@ TEST_P(AiksTest, GaussianBlurRotatedNonUniform) {
     builder.Rotate(rotation);
 
     DlRoundRect rrect =
-        DlRoundRect::MakeRectXY(DlRect::MakeXYWH(-100, -100, 200, 200), 10, 10);
+        DlRoundRect::MakeRectXY(DlRect::MakeCircleBounds({0, 0}, 100), 10, 10);
     builder.DrawRoundRect(rrect, paint);
     return builder.Build();
   };
@@ -1271,7 +1368,7 @@ TEST_P(AiksTest, GaussianBlurSolidColorTinyMipMap) {
     auto blur_filter = DlImageFilter::MakeBlur(0.1, 0.1, DlTileMode::kClamp);
     paint.setImageFilter(blur_filter);
 
-    builder.DrawPath(DlPath(path_builder), paint);
+    builder.DrawPath(path_builder.TakePath(), paint);
 
     auto image = DisplayListToTexture(builder.Build(), {1024, 768}, renderer);
     EXPECT_TRUE(image) << " length " << i;
@@ -1359,6 +1456,78 @@ TEST_P(AiksTest, BlurGradientWithOpacity) {
   paint.setMaskFilter(DlBlurMaskFilter::Make(DlBlurStyle::kNormal, 1));
   builder.DrawRect(DlRect::MakeXYWH(100, 100, 200, 200), paint);
 
+  builder.Restore();
+
+  ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));
+}
+
+// The artifacts this test attempts to reproduce don't reproduce on playgrounds.
+// The test is animated as an attempt to catch any ghosting that may happen
+// when DontCare is used instead of Clear.
+// https://github.com/flutter/flutter/issues/171772
+TEST_P(AiksTest, CanRenderNestedBackdropBlur) {
+  int64_t count = 0;
+  auto callback = [&]() -> sk_sp<DisplayList> {
+    DisplayListBuilder builder;
+
+    Scalar freq = 1.0;
+    Scalar amp = 50.0;
+    Scalar offset = amp * sin(freq * 2.0 * M_PI * count / 60.0);
+
+    // Draw some background content to be blurred.
+    DlPaint paint;
+    paint.setColor(DlColor::kCornflowerBlue());
+    builder.DrawCircle(DlPoint(100 + offset, 100), 50, paint);
+    paint.setColor(DlColor::kGreenYellow());
+    builder.DrawCircle(DlPoint(300, 200 + offset), 100, paint);
+    paint.setColor(DlColor::kDarkMagenta());
+    builder.DrawCircle(DlPoint(140, 170), 75, paint);
+    paint.setColor(DlColor::kOrangeRed());
+    builder.DrawCircle(DlPoint(180 + offset, 120 + offset), 100, paint);
+
+    // This is the first backdrop blur, simulating the navigation transition.
+    auto backdrop_filter1 = DlImageFilter::MakeBlur(15, 15, DlTileMode::kClamp);
+    builder.SaveLayer(std::nullopt, nullptr, backdrop_filter1.get());
+
+    // Draw the semi-transparent container from the second screen.
+    DlPaint transparent_paint;
+    transparent_paint.setColor(DlColor::kWhite().withAlpha(0.1 * 255));
+    builder.DrawPaint(transparent_paint);
+
+    {
+      // This is the second, nested backdrop blur.
+      auto backdrop_filter2 =
+          DlImageFilter::MakeBlur(10, 10, DlTileMode::kClamp);
+      builder.Save();
+      builder.ClipRect(DlRect::MakeXYWH(150, 150, 300, 300));
+      builder.SaveLayer(std::nullopt, nullptr, backdrop_filter2.get());
+      builder.Restore();  // Restore from SaveLayer
+      builder.Restore();  // Restore from ClipRect
+    }
+
+    builder.Restore();  // Restore from the first SaveLayer
+
+    count++;
+    return builder.Build();
+  };
+  ASSERT_TRUE(OpenPlaygroundHere(callback));
+}
+
+TEST_P(AiksTest, GaussianBlurFlipped) {
+  DisplayListBuilder builder;
+  builder.Scale(GetContentScale().x, GetContentScale().y);
+
+  builder.DrawRect(DlRect::MakeXYWH(0, 0, 350, 350),
+                   DlPaint().setColor(DlColor::kWhite()));
+
+  builder.Save();
+  builder.Scale(-1, 1);
+  DlPaint paint;
+  paint.setImageFilter(DlBlurImageFilter::Make(10, 10, DlTileMode::kDecal));
+  builder.SaveLayer(DlRect::MakeLTRB(-150, 100, 150, 200), &paint);
+  builder.DrawRect(DlRect::MakeLTRB(-150, 0, 150, 300),
+                   DlPaint().setColor(DlColor::kRed()));
+  builder.Restore();
   builder.Restore();
 
   ASSERT_TRUE(OpenPlaygroundHere(builder.Build()));

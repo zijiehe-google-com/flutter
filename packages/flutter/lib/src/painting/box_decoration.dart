@@ -225,7 +225,7 @@ class BoxDecoration extends Decoration {
       case BoxShape.circle:
         final Offset center = rect.center;
         final double radius = rect.shortestSide / 2.0;
-        final Rect square = Rect.fromCircle(center: center, radius: radius);
+        final square = Rect.fromCircle(center: center, radius: radius);
         return Path()..addOval(square);
       case BoxShape.rectangle:
         if (borderRadius != null) {
@@ -384,8 +384,9 @@ class BoxDecoration extends Decoration {
       case BoxShape.circle:
         // Circles are inscribed into our smallest dimension.
         final Offset center = size.center(Offset.zero);
-        final double distance = (position - center).distance;
-        return distance <= math.min(size.width, size.height) / 2.0;
+        final double radius = math.min(size.width, size.height) / 2.0;
+        // Comparing squared distances avoids computing sqrt(dx * dx + dy * dy).
+        return (position - center).distanceSquared <= radius * radius;
     }
   }
 
@@ -409,7 +410,7 @@ class _BoxDecorationPainter extends BoxPainter {
 
     if (_cachedBackgroundPaint == null ||
         (_decoration.gradient != null && _rectForCachedBackgroundPaint != rect)) {
-      final Paint paint = Paint();
+      final paint = Paint();
       if (_decoration.backgroundBlendMode != null) {
         paint.blendMode = _decoration.backgroundBlendMode!;
       }
@@ -491,7 +492,7 @@ class _BoxDecorationPainter extends BoxPainter {
     }
 
     if (_decoration.border is Border) {
-      final Border border = _decoration.border! as Border;
+      final border = _decoration.border! as Border;
 
       final EdgeInsets insets =
           EdgeInsets.fromLTRB(
@@ -509,7 +510,7 @@ class _BoxDecorationPainter extends BoxPainter {
         rect.bottom - insets.bottom,
       );
     } else if (_decoration.border is BorderDirectional && textDirection != null) {
-      final BorderDirectional border = _decoration.border! as BorderDirectional;
+      final border = _decoration.border! as BorderDirectional;
       final BorderSide leftSide = textDirection == TextDirection.rtl ? border.end : border.start;
       final BorderSide rightSide = textDirection == TextDirection.rtl ? border.start : border.end;
 
@@ -547,14 +548,14 @@ class _BoxDecorationPainter extends BoxPainter {
         );
         final Offset center = rect.center;
         final double radius = rect.shortestSide / 2.0;
-        final Rect square = Rect.fromCircle(center: center, radius: radius);
+        final square = Rect.fromCircle(center: center, radius: radius);
         clipPath = Path()..addOval(square);
       case BoxShape.rectangle:
         if (_decoration.borderRadius != null) {
-          clipPath =
-              Path()..addRRect(
-                _decoration.borderRadius!.resolve(configuration.textDirection).toRRect(rect),
-              );
+          clipPath = Path()
+            ..addRRect(
+              _decoration.borderRadius!.resolve(configuration.textDirection).toRRect(rect),
+            );
         }
     }
     _imagePainter!.paint(canvas, rect, clipPath, configuration);

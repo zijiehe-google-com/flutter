@@ -16,6 +16,7 @@ import 'package:flutter_tools/src/build_info.dart';
 import 'package:flutter_tools/src/build_system/build_system.dart';
 import 'package:flutter_tools/src/bundle.dart' hide defaultManifestPath;
 import 'package:flutter_tools/src/bundle_builder.dart';
+import 'package:flutter_tools/src/compile.dart';
 import 'package:flutter_tools/src/devfs.dart';
 import 'package:flutter_tools/src/device.dart';
 import 'package:flutter_tools/src/flutter_manifest.dart';
@@ -67,14 +68,13 @@ void main() {
   testWithoutContext(
     'writeBundle applies transformations to any assets that have them defined',
     () async {
-      final MemoryFileSystem fileSystem = MemoryFileSystem.test();
-      final File asset =
-          fileSystem.file('my-asset.txt')
-            ..createSync()
-            ..writeAsBytesSync(<int>[1, 2, 3]);
-      final Artifacts artifacts = Artifacts.test();
+      final fileSystem = MemoryFileSystem.test();
+      final File asset = fileSystem.file('my-asset.txt')
+        ..createSync()
+        ..writeAsBytesSync(<int>[1, 2, 3]);
+      final artifacts = Artifacts.test();
 
-      final FakeProcessManager processManager = FakeProcessManager.list(<FakeCommand>[
+      final processManager = FakeProcessManager.list(<FakeCommand>[
         FakeCommand(
           command: <Pattern>[
             artifacts.getArtifactPath(Artifact.engineDartBinary),
@@ -84,10 +84,11 @@ void main() {
             '--output=/.tmp_rand0/rand0/my-asset.txt-transformOutput1.txt',
           ],
           onRun: (List<String> command) {
-            final ArgResults argParseResults = (ArgParser()
-                  ..addOption('input', mandatory: true)
-                  ..addOption('output', mandatory: true))
-                .parse(command);
+            final ArgResults argParseResults =
+                (ArgParser()
+                      ..addOption('input', mandatory: true)
+                      ..addOption('output', mandatory: true))
+                    .parse(command);
 
             final File inputFile = fileSystem.file(argParseResults['input']);
             final File outputFile = fileSystem.file(argParseResults['output']);
@@ -102,15 +103,14 @@ void main() {
         ),
       ]);
 
-      final FakeAssetBundle bundle =
-          FakeAssetBundle()
-            ..entries['my-asset.txt'] = AssetBundleEntry(
-              DevFSFileContent(asset),
-              kind: AssetKind.regular,
-              transformers: const <AssetTransformerEntry>[
-                AssetTransformerEntry(package: 'increment', args: <String>[]),
-              ],
-            );
+      final bundle = FakeAssetBundle()
+        ..entries['my-asset.txt'] = AssetBundleEntry(
+          DevFSFileContent(asset),
+          kind: AssetKind.regular,
+          transformers: const <AssetTransformerEntry>[
+            AssetTransformerEntry(package: 'increment', args: <String>[]),
+          ],
+        );
 
       final Directory bundleDir = fileSystem.directory(
         getAssetBuildDirectory(Config.test(), fileSystem),
@@ -162,8 +162,8 @@ void main() {
     () async {
       final FlutterProject project = FlutterProject.fromDirectoryTest(globals.fs.currentDirectory);
       final String mainPath = globals.fs.path.join('lib', 'main.dart');
-      const String assetDirPath = 'example';
-      const String depfilePath = 'example.d';
+      const assetDirPath = 'example';
+      const depfilePath = 'example.d';
       Environment? env;
       final BuildSystem buildSystem = TestBuildSystem.all(BuildResult(success: true), (
         Target target,
@@ -220,7 +220,7 @@ void main() {
 
   testWithoutContext('--enable-experiment is removed from getDefaultCachedKernelPath hash', () {
     final FileSystem fileSystem = MemoryFileSystem.test();
-    final Config config = Config.test();
+    final config = Config.test();
 
     expect(
       getDefaultCachedKernelPath(
@@ -267,10 +267,42 @@ void main() {
     );
   });
 
+  testWithoutContext('TargetModel isolates getDefaultCachedKernelPath hash', () {
+    final FileSystem fileSystem = MemoryFileSystem.test();
+    final config = Config.test();
+
+    final String pathWithFlutter = getDefaultCachedKernelPath(
+      trackWidgetCreation: true,
+      dartDefines: <String>[],
+      fileSystem: fileSystem,
+      config: config,
+      targetModel: TargetModel.flutter,
+    );
+
+    final String pathWithDartdevc = getDefaultCachedKernelPath(
+      trackWidgetCreation: true,
+      dartDefines: <String>[],
+      fileSystem: fileSystem,
+      config: config,
+      targetModel: TargetModel.dartdevc,
+    );
+
+    final String pathWithoutTarget = getDefaultCachedKernelPath(
+      trackWidgetCreation: true,
+      dartDefines: <String>[],
+      fileSystem: fileSystem,
+      config: config,
+    );
+
+    expect(pathWithFlutter, isNot(pathWithDartdevc));
+    expect(pathWithFlutter, isNot(pathWithoutTarget));
+    expect(pathWithDartdevc, isNot(pathWithoutTarget));
+  });
+
   testUsingContext(
     'Release bundle includes native assets',
     () async {
-      final List<String> dependencies = <String>[];
+      final dependencies = <String>[];
       final BuildSystem buildSystem = TestBuildSystem.all(BuildResult(success: true), (
         Target target,
         Environment environment,
@@ -299,5 +331,5 @@ void main() {
 
 class FakeAssetBundle extends Fake implements AssetBundle {
   @override
-  final Map<String, AssetBundleEntry> entries = <String, AssetBundleEntry>{};
+  final entries = <String, AssetBundleEntry>{};
 }

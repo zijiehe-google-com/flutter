@@ -348,19 +348,6 @@ bool RuntimeController::NotifyIdle(fml::TimeDelta deadline) {
   return true;
 }
 
-bool RuntimeController::NotifyDestroyed() {
-  std::shared_ptr<DartIsolate> root_isolate = root_isolate_.lock();
-  if (!root_isolate) {
-    return false;
-  }
-
-  tonic::DartState::Scope scope(root_isolate);
-
-  Dart_NotifyDestroyed();
-
-  return true;
-}
-
 bool RuntimeController::DispatchPlatformMessage(
     std::unique_ptr<PlatformMessage> message) {
   if (auto* platform_configuration = GetPlatformConfigurationIfAvailable()) {
@@ -385,6 +372,15 @@ bool RuntimeController::DispatchPointerDataPacket(
   }
 
   return false;
+}
+
+HitTestResponse RuntimeController::HitTest(int64_t view_id,
+                                           const flutter::PointData offset) {
+  if (auto* platform_configuration = GetPlatformConfigurationIfAvailable()) {
+    TRACE_EVENT0("flutter", "RuntimeController::HitTest");
+    return platform_configuration->HitTest(view_id, offset);
+  }
+  return {.has_platform_view = false};
 }
 
 bool RuntimeController::DispatchSemanticsAction(int64_t view_id,
@@ -454,10 +450,17 @@ void RuntimeController::CheckIfAllViewsRendered() {
 // |PlatformConfigurationClient|
 void RuntimeController::UpdateSemantics(int64_t view_id,
                                         SemanticsUpdate* update) {
-  if (platform_data_.semantics_enabled) {
-    client_.UpdateSemantics(view_id, update->takeNodes(),
-                            update->takeActions());
-  }
+  client_.UpdateSemantics(view_id, update->takeNodes(), update->takeActions());
+}
+
+// |PlatformConfigurationClient|
+void RuntimeController::SetApplicationLocale(std::string locale) {
+  client_.SetApplicationLocale(std::move(locale));
+}
+
+// |PlatformConfigurationClient|
+void RuntimeController::SetSemanticsTreeEnabled(bool enabled) {
+  client_.SetSemanticsTreeEnabled(enabled);
 }
 
 // |PlatformConfigurationClient|

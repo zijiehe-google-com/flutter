@@ -5,9 +5,12 @@
 import 'project.dart';
 
 class BasicProject extends Project {
+  BasicProject({super.name});
+
   @override
-  final String pubspec = '''
-  name: test
+  String get pubspec =>
+      '''
+  name: $name
   environment:
     sdk: ^3.7.0-0
 
@@ -17,7 +20,7 @@ class BasicProject extends Project {
   ''';
 
   @override
-  final String main = r'''
+  final main = r'''
   import 'dart:async';
 
   import 'package:flutter/material.dart';
@@ -58,7 +61,7 @@ class BasicProject extends Project {
 /// where Hot Restart could become stuck on exceptions and never complete.
 class BasicProjectThatThrows extends Project {
   @override
-  final String pubspec = '''
+  final pubspec = '''
   name: test
   environment:
     sdk: ^3.7.0-0
@@ -69,7 +72,7 @@ class BasicProjectThatThrows extends Project {
   ''';
 
   @override
-  final String main = r'''
+  final main = r'''
   import 'package:flutter/material.dart';
 
   void a() {
@@ -115,7 +118,7 @@ class BasicProjectThatThrows extends Project {
 
 class BasicProjectWithTimelineTraces extends Project {
   @override
-  final String pubspec = '''
+  final pubspec = '''
   name: test
   environment:
     sdk: ^3.7.0-0
@@ -126,7 +129,7 @@ class BasicProjectWithTimelineTraces extends Project {
   ''';
 
   @override
-  final String main = r'''
+  final main = r'''
   import 'dart:async';
   import 'dart:developer';
 
@@ -159,12 +162,12 @@ class BasicProjectWithTimelineTraces extends Project {
 
 class BasicProjectWithFlutterGen extends Project {
   @override
-  final String generatedFile = '''
+  final generatedFile = '''
     String x = "a";
   ''';
 
   @override
-  final String pubspec = '''
+  final pubspec = '''
   name: test
   environment:
     sdk: ^3.7.0-0
@@ -178,7 +181,7 @@ class BasicProjectWithFlutterGen extends Project {
   ''';
 
   @override
-  final String main = r'''
+  final main = r'''
   import 'dart:async';
   import 'package:flutter_gen/flutter_gen.dart';
 
@@ -188,7 +191,7 @@ class BasicProjectWithFlutterGen extends Project {
 
 class BasicProjectWithUnaryMain extends Project {
   @override
-  final String pubspec = '''
+  final pubspec = '''
   name: test
   environment:
     sdk: ^3.7.0-0
@@ -198,7 +201,7 @@ class BasicProjectWithUnaryMain extends Project {
   ''';
 
   @override
-  final String main = r'''
+  final main = r'''
   import 'dart:async';
   import 'package:flutter/material.dart';
   Future<void> main(List<String> args) async {

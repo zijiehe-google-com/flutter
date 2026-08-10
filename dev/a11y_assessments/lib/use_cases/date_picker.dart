@@ -7,11 +7,16 @@ import '../utils.dart';
 import 'use_cases.dart';
 
 class DatePickerUseCase extends UseCase {
+  DatePickerUseCase();
+
   @override
   String get name => 'DatePicker';
 
   @override
   String get route => '/date-picker';
+
+  @override
+  List<Tag> get tags => <Tag>[Tag.batch1, Tag.core];
 
   @override
   Widget build(BuildContext context) => const _MainWidget();
@@ -30,20 +35,16 @@ class _MainWidgetState extends State<_MainWidget> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Semantics(headingLevel: 1, child: Text('$pageTitle Demo')),
-      ),
+      appBar: AppBar(title: Semantics(headingLevel: 1, child: Text('$pageTitle Demo'))),
       body: Center(
         child: TextButton(
-          onPressed:
-              () => showDatePicker(
-                context: context,
-                initialEntryMode: DatePickerEntryMode.calendarOnly,
-                initialDate: DateTime.now(),
-                firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                lastDate: DateTime.now().add(const Duration(days: 365)),
-              ),
+          onPressed: () => showDatePicker(
+            context: context,
+            initialEntryMode: DatePickerEntryMode.calendarOnly,
+            initialDate: DateTime.now(),
+            firstDate: DateTime.now().subtract(const Duration(days: 365)),
+            lastDate: DateTime.now().add(const Duration(days: 365)),
+          ),
           child: const Text('Show Date Picker'),
         ),
       ),

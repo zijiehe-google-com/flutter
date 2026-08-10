@@ -34,7 +34,9 @@ class ReusableFragmentShader : public Shader {
                             Dart_Handle float_count,
                             Dart_Handle sampler_count);
 
-  void SetImageSampler(Dart_Handle index, Dart_Handle image);
+  void SetImageSampler(Dart_Handle index,
+                       Dart_Handle image,
+                       int filterQualityIndex);
 
   bool ValidateSamplers();
 
@@ -45,7 +47,8 @@ class ReusableFragmentShader : public Shader {
   // |Shader|
   std::shared_ptr<DlColorSource> shader(DlImageSampling) override;
 
-  std::shared_ptr<DlImageFilter> as_image_filter() const;
+  std::shared_ptr<DlImageFilter> as_image_filter(
+      DlImageSampling input_sampling) const;
 
  private:
   ReusableFragmentShader(fml::RefPtr<FragmentProgram> program,

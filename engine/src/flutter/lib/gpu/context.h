@@ -30,7 +30,9 @@ class Context : public RefCountedDartWrappable<Context> {
   explicit Context(std::shared_ptr<impeller::Context> context);
   ~Context() override;
 
-  std::shared_ptr<impeller::Context> GetContext();
+  impeller::Context& GetContext();
+
+  std::shared_ptr<impeller::Context>& GetContextShared();
 
  private:
   /// An Impeller context that takes precedent over the IO state context when
@@ -79,6 +81,31 @@ extern int InternalFlutterGpu_Context_GetMinimumUniformByteAlignment(
 FLUTTER_GPU_EXPORT
 extern bool InternalFlutterGpu_Context_GetSupportsOffscreenMSAA(
     flutter::gpu::Context* wrapper);
+
+FLUTTER_GPU_EXPORT
+extern bool InternalFlutterGpu_Context_GetSupportsFramebufferRenderMipmap(
+    flutter::gpu::Context* wrapper);
+
+FLUTTER_GPU_EXPORT
+extern bool InternalFlutterGpu_Context_GetSupportsManuallyMippedTextures(
+    flutter::gpu::Context* wrapper);
+
+FLUTTER_GPU_EXPORT
+extern int InternalFlutterGpu_Context_GetMaxSamplerAnisotropy(
+    flutter::gpu::Context* wrapper);
+
+FLUTTER_GPU_EXPORT
+extern bool InternalFlutterGpu_Context_SupportsTextureCompression(
+    flutter::gpu::Context* wrapper,
+    int family);
+
+FLUTTER_GPU_EXPORT
+extern bool InternalFlutterGpu_Context_SupportsTextureFormat(
+    flutter::gpu::Context* wrapper,
+    int format,
+    bool render_target,
+    bool shader_read,
+    bool shader_write);
 
 }  // extern "C"
 

@@ -29,7 +29,7 @@ source_set("image_generator") {
 
   deps = [
     "//flutter/fml",
-    "//flutter/lib/ui:ui",
+    "//flutter/lib/ui",
     "//flutter/skia",
   ]
 
@@ -44,10 +44,12 @@ executable("flutter_shell_native_unittests") {
   testonly = true
   sources = [
     "android_context_gl_impeller_unittests.cc",
+    "android_image_generator_unittests.cc",
     "android_shell_holder_unittests.cc",
     "apk_asset_provider_unittests.cc",
     "flutter_shell_native_unittests.cc",
     "image_lru_unittests.cc",
+    "platform_view_android_jni_impl_unittests.cc",
     "platform_view_android_unittests.cc",
   ]
   if (!slimpeller) {
@@ -58,6 +60,7 @@ executable("flutter_shell_native_unittests") {
     ":flutter_shell_native_src",
     "//flutter/fml",
     "//flutter/shell/platform/android/jni:jni_mock",
+    "//flutter/shell/platform/android/jni:mock_jni_env",
     "//flutter/third_party/googletest:gmock",
     "//flutter/third_party/googletest:gtest",
   ]
@@ -202,7 +205,7 @@ action("gen_android_build_config_java") {
 
   args = [
     "--out",
-    rebase_path(build_config_java),
+    rebase_path(build_config_java, root_build_dir),
     "--runtime-mode",
     flutter_runtime_mode,
   ]
@@ -221,6 +224,7 @@ android_java_sources = [
   "io/flutter/Log.java",
   "io/flutter/app/FlutterApplication.java",
   "io/flutter/embedding/android/AndroidTouchProcessor.java",
+  "io/flutter/embedding/android/ContentSizingFlag.java",
   "io/flutter/embedding/android/ExclusiveAppComponent.java",
   "io/flutter/embedding/android/FlutterActivity.java",
   "io/flutter/embedding/android/FlutterActivityAndFragmentDelegate.java",
@@ -230,6 +234,7 @@ android_java_sources = [
   "io/flutter/embedding/android/FlutterFragment.java",
   "io/flutter/embedding/android/FlutterFragmentActivity.java",
   "io/flutter/embedding/android/FlutterImageView.java",
+  "io/flutter/embedding/android/FlutterMeasureSpec.java",
   "io/flutter/embedding/android/FlutterPlayStoreSplitApplication.java",
   "io/flutter/embedding/android/FlutterSurfaceView.java",
   "io/flutter/embedding/android/FlutterTextureView.java",
@@ -242,11 +247,13 @@ android_java_sources = [
   "io/flutter/embedding/android/KeyboardMap.java",
   "io/flutter/embedding/android/MotionEventTracker.java",
   "io/flutter/embedding/android/RenderMode.java",
+  "io/flutter/embedding/android/SurfaceHolderCallbackCompat.java",
   "io/flutter/embedding/android/TransparencyMode.java",
   "io/flutter/embedding/android/WindowInfoRepositoryCallbackAdapterWrapper.java",
   "io/flutter/embedding/engine/FlutterEngine.java",
   "io/flutter/embedding/engine/FlutterEngineCache.java",
   "io/flutter/embedding/engine/FlutterEngineConnectionRegistry.java",
+  "io/flutter/embedding/engine/FlutterEngineFlags.java",
   "io/flutter/embedding/engine/FlutterEngineGroup.java",
   "io/flutter/embedding/engine/FlutterEngineGroupCache.java",
   "io/flutter/embedding/engine/FlutterJNI.java",
@@ -258,6 +265,15 @@ android_java_sources = [
   "io/flutter/embedding/engine/dart/PlatformTaskQueue.java",
   "io/flutter/embedding/engine/deferredcomponents/DeferredComponentManager.java",
   "io/flutter/embedding/engine/deferredcomponents/PlayStoreDeferredComponentManager.java",
+  "io/flutter/embedding/engine/image/BitmapMetadataReader.java",
+  "io/flutter/embedding/engine/image/ExifMetadataReader.java",
+  "io/flutter/embedding/engine/image/FlutterImageDecoder.java",
+  "io/flutter/embedding/engine/image/ImageDecoderDefaultImpl.java",
+  "io/flutter/embedding/engine/image/ImageDecoderHeifApi36Impl.java",
+  "io/flutter/embedding/engine/image/ImageDecoderHeifPre36Impl.java",
+  "io/flutter/embedding/engine/image/ImageUtils.java",
+  "io/flutter/embedding/engine/image/MediaMetadataReader.java",
+  "io/flutter/embedding/engine/image/Metadata.java",
   "io/flutter/embedding/engine/loader/ApplicationInfoLoader.java",
   "io/flutter/embedding/engine/loader/FlutterApplicationInfo.java",
   "io/flutter/embedding/engine/loader/FlutterLoader.java",
@@ -282,6 +298,7 @@ android_java_sources = [
   "io/flutter/embedding/engine/plugins/util/GeneratedPluginRegister.java",
   "io/flutter/embedding/engine/renderer/FlutterRenderer.java",
   "io/flutter/embedding/engine/renderer/FlutterUiDisplayListener.java",
+  "io/flutter/embedding/engine/renderer/FlutterUiResizeListener.java",
   "io/flutter/embedding/engine/renderer/RenderSurface.java",
   "io/flutter/embedding/engine/renderer/SurfaceTextureSurfaceProducer.java",
   "io/flutter/embedding/engine/renderer/SurfaceTextureWrapper.java",
@@ -295,6 +312,8 @@ android_java_sources = [
   "io/flutter/embedding/engine/systemchannels/MouseCursorChannel.java",
   "io/flutter/embedding/engine/systemchannels/NavigationChannel.java",
   "io/flutter/embedding/engine/systemchannels/PlatformChannel.java",
+  "io/flutter/embedding/engine/systemchannels/PlatformViewCreationRequest.java",
+  "io/flutter/embedding/engine/systemchannels/PlatformViewTouch.java",
   "io/flutter/embedding/engine/systemchannels/PlatformViewsChannel.java",
   "io/flutter/embedding/engine/systemchannels/PlatformViewsChannel2.java",
   "io/flutter/embedding/engine/systemchannels/ProcessTextChannel.java",
@@ -305,7 +324,6 @@ android_java_sources = [
   "io/flutter/embedding/engine/systemchannels/SpellCheckChannel.java",
   "io/flutter/embedding/engine/systemchannels/SystemChannel.java",
   "io/flutter/embedding/engine/systemchannels/TextInputChannel.java",
-  "io/flutter/plugin/common/ActivityLifecycleListener.java",
   "io/flutter/plugin/common/BasicMessageChannel.java",
   "io/flutter/plugin/common/BinaryCodec.java",
   "io/flutter/plugin/common/BinaryMessenger.java",
@@ -346,6 +364,7 @@ android_java_sources = [
   "io/flutter/plugin/platform/PlatformViewsAccessibilityDelegate.java",
   "io/flutter/plugin/platform/PlatformViewsController.java",
   "io/flutter/plugin/platform/PlatformViewsController2.java",
+  "io/flutter/plugin/platform/PlatformViewsControllerDelegator.java",
   "io/flutter/plugin/platform/SingleViewFakeWindowViewGroup.java",
   "io/flutter/plugin/platform/SingleViewPresentation.java",
   "io/flutter/plugin/platform/SingleViewWindowManager.java",
@@ -358,20 +377,26 @@ android_java_sources = [
   "io/flutter/util/HandlerCompat.java",
   "io/flutter/util/PathUtils.java",
   "io/flutter/util/Preconditions.java",
-  "io/flutter/util/Predicate.java",
   "io/flutter/util/TraceSection.java",
   "io/flutter/util/ViewUtils.java",
   "io/flutter/view/AccessibilityBridge.java",
+  "io/flutter/view/AccessibilityNodeConfigurator.java",
+  "io/flutter/view/AccessibilityStringBuilder.java",
   "io/flutter/view/AccessibilityViewEmbedder.java",
+  "io/flutter/view/BaseRoleConfigurator.java",
+  "io/flutter/view/ClassNameRoleConfigurator.java",
+  "io/flutter/view/ComboBoxRoleConfigurator.java",
   "io/flutter/view/FlutterCallbackInformation.java",
-  "io/flutter/view/FlutterRunArguments.java",
+  "io/flutter/view/MenuRoleConfigurator.java",
+  "io/flutter/view/ProgressBarRoleConfigurator.java",
+  "io/flutter/view/RoleConfiguratorFactory.java",
   "io/flutter/view/TextureRegistry.java",
   "io/flutter/view/VsyncWaiter.java",
 ]
 
 embedding_dependencies_jars = [
   "//flutter/third_party/android_embedding_dependencies/lib/activity-1.8.1.jar",
-  "//flutter/third_party/android_embedding_dependencies/lib/annotation-jvm-1.8.0.jar",
+  "//flutter/third_party/android_embedding_dependencies/lib/annotation-jvm-1.8.1.jar",
   "//flutter/third_party/android_embedding_dependencies/lib/annotation-experimental-1.4.0.jar",
   "//flutter/third_party/android_embedding_dependencies/lib/annotations-23.0.0.jar",
   "//flutter/third_party/android_embedding_dependencies/lib/collection-1.1.0.jar",
@@ -380,6 +405,7 @@ embedding_dependencies_jars = [
   "//flutter/third_party/android_embedding_dependencies/lib/core-common-2.2.0.jar",
   "//flutter/third_party/android_embedding_dependencies/lib/core-runtime-2.2.0.jar",
   "//flutter/third_party/android_embedding_dependencies/lib/customview-1.0.0.jar",
+  "//flutter/third_party/android_embedding_dependencies/lib/exifinterface-1.4.1.jar",
   "//flutter/third_party/android_embedding_dependencies/lib/fragment-1.7.1.jar",
   "//flutter/third_party/android_embedding_dependencies/lib/kotlin-stdlib-1.8.22.jar",
   "//flutter/third_party/android_embedding_dependencies/lib/kotlin-stdlib-common-1.8.22.jar",
@@ -416,9 +442,9 @@ action("check_imports") {
 
   args = [
            "--stamp",
-           rebase_path(stamp_file),
+           rebase_path(stamp_file, root_build_dir),
            "--files",
-         ] + rebase_path(android_java_sources)
+         ] + rebase_path(android_java_sources, root_build_dir)
 }
 
 action("flutter_shell_java") {
@@ -446,7 +472,7 @@ action("flutter_shell_java") {
              lambda_jar,
            ] + embedding_dependencies_jars
 
-  _rebased_current_path = rebase_path(".")
+  _rebased_current_path = rebase_path(".", root_build_dir)
   _rebased_jar_path = rebase_path(jar_path, root_build_dir)
   _rebased_source_jar_path = rebase_path(source_jar_path, root_build_dir)
   _rebased_depfile = rebase_path(depfile, root_build_dir)
@@ -531,6 +557,8 @@ action("android_jar") {
   deps = [
     ":flutter_shell_java",
     ":flutter_shell_native",
+    ":pom_content_hash_embedding",
+    ":pom_content_hash_libflutter",
     ":pom_embedding",
     ":pom_libflutter",
   ]
@@ -593,9 +621,33 @@ action("pom_libflutter") {
 
   args = [
     "--destination",
-    rebase_path(root_build_dir),
+    rebase_path(root_build_dir, root_build_dir),
     "--engine-version",
     engine_version,
+    "--engine-artifact-id",
+    artifact_id,
+  ]
+}
+
+action("pom_content_hash_libflutter") {
+  script = "//flutter/tools/androidx/generate_pom_file.py"
+
+  inputs = [ "//flutter/tools/androidx/files.json" ]
+
+  artifact_id =
+      string_replace(android_app_abi, "-", "_") + "_" + flutter_runtime_mode
+
+  hash_dir = "$root_build_dir/content_hash"
+  outputs = [
+    "$hash_dir/$artifact_id.pom",
+    "$hash_dir/$artifact_id.maven-metadata.xml",
+  ]
+
+  args = [
+    "--destination",
+    rebase_path(hash_dir, root_build_dir),
+    "--engine-version",
+    content_hash,
     "--engine-artifact-id",
     artifact_id,
   ]
@@ -615,9 +667,34 @@ action("pom_embedding") {
 
   args = [
     "--destination",
-    rebase_path(root_build_dir),
+    rebase_path(root_build_dir, root_build_dir),
     "--engine-version",
     engine_version,
+    "--engine-artifact-id",
+    artifact_id,
+    "--include-embedding-dependencies",
+    "true",
+  ]
+}
+
+action("pom_content_hash_embedding") {
+  script = "//flutter/tools/androidx/generate_pom_file.py"
+
+  inputs = [ "//flutter/tools/androidx/files.json" ]
+
+  artifact_id = "flutter_embedding_$flutter_runtime_mode"
+
+  hash_dir = "$root_build_dir/content_hash"
+  outputs = [
+    "$hash_dir/$artifact_id.pom",
+    "$hash_dir/$artifact_id.maven-metadata.xml",
+  ]
+
+  args = [
+    "--destination",
+    rebase_path(hash_dir, root_build_dir),
+    "--engine-version",
+    content_hash,
     "--engine-artifact-id",
     artifact_id,
     "--include-embedding-dependencies",
@@ -661,13 +738,13 @@ action("gen_android_javadoc") {
   outputs = [ "$target_gen_dir/javadocs" ]
   args = [
     "--out-dir",
-    rebase_path(outputs[0]),
+    rebase_path(outputs[0], root_build_dir),
     "--android-source-root",
-    rebase_path("."),
+    rebase_path(".", root_build_dir),
     "--build-config-path",
-    rebase_path(target_gen_dir),
+    rebase_path(target_gen_dir, root_build_dir),
     "--src-dir",
-    rebase_path("//"),
+    rebase_path("//", root_build_dir),
     "--quiet",
   ]
 
@@ -706,9 +783,9 @@ if (target_cpu != "x86") {
     gen_snapshot_dest = "gen_snapshot"
 
     if (host_os == "mac") {
-      gen_snapshot_src = rebase_path("$root_out_dir/universal/gen_snapshot")
+      gen_snapshot_src = "$root_out_dir/universal/gen_snapshot"
     } else if (host_os == "win") {
-      gen_snapshot_src = rebase_path("$root_out_dir/gen_snapshot.exe")
+      gen_snapshot_src = "$root_out_dir/gen_snapshot.exe"
       gen_snapshot_dest = "gen_snapshot.exe"
     }
 
@@ -741,7 +818,8 @@ if (target_cpu != "x86") {
   }
 }
 
-if (host_os == "linux" && (target_cpu == "x64" || target_cpu == "arm64")) {
+if (host_os == "linux" &&
+    (target_cpu == "x64" || target_cpu == "arm64" || target_cpu == "riscv64")) {
   zip_bundle("analyze_snapshot") {
     deps = [ "$dart_src/runtime/bin:analyze_snapshot($host_toolchain)" ]
 
@@ -750,8 +828,7 @@ if (host_os == "linux" && (target_cpu == "x64" || target_cpu == "arm64")) {
         get_label_info(
             "$dart_src/runtime/bin:analyze_snapshot($host_toolchain)",
             "root_out_dir")
-    analyze_snapshot_path =
-        rebase_path("$analyze_snapshot_out_dir/$analyze_snapshot_bin")
+    analyze_snapshot_path = "$analyze_snapshot_out_dir/$analyze_snapshot_bin"
 
     if (host_os == "linux") {
       output = "$android_zip_archive_dir/analyze-snapshot-linux-x64.zip"
@@ -760,7 +837,7 @@ if (host_os == "linux" && (target_cpu == "x64" || target_cpu == "arm64")) {
     } else if (host_os == "win") {
       output = "$android_zip_archive_dir/analyze-snapshot-windows-x64.zip"
       analyze_snapshot_bin = "analyze-snapshot.exe"
-      analyze_snapshot_path = rebase_path("$root_out_dir/$analyze_snapshot_bin")
+      analyze_snapshot_path = "$root_out_dir/$analyze_snapshot_bin"
     }
 
     files = [
@@ -790,18 +867,26 @@ action("embedding_jars") {
 
   deps = [
     ":flutter_shell_java",
+    ":pom_content_hash_embedding",
     ":pom_embedding",
   ]
-  sources = [
+  base_sources = [
     "$root_out_dir/flutter_embedding_$flutter_runtime_mode.jar",
     "$root_out_dir/flutter_embedding_$flutter_runtime_mode.pom",
   ]
+  hash_dir = "$root_build_dir/content_hash"
+  hash_sources = [
+    "$hash_dir/flutter_embedding_$flutter_runtime_mode.pom",
+    "$root_out_dir/flutter_embedding_$flutter_runtime_mode.jar",
+  ]
+  sources = base_sources + hash_sources
+
   outputs = []
   args = []
   base_name = "$root_out_dir/zip_archives/download.flutter.io/io/flutter/" +
               "flutter_embedding_$flutter_runtime_mode/1.0.0-$engine_version/" +
               "flutter_embedding_$flutter_runtime_mode-1.0.0-${engine_version}"
-  foreach(source, sources) {
+  foreach(source, base_sources) {
     extension = get_path_info(source, "extension")
     name = get_path_info(source, "name")
     if (extension == "jar") {
@@ -812,17 +897,51 @@ action("embedding_jars") {
       args += [
         "-i",
         "${name}.jar",
-        rebase_path("${base_name}.jar"),
+        rebase_path("${base_name}.jar", root_build_dir),
         "-i",
         "${name}-sources.jar",
-        rebase_path("${base_name}-sources.jar"),
+        rebase_path("${base_name}-sources.jar", root_build_dir),
       ]
     } else {
       outputs += [ "${base_name}.${extension}" ]
       args += [
         "-i",
-        rebase_path(source),
-        rebase_path("${base_name}.${extension}"),
+        rebase_path(source, root_build_dir),
+        rebase_path("${base_name}.${extension}", root_build_dir),
+      ]
+    }
+  }
+
+  # NOTE(codefu): the URL having /*-$engine_version/ is expected; we want these
+  # files in one URL. The flutter-recipes duplicate them to content_hash as
+  # part of its upload step.
+  # More info here: https://github.com/flutter/flutter/issues/172259
+  hash_base_name =
+      "$root_out_dir/zip_archives/download.flutter.io/io/flutter/" +
+      "flutter_embedding_$flutter_runtime_mode/1.0.0-$engine_version/" +
+      "flutter_embedding_$flutter_runtime_mode-1.0.0-${content_hash}"
+  foreach(source, hash_sources) {
+    extension = get_path_info(source, "extension")
+    name = get_path_info(source, "name")
+    if (extension == "jar") {
+      outputs += [
+        "${hash_base_name}.jar",
+        "${hash_base_name}-sources.jar",
+      ]
+      args += [
+        "-i",
+        "${name}.jar",
+        rebase_path("${hash_base_name}.jar", root_build_dir),
+        "-i",
+        "${name}-sources.jar",
+        rebase_path("${hash_base_name}-sources.jar", root_build_dir),
+      ]
+    } else {
+      outputs += [ "${hash_base_name}.${extension}" ]
+      args += [
+        "-i",
+        rebase_path(source, root_build_dir),
+        rebase_path("${hash_base_name}.${extension}", root_build_dir),
       ]
     }
   }
@@ -834,28 +953,54 @@ action("abi_jars") {
   script = "//flutter/build/android_artifacts.py"
   deps = [
     ":android_jar",
+    ":pom_content_hash_libflutter",
     ":pom_libflutter",
   ]
 
   artifact_id =
       string_replace(android_app_abi, "-", "_") + "_" + flutter_runtime_mode
-  sources = [
+  base_sources = [
     "$root_out_dir/${artifact_id}.jar",
     "$root_out_dir/${artifact_id}.pom",
   ]
+  hash_dir = "$root_build_dir/content_hash"
+  hash_sources = [
+    "$hash_dir/${artifact_id}.pom",
+    "$root_out_dir/${artifact_id}.jar",
+  ]
+  sources = base_sources + hash_sources
   outputs = []
   args = []
   base_name = "$root_out_dir/zip_archives/download.flutter.io/io/flutter/" +
               "${artifact_id}/1.0.0-$engine_version/" +
               "${artifact_id}-1.0.0-${engine_version}"
-  foreach(source, sources) {
+  foreach(source, base_sources) {
     extension = get_path_info(source, "extension")
     name = get_path_info(source, "name")
     outputs += [ "${base_name}.${extension}" ]
     args += [
       "-i",
-      rebase_path(source),
-      rebase_path("${base_name}.${extension}"),
+      rebase_path(source, root_build_dir),
+      rebase_path("${base_name}.${extension}", root_build_dir),
+    ]
+  }
+
+  # NOTE(codefu): the URL having /*-$engine_version/ is expected; we want these
+  # files in one URL. The flutter-recipes duplicate them to content_hash as
+  # part of its upload step.
+  # More info here: https://github.com/flutter/flutter/issues/172259
+  hash_base_name =
+      "$root_out_dir/zip_archives/download.flutter.io/io/flutter/" +
+      "${artifact_id}/1.0.0-$engine_version/" +
+      "${artifact_id}-1.0.0-${content_hash}"
+  foreach(source, hash_sources) {
+    extension = get_path_info(source, "extension")
+    name = get_path_info(source, "name")
+    outputs += [ "${hash_base_name}.${extension}" ]
+    args += [
+      "-i",
+      rebase_path(source, root_build_dir),
+      rebase_path("${hash_base_name}.${extension}", root_build_dir),
     ]
   }
 }

@@ -12,7 +12,7 @@
 #include "flutter/shell/platform/embedder/tests/embedder_assertions.h"
 #include "flutter/testing/testing.h"
 #include "third_party/dart/runtime/bin/elf_loader.h"
-#include "third_party/skia/include/core/SkSurface.h"
+#include "third_party/skia/include/core/SkImage.h"
 
 namespace flutter {
 namespace testing {
@@ -92,7 +92,7 @@ FlutterEngineAOTData EmbedderTestContext::GetAOTData() const {
   return aot_data_.get();
 }
 
-void EmbedderTestContext::SetRootSurfaceTransformation(SkMatrix matrix) {
+void EmbedderTestContext::SetRootSurfaceTransformation(DlMatrix matrix) {
   root_surface_transformation_ = matrix;
 }
 
@@ -123,6 +123,11 @@ void EmbedderTestContext::FireIsolateCreateCallbacks() {
 void EmbedderTestContext::AddNativeCallback(const char* name,
                                             Dart_NativeFunction function) {
   native_resolver_->AddNativeCallback({name}, function);
+}
+
+void EmbedderTestContext::AddFfiNativeCallback(const char* name,
+                                               void* function) {
+  native_resolver_->AddFfiNativeCallback({name}, function);
 }
 
 void EmbedderTestContext::SetSemanticsUpdateCallback2(
@@ -293,8 +298,8 @@ void EmbedderTestContext::SetNextSceneCallback(
 std::future<sk_sp<SkImage>> EmbedderTestContext::GetNextSceneImage() {
   std::promise<sk_sp<SkImage>> promise;
   auto future = promise.get_future();
-  SetNextSceneCallback(
-      fml::MakeCopyable([promise = std::move(promise)](auto image) mutable {
+  SetNextSceneCallback(fml::MakeCopyable(
+      [promise = std::move(promise)](const auto& image) mutable {
         promise.set_value(image);
       }));
   return future;

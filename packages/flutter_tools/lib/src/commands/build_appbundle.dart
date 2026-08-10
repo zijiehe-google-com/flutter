@@ -38,6 +38,7 @@ class BuildAppBundleCommand extends BuildSubCommand {
     usesAnalyzeSizeFlag();
     addAndroidSpecificBuildOptions(hide: !verboseHelp);
     addIgnoreDeprecationOption();
+    addEnableHcppFlag(verboseHelp: verboseHelp);
     argParser.addMultiOption(
       'target-platform',
       defaultsTo: <String>['android-arm', 'android-arm64', 'android-x64'],
@@ -68,7 +69,7 @@ class BuildAppBundleCommand extends BuildSubCommand {
   }
 
   @override
-  final String name = 'appbundle';
+  final name = 'appbundle';
 
   @override
   List<String> get aliases => const <String>['aab'];
@@ -83,7 +84,7 @@ class BuildAppBundleCommand extends BuildSubCommand {
   };
 
   @override
-  final String description =
+  final description =
       'Build an Android App Bundle file from your app.\n\n'
       "This command can build debug and release versions of an app bundle for your application. 'debug' builds support "
       "debugging and a quick development cycle. 'release' builds don't support debugging and are "
@@ -109,6 +110,9 @@ class BuildAppBundleCommand extends BuildSubCommand {
       commandHasTerminal: hasTerminal,
       buildAppBundleTargetPlatform: stringsArg('target-platform').join(','),
       buildAppBundleBuildMode: buildMode,
+      buildBundleEnableHcpp:
+          explicitEnableHcpp ??
+          FlutterProject.current().android.computeHcppEnabled(ifAbsent: enableHcpp),
     );
   }
 
@@ -117,9 +121,9 @@ class BuildAppBundleCommand extends BuildSubCommand {
     if (globals.androidSdk == null) {
       exitWithNoSdkMessage();
     }
-    final AndroidBuildInfo androidBuildInfo = AndroidBuildInfo(
+    final androidBuildInfo = AndroidBuildInfo(
       await getBuildInfo(),
-      targetArchs: stringsArg('target-platform').map<AndroidArch>(getAndroidArchForName),
+      targetArchs: stringsArg('target-platform').map<CpuArch>(getCpuArchForName),
     );
     // Do all setup verification that doesn't involve loading units. Checks that
     // require generated loading units are done after gen_snapshot in assemble.
@@ -135,7 +139,7 @@ class BuildAppBundleCommand extends BuildSubCommand {
         boolArg('deferred-components') &&
         boolArg('validate-deferred-components') &&
         !boolArg('debug')) {
-      final DeferredComponentsPrebuildValidator validator = DeferredComponentsPrebuildValidator(
+      final validator = DeferredComponentsPrebuildValidator(
         project.directory,
         globals.logger,
         globals.platform,
@@ -172,6 +176,10 @@ class BuildAppBundleCommand extends BuildSubCommand {
       validateDeferredComponents: boolArg('validate-deferred-components'),
       deferredComponentsEnabled: boolArg('deferred-components') && !boolArg('debug'),
     );
+
+    final bool impellerEnabled = project.android.computeImpellerEnabled();
+    final buildLabel = impellerEnabled ? 'manifest-impeller-enabled' : 'manifest-impeller-disabled';
+    globals.analytics.send(Event.flutterBuildInfo(label: buildLabel, buildType: 'android'));
     return FlutterCommandResult.success();
   }
 }

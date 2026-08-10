@@ -4,21 +4,43 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show DragStartBehavior;
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'semantics_tester.dart';
 
-void main() {
-  SemanticsTester semantics;
+class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _PinnedHeaderDelegate({required double height}) : minExtent = height, maxExtent = height;
 
+  const _PinnedHeaderDelegate.collapsing({required this.minExtent, required this.maxExtent});
+
+  @override
+  final double minExtent;
+
+  @override
+  final double maxExtent;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return const SizedBox.expand();
+  }
+
+  @override
+  bool shouldRebuild(covariant _PinnedHeaderDelegate oldDelegate) {
+    return oldDelegate.minExtent != minExtent || oldDelegate.maxExtent != maxExtent;
+  }
+}
+
+const double _kToolbarHeight = 56.0;
+
+void main() {
   setUp(() {
     debugResetSemanticsIdCounter();
   });
 
   testWidgets('scrollable exposes the correct semantic actions', (WidgetTester tester) async {
-    semantics = SemanticsTester(tester);
+    final semantics = SemanticsTester(tester);
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
@@ -77,8 +99,8 @@ void main() {
   });
 
   testWidgets('Vertical scrollable responds to scrollToOffset', (WidgetTester tester) async {
-    semantics = SemanticsTester(tester);
-    final ScrollController controller = ScrollController();
+    final semantics = SemanticsTester(tester);
+    final controller = ScrollController();
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
@@ -89,13 +111,12 @@ void main() {
       ),
     );
     final SemanticsOwner semanticsOwner = tester.binding.pipelineOwner.semanticsOwner!;
-    final int scrollableId =
-        semantics
-            .nodesWith(
-              actions: <SemanticsAction>[SemanticsAction.scrollUp, SemanticsAction.scrollToOffset],
-            )
-            .single
-            .id;
+    final int scrollableId = semantics
+        .nodesWith(
+          actions: <SemanticsAction>[SemanticsAction.scrollUp, SemanticsAction.scrollToOffset],
+        )
+        .single
+        .id;
 
     assert(controller.offset == 0);
     semanticsOwner.performAction(
@@ -109,8 +130,8 @@ void main() {
   });
 
   testWidgets('Horizontal scrollable responds to scrollToOffset', (WidgetTester tester) async {
-    semantics = SemanticsTester(tester);
-    final ScrollController controller = ScrollController();
+    final semantics = SemanticsTester(tester);
+    final controller = ScrollController();
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
@@ -122,16 +143,12 @@ void main() {
       ),
     );
     final SemanticsOwner semanticsOwner = tester.binding.pipelineOwner.semanticsOwner!;
-    final int scrollableId =
-        semantics
-            .nodesWith(
-              actions: <SemanticsAction>[
-                SemanticsAction.scrollLeft,
-                SemanticsAction.scrollToOffset,
-              ],
-            )
-            .single
-            .id;
+    final int scrollableId = semantics
+        .nodesWith(
+          actions: <SemanticsAction>[SemanticsAction.scrollLeft, SemanticsAction.scrollToOffset],
+        )
+        .single
+        .id;
 
     assert(controller.offset == 0);
     semanticsOwner.performAction(
@@ -147,7 +164,7 @@ void main() {
   testWidgets('Unscrollable scrollable does not respond to scrollToOffset', (
     WidgetTester tester,
   ) async {
-    semantics = SemanticsTester(tester);
+    final semantics = SemanticsTester(tester);
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
@@ -163,10 +180,37 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('Scrollable exposes implicit scrolling before dimensions are available', (
+    WidgetTester tester,
+  ) async {
+    final semantics = SemanticsTester(tester);
+    final controller = _NoDimensionsDuringSemanticsScrollController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: ListView(
+          controller: controller,
+          children: List<Widget>.generate(60, (int i) => Text('$i')),
+        ),
+      ),
+    );
+
+    expect(semantics, includesNodeWith(flags: <SemanticsFlag>[SemanticsFlag.hasImplicitScrolling]));
+    expect(
+      semantics.nodesWith(
+        actions: <SemanticsAction>[SemanticsAction.scrollUp, SemanticsAction.scrollToOffset],
+      ),
+      isEmpty,
+    );
+    semantics.dispose();
+  });
+
   testWidgets('scrollToOffset respects implicit scrolling configuration', (
     WidgetTester tester,
   ) async {
-    semantics = SemanticsTester(tester);
+    final semantics = SemanticsTester(tester);
     final ScrollPhysics physics = _NoImplicitScrollingScrollPhysics();
     await tester.pumpWidget(
       Directionality(
@@ -187,11 +231,11 @@ void main() {
   });
 
   testWidgets('showOnScreen works in scrollable', (WidgetTester tester) async {
-    semantics = SemanticsTester(tester); // enables semantics tree generation
+    final semantics = SemanticsTester(tester); // enables semantics tree generation
 
-    const double kItemHeight = 40.0;
+    const kItemHeight = 40.0;
 
-    final List<Widget> containers = List<Widget>.generate(
+    final containers = List<Widget>.generate(
       80,
       (int i) => MergeSemantics(
         child: SizedBox(
@@ -201,9 +245,7 @@ void main() {
       ),
     );
 
-    final ScrollController scrollController = ScrollController(
-      initialScrollOffset: kItemHeight / 2,
-    );
+    final scrollController = ScrollController(initialScrollOffset: kItemHeight / 2);
     addTearDown(scrollController.dispose);
 
     await tester.pumpWidget(
@@ -215,8 +257,10 @@ void main() {
 
     expect(scrollController.offset, kItemHeight / 2);
 
-    final int firstContainerId =
-        tester.renderObject(find.byWidget(containers.first)).debugSemantics!.id;
+    final int firstContainerId = tester
+        .renderObject(find.byWidget(containers.first))
+        .debugSemantics!
+        .id;
     tester.binding.pipelineOwner.semanticsOwner!.performAction(
       firstContainerId,
       SemanticsAction.showOnScreen,
@@ -229,22 +273,24 @@ void main() {
     semantics.dispose();
   });
 
+  // TODO(rkishan516): Cover this test with SliverAppBar in material_ui package.
+  // https://github.com/flutter/flutter/issues/189117
   testWidgets('showOnScreen works with pinned app bar and sliver list', (
     WidgetTester tester,
   ) async {
-    semantics = SemanticsTester(tester); // enables semantics tree generation
+    final semantics = SemanticsTester(tester); // enables semantics tree generation
 
-    const double kItemHeight = 100.0;
-    const double kExpandedAppBarHeight = 56.0;
+    const kItemHeight = 100.0;
+    const kExpandedAppBarHeight = 56.0;
 
-    final List<Widget> containers = List<Widget>.generate(
+    final containers = List<Widget>.generate(
       80,
-      (int i) => MergeSemantics(child: SizedBox(height: kItemHeight, child: Text('container $i'))),
+      (int i) => MergeSemantics(
+        child: SizedBox(height: kItemHeight, child: Text('container $i')),
+      ),
     );
 
-    final ScrollController scrollController = ScrollController(
-      initialScrollOffset: kItemHeight / 2,
-    );
+    final scrollController = ScrollController(initialScrollOffset: kItemHeight / 2);
     addTearDown(scrollController.dispose);
 
     await tester.pumpWidget(
@@ -252,10 +298,7 @@ void main() {
         textDirection: TextDirection.ltr,
         child: Localizations(
           locale: const Locale('en', 'us'),
-          delegates: const <LocalizationsDelegate<dynamic>>[
-            DefaultWidgetsLocalizations.delegate,
-            DefaultMaterialLocalizations.delegate,
-          ],
+          delegates: const <LocalizationsDelegate<dynamic>>[DefaultWidgetsLocalizations.delegate],
           child: MediaQuery(
             data: const MediaQueryData(),
             child: Scrollable(
@@ -264,12 +307,11 @@ void main() {
                 return Viewport(
                   offset: offset,
                   slivers: <Widget>[
-                    const SliverAppBar(
+                    const SliverPersistentHeader(
                       pinned: true,
-                      expandedHeight: kExpandedAppBarHeight,
-                      flexibleSpace: FlexibleSpaceBar(title: Text('App Bar')),
+                      delegate: _PinnedHeaderDelegate(height: kExpandedAppBarHeight),
                     ),
-                    SliverList(delegate: SliverChildListDelegate(containers)),
+                    SliverList.list(children: containers),
                   ],
                 );
               },
@@ -281,8 +323,10 @@ void main() {
 
     expect(scrollController.offset, kItemHeight / 2);
 
-    final int firstContainerId =
-        tester.renderObject(find.byWidget(containers.first)).debugSemantics!.id;
+    final int firstContainerId = tester
+        .renderObject(find.byWidget(containers.first))
+        .debugSemantics!
+        .id;
     tester.binding.pipelineOwner.semanticsOwner!.performAction(
       firstContainerId,
       SemanticsAction.showOnScreen,
@@ -297,21 +341,19 @@ void main() {
   testWidgets('showOnScreen works with pinned app bar and individual slivers', (
     WidgetTester tester,
   ) async {
-    semantics = SemanticsTester(tester); // enables semantics tree generation
+    final semantics = SemanticsTester(tester); // enables semantics tree generation
 
-    const double kItemHeight = 100.0;
-    const double kExpandedAppBarHeight = 256.0;
+    const kItemHeight = 100.0;
+    const kExpandedAppBarHeight = 256.0;
 
-    final List<Widget> children = <Widget>[];
-    final List<Widget> slivers = List<Widget>.generate(30, (int i) {
+    final children = <Widget>[];
+    final slivers = List<Widget>.generate(30, (int i) {
       final Widget child = MergeSemantics(child: SizedBox(height: 72.0, child: Text('Item $i')));
       children.add(child);
       return SliverToBoxAdapter(child: child);
     });
 
-    final ScrollController scrollController = ScrollController(
-      initialScrollOffset: 2.5 * kItemHeight,
-    );
+    final scrollController = ScrollController(initialScrollOffset: 2.5 * kItemHeight);
     addTearDown(scrollController.dispose);
 
     await tester.pumpWidget(
@@ -321,20 +363,19 @@ void main() {
           data: const MediaQueryData(),
           child: Localizations(
             locale: const Locale('en', 'us'),
-            delegates: const <LocalizationsDelegate<dynamic>>[
-              DefaultWidgetsLocalizations.delegate,
-              DefaultMaterialLocalizations.delegate,
-            ],
+            delegates: const <LocalizationsDelegate<dynamic>>[DefaultWidgetsLocalizations.delegate],
             child: Scrollable(
               controller: scrollController,
               viewportBuilder: (BuildContext context, ViewportOffset offset) {
                 return Viewport(
                   offset: offset,
                   slivers: <Widget>[
-                    const SliverAppBar(
+                    const SliverPersistentHeader(
                       pinned: true,
-                      expandedHeight: kExpandedAppBarHeight,
-                      flexibleSpace: FlexibleSpaceBar(title: Text('App Bar')),
+                      delegate: _PinnedHeaderDelegate.collapsing(
+                        minExtent: _kToolbarHeight,
+                        maxExtent: kExpandedAppBarHeight,
+                      ),
                     ),
                     ...slivers,
                   ],
@@ -352,13 +393,13 @@ void main() {
     tester.binding.pipelineOwner.semanticsOwner!.performAction(id0, SemanticsAction.showOnScreen);
     await tester.pump();
     await tester.pump(const Duration(seconds: 5));
-    expect(tester.getTopLeft(find.byWidget(children[0])).dy, kToolbarHeight);
+    expect(tester.getTopLeft(find.byWidget(children[0])).dy, _kToolbarHeight);
 
     semantics.dispose();
   });
 
   testWidgets('correct scrollProgress', (WidgetTester tester) async {
-    semantics = SemanticsTester(tester);
+    final semantics = SemanticsTester(tester);
 
     await tester.pumpWidget(
       Directionality(
@@ -409,7 +450,7 @@ void main() {
   });
 
   testWidgets('correct scrollProgress for unbound', (WidgetTester tester) async {
-    semantics = SemanticsTester(tester);
+    final semantics = SemanticsTester(tester);
 
     await tester.pumpWidget(
       Directionality(
@@ -470,14 +511,17 @@ void main() {
   });
 
   testWidgets('Semantics tree is populated mid-scroll', (WidgetTester tester) async {
-    semantics = SemanticsTester(tester);
+    final semantics = SemanticsTester(tester);
 
-    final List<Widget> children = List<Widget>.generate(
+    final children = List<Widget>.generate(
       80,
       (int i) => SizedBox(height: 40.0, child: Text('Item $i')),
     );
     await tester.pumpWidget(
-      Directionality(textDirection: TextDirection.ltr, child: ListView(children: children)),
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: ListView(children: children),
+      ),
     );
 
     final TestGesture gesture = await tester.startGesture(tester.getCenter(find.byType(ListView)));
@@ -503,7 +547,7 @@ void main() {
       ),
     );
 
-    final TestSemantics expectedSemantics = TestSemantics.root(
+    final expectedSemantics = TestSemantics.root(
       children: <TestSemantics>[
         TestSemantics.rootChild(
           children: <TestSemantics>[
@@ -525,7 +569,7 @@ void main() {
     expect(tester.binding.pipelineOwner.semanticsOwner, isNull);
 
     // Semantics on
-    semantics = SemanticsTester(tester);
+    var semantics = SemanticsTester(tester);
     await tester.pumpAndSettle();
     expect(tester.binding.pipelineOwner.semanticsOwner, isNotNull);
     expect(
@@ -551,7 +595,7 @@ void main() {
   }, semanticsEnabled: false);
 
   group('showOnScreen', () {
-    const double kItemHeight = 100.0;
+    const kItemHeight = 100.0;
 
     late List<Widget> children;
     late ScrollController scrollController;
@@ -559,7 +603,9 @@ void main() {
 
     setUp(() {
       children = List<Widget>.generate(10, (int i) {
-        return MergeSemantics(child: SizedBox(height: kItemHeight, child: Text('container $i')));
+        return MergeSemantics(
+          child: SizedBox(height: kItemHeight, child: Text('container $i')),
+        );
       });
 
       scrollController = ScrollController(initialScrollOffset: kItemHeight / 2);
@@ -576,14 +622,16 @@ void main() {
     });
 
     testWidgets('brings item above leading edge to leading edge', (WidgetTester tester) async {
-      semantics = SemanticsTester(tester); // enables semantics tree generation
+      final semantics = SemanticsTester(tester); // enables semantics tree generation
 
       await tester.pumpWidget(widgetUnderTest);
 
       expect(scrollController.offset, kItemHeight / 2);
 
-      final int firstContainerId =
-          tester.renderObject(find.byWidget(children.first)).debugSemantics!.id;
+      final int firstContainerId = tester
+          .renderObject(find.byWidget(children.first))
+          .debugSemantics!
+          .id;
       tester.binding.pipelineOwner.semanticsOwner!.performAction(
         firstContainerId,
         SemanticsAction.showOnScreen,
@@ -596,14 +644,16 @@ void main() {
     });
 
     testWidgets('brings item below trailing edge to trailing edge', (WidgetTester tester) async {
-      semantics = SemanticsTester(tester); // enables semantics tree generation
+      final semantics = SemanticsTester(tester); // enables semantics tree generation
 
       await tester.pumpWidget(widgetUnderTest);
 
       expect(scrollController.offset, kItemHeight / 2);
 
-      final int firstContainerId =
-          tester.renderObject(find.byWidget(children[2])).debugSemantics!.id;
+      final int firstContainerId = tester
+          .renderObject(find.byWidget(children[2]))
+          .debugSemantics!
+          .id;
       tester.binding.pipelineOwner.semanticsOwner!.performAction(
         firstContainerId,
         SemanticsAction.showOnScreen,
@@ -618,14 +668,16 @@ void main() {
     testWidgets('does not change position of items already fully on-screen', (
       WidgetTester tester,
     ) async {
-      semantics = SemanticsTester(tester); // enables semantics tree generation
+      final semantics = SemanticsTester(tester); // enables semantics tree generation
 
       await tester.pumpWidget(widgetUnderTest);
 
       expect(scrollController.offset, kItemHeight / 2);
 
-      final int firstContainerId =
-          tester.renderObject(find.byWidget(children[1])).debugSemantics!.id;
+      final int firstContainerId = tester
+          .renderObject(find.byWidget(children[1]))
+          .debugSemantics!
+          .id;
       tester.binding.pipelineOwner.semanticsOwner!.performAction(
         firstContainerId,
         SemanticsAction.showOnScreen,
@@ -639,7 +691,7 @@ void main() {
   });
 
   group('showOnScreen with negative children', () {
-    const double kItemHeight = 100.0;
+    const kItemHeight = 100.0;
 
     late List<Widget> children;
     late ScrollController scrollController;
@@ -693,14 +745,16 @@ void main() {
     });
 
     testWidgets('brings item above leading edge to leading edge', (WidgetTester tester) async {
-      semantics = SemanticsTester(tester); // enables semantics tree generation
+      final semantics = SemanticsTester(tester); // enables semantics tree generation
 
       await tester.pumpWidget(widgetUnderTest);
 
       expect(scrollController.offset, -250.0);
 
-      final int firstContainerId =
-          tester.renderObject(find.byKey(const ValueKey<int>(2))).debugSemantics!.id;
+      final int firstContainerId = tester
+          .renderObject(find.byKey(const ValueKey<int>(2)))
+          .debugSemantics!
+          .id;
       tester.binding.pipelineOwner.semanticsOwner!.performAction(
         firstContainerId,
         SemanticsAction.showOnScreen,
@@ -713,14 +767,16 @@ void main() {
     });
 
     testWidgets('brings item below trailing edge to trailing edge', (WidgetTester tester) async {
-      semantics = SemanticsTester(tester); // enables semantics tree generation
+      final semantics = SemanticsTester(tester); // enables semantics tree generation
 
       await tester.pumpWidget(widgetUnderTest);
 
       expect(scrollController.offset, -250.0);
 
-      final int firstContainerId =
-          tester.renderObject(find.byKey(const ValueKey<int>(4))).debugSemantics!.id;
+      final int firstContainerId = tester
+          .renderObject(find.byKey(const ValueKey<int>(4)))
+          .debugSemantics!
+          .id;
       tester.binding.pipelineOwner.semanticsOwner!.performAction(
         firstContainerId,
         SemanticsAction.showOnScreen,
@@ -735,14 +791,16 @@ void main() {
     testWidgets('does not change position of items already fully on-screen', (
       WidgetTester tester,
     ) async {
-      semantics = SemanticsTester(tester); // enables semantics tree generation
+      final semantics = SemanticsTester(tester); // enables semantics tree generation
 
       await tester.pumpWidget(widgetUnderTest);
 
       expect(scrollController.offset, -250.0);
 
-      final int firstContainerId =
-          tester.renderObject(find.byKey(const ValueKey<int>(3))).debugSemantics!.id;
+      final int firstContainerId = tester
+          .renderObject(find.byKey(const ValueKey<int>(3)))
+          .debugSemantics!
+          .id;
       tester.binding.pipelineOwner.semanticsOwner!.performAction(
         firstContainerId,
         SemanticsAction.showOnScreen,
@@ -758,7 +816,7 @@ void main() {
   testWidgets(
     'transform of inner node from useTwoPaneSemantics scrolls correctly with nested scrollables',
     (WidgetTester tester) async {
-      semantics = SemanticsTester(tester); // enables semantics tree generation
+      final semantics = SemanticsTester(tester); // enables semantics tree generation
 
       // Context: https://github.com/flutter/flutter/issues/61631
       await tester.pumpWidget(
@@ -773,27 +831,25 @@ void main() {
         ),
       );
 
-      final SemanticsNode rootScrollNode =
-          semantics
-              .nodesWith(
-                actions: <SemanticsAction>[
-                  SemanticsAction.scrollUp,
-                  SemanticsAction.scrollToOffset,
-                ],
-              )
-              .single;
-      final SemanticsNode innerListPane =
-          semantics.nodesWith(ancestor: rootScrollNode, scrollExtentMax: 0).single;
+      final SemanticsNode rootScrollNode = semantics
+          .nodesWith(
+            actions: <SemanticsAction>[SemanticsAction.scrollUp, SemanticsAction.scrollToOffset],
+          )
+          .single;
+      final SemanticsNode innerListPane = semantics
+          .nodesWith(ancestor: rootScrollNode, scrollExtentMax: 0)
+          .single;
       final SemanticsNode outerListPane = innerListPane.parent!;
-      final List<SemanticsNode> hiddenNodes =
-          semantics.nodesWith(flags: <SemanticsFlag>[SemanticsFlag.isHidden]).toList();
+      final List<SemanticsNode> hiddenNodes = semantics
+          .nodesWith(flags: <SemanticsFlag>[SemanticsFlag.isHidden])
+          .toList();
 
       // This test is only valid if some children are offscreen.
       // Increase the number of Text children if this assert fails.
       assert(hiddenNodes.length >= 3);
 
       // Scroll to end -> beginning -> middle to test both directions.
-      final List<SemanticsNode> targetNodes = <SemanticsNode>[
+      final targetNodes = <SemanticsNode>[
         hiddenNodes.last,
         hiddenNodes.first,
         hiddenNodes[hiddenNodes.length ~/ 2],
@@ -801,7 +857,7 @@ void main() {
 
       expect(nodeGlobalRect(innerListPane), nodeGlobalRect(outerListPane));
 
-      for (final SemanticsNode node in targetNodes) {
+      for (final node in targetNodes) {
         tester.binding.pipelineOwner.semanticsOwner!.performAction(
           node.id,
           SemanticsAction.showOnScreen,
@@ -846,4 +902,48 @@ class _NoImplicitScrollingScrollPhysics extends ScrollPhysics {
 
   @override
   ScrollPhysics applyTo(ScrollPhysics? ancestor) => this;
+}
+
+class _NoDimensionsDuringSemanticsScrollController extends ScrollController {
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) {
+    return _NoDimensionsDuringSemanticsScrollPosition(
+      physics: physics,
+      context: context,
+      oldPosition: oldPosition,
+      initialPixels: initialScrollOffset,
+      keepScrollOffset: keepScrollOffset,
+      debugLabel: debugLabel,
+    );
+  }
+}
+
+class _NoDimensionsDuringSemanticsScrollPosition extends ScrollPositionWithSingleContext {
+  _NoDimensionsDuringSemanticsScrollPosition({
+    required super.physics,
+    required super.context,
+    super.oldPosition,
+    super.initialPixels,
+    super.keepScrollOffset,
+    super.debugLabel,
+  });
+
+  bool _useRealDimensionsForLayout = false;
+
+  @override
+  bool get haveDimensions => _useRealDimensionsForLayout && super.haveDimensions;
+
+  @override
+  bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    // Let ScrollPosition update its layout state normally, then hide dimensions
+    // again so semantics sees the transient no-dimensions state.
+    _useRealDimensionsForLayout = true;
+    final bool result = super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+    _useRealDimensionsForLayout = false;
+    return result;
+  }
 }

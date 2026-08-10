@@ -27,7 +27,27 @@ FLUTTER_DARWIN_EXPORT
 @interface FlutterAppDelegate
     : UIResponder <UIApplicationDelegate, FlutterPluginRegistry, FlutterAppLifeCycleProvider>
 
-@property(strong, nonatomic) UIWindow* window;
+@property(nonatomic, strong, nullable) UIWindow* window;
+
+/**
+ * A user-assignable `FlutterPluginRegistrant` for deferred plugin registration.
+ *
+ * For applications adopting the `UISceneDelegate` lifecycle, the recommended approach is to update
+ * the application's `UIApplicationDelegate` to conform to `FlutterImplicitEngineDelegate` and
+ * perform plugin registration via the generated plugin registrant in the
+ * `didInitializeImplicitFlutterEngine` callback.
+ *
+ * Alternatively, assigning a `FlutterPluginRegistrant` to this property allows Flutter to
+ * automatically handle plugin registration when a `FlutterEngine` becomes available, avoiding
+ * the need to implement delegate callbacks.
+ *
+ * The `FlutterAppDelegate` itself can be assigned to this property without creating a
+ * retain cycle (e.g., `self.pluginRegistrant = self;`).
+ *
+ * @see |FlutterImplicitEngineDelegate|
+ * @see https://docs.flutter.dev/release/breaking-changes/uiscenedelegate
+ */
+@property(nonatomic, strong, nullable) NSObject<FlutterPluginRegistrant>* pluginRegistrant;
 
 @end
 

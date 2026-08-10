@@ -58,16 +58,14 @@ std::optional<Entity> LinearToSrgbFilterContents::RenderFilter(
         VS::PerVertexData{Point(1, 1)},
     };
 
-    auto& host_buffer = renderer.GetTransientsBuffer();
-    pass.SetVertexBuffer(CreateVertexBuffer(vertices, host_buffer));
+    auto& data_host_buffer = renderer.GetTransientsDataBuffer();
+    pass.SetVertexBuffer(CreateVertexBuffer(vertices, data_host_buffer));
 
     VS::FrameInfo frame_info;
     frame_info.mvp = Entity::GetShaderTransform(
         entity.GetShaderClipDepth(), pass,
         entity.GetTransform() * input_snapshot->transform *
             Matrix::MakeScale(Vector2(size)));
-    frame_info.texture_sampler_y_coord_scale =
-        input_snapshot->texture->GetYCoordScale();
 
     FS::FragInfo frag_info;
     frag_info.input_alpha =
@@ -78,8 +76,8 @@ std::optional<Entity> LinearToSrgbFilterContents::RenderFilter(
     FS::BindInputTexture(
         pass, input_snapshot->texture,
         renderer.GetContext()->GetSamplerLibrary()->GetSampler({}));
-    FS::BindFragInfo(pass, host_buffer.EmplaceUniform(frag_info));
-    VS::BindFrameInfo(pass, host_buffer.EmplaceUniform(frame_info));
+    FS::BindFragInfo(pass, data_host_buffer.EmplaceUniform(frag_info));
+    VS::BindFrameInfo(pass, data_host_buffer.EmplaceUniform(frame_info));
 
     return pass.Draw().ok();
   };

@@ -40,6 +40,7 @@ abstract class PageRoute<T> extends ModalRoute<T> {
   /// iOS, dialogs transitions animate differently and are also not closeable
   /// with the back swipe gesture.
   /// {@endtemplate}
+  @override
   final bool fullscreenDialog;
 
   @override
@@ -104,7 +105,7 @@ class PageRouteBuilder<T> extends PageRoute<T> {
   });
 
   /// {@template flutter.widgets.pageRouteBuilder.pageBuilder}
-  /// Used build the route's primary contents.
+  /// Used to build the route's primary contents.
   ///
   /// See [ModalRoute.buildPage] for complete definition of the parameters.
   /// {@endtemplate}
@@ -112,6 +113,13 @@ class PageRouteBuilder<T> extends PageRoute<T> {
 
   /// {@template flutter.widgets.pageRouteBuilder.transitionsBuilder}
   /// Used to build the route's transitions.
+  ///
+  /// The [animation] argument drives this route's own entrance and exit
+  /// transition. The [secondaryAnimation] argument drives transitions for this
+  /// route when another route is pushed on top of it or popped from above it, if
+  /// both routes allow transition coordination. See
+  /// [TransitionRoute.canTransitionTo] and
+  /// [TransitionRoute.canTransitionFrom].
   ///
   /// See [ModalRoute.buildTransitions] for complete definition of the parameters.
   /// {@endtemplate}

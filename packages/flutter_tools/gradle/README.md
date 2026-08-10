@@ -27,9 +27,15 @@ Tests can be run in Android Studio, or directly with Gradle: `./gradlew test`
 the engines `third_party` directory at 
 `<flutter_root>/engine/src/flutter/third_party/gradle/bin/gradle`).
 
-Alternatively, you can run all the tests in one file by passing in the fully qualified class name, 
-e.g. `./gradlew test --tests com.flutter.gradle.BaseApplicationNameHandlerTest`, or one test in 
-one file by passing in the fully qualified class name followed by the method name, 
+If you can not run the test task try running `./gradlew tasks`. If that does not work then there is
+a configuration error. The most common one is using the wrong version of java. Java can be
+overridden by setting the `JAVA_HOME` environment variable.
+This example sets the java version to 17 downloaded with brew and then runs the tests:
+`JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/ ./gradlew test`
+
+You can run all the tests in one file by passing in the fully qualified class name,
+e.g. `./gradlew test --tests com.flutter.gradle.BaseApplicationNameHandlerTest`, or one test in
+one file by passing in the fully qualified class name followed by the method name,
 e.g `./gradlew test --tests "com.flutter.gradle.BaseApplicationNameHandlerTest.setBaseName respects Flutter tool property"`.
 
 Sometimes changing a test name and then running it will cause an IDE error. To get Android Studio back
@@ -37,3 +43,19 @@ to a good state on Mac, run `Help > "Repair IDE"`, and then in the popup window 
 
 To add a new test, add a class under `src/test/kotlin`, with methods annotated with `@Test`.
 These tests will get automatically run on CI by `packages/flutter_tools/test/integration.shard/android_run_flutter_gradle_plugin_tests_test.dart`.
+
+### Kotlin Formatting
+
+We use `ktlint` to enforce Kotlin style rules. The project uses specific configurations for editorconfig and baseline files located in the repo.
+
+To check formatting, run:
+```bash
+ktlint --editorconfig=../../../dev/bots/test/analyze-test-input/.editorconfig --baseline=../../../dev/bots/test/analyze-test-input/ktlint-baseline.xml "src/**/*.kt"
+```
+
+To automatically fix formatting issues, run:
+```bash
+ktlint -F --editorconfig=../../../dev/bots/test/analyze-test-input/.editorconfig --baseline=../../../dev/bots/test/analyze-test-input/ktlint-baseline.xml "src/**/*.kt"
+```
+
+Note: Ensure you are using `ktlint` version 1.5.0. If `ktlint` is not in your PATH, replace `ktlint` with the path to your executable.

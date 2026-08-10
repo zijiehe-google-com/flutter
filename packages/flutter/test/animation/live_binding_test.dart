@@ -7,7 +7,7 @@
 @Tags(<String>['reduced-test-set'])
 library;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -19,16 +19,13 @@ void main() {
   LiveTestWidgetsFlutterBinding().framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.onlyPumps;
 
   testWidgets('Should show event indicator for pointer events', (WidgetTester tester) async {
-    final AnimationSheetBuilder animationSheet = AnimationSheetBuilder(
-      frameSize: const Size(200, 200),
-      allLayers: true,
-    );
+    final animationSheet = AnimationSheetBuilder(frameSize: const Size(200, 200), allLayers: true);
     addTearDown(animationSheet.dispose);
-    final List<Offset> taps = <Offset>[];
+    final taps = <Offset>[];
     Widget target({bool recording = true}) => Container(
       padding: const EdgeInsets.fromLTRB(20, 10, 25, 20),
       child: animationSheet.record(
-        MaterialApp(
+        TestWidgetsApp(
           home: Container(
             decoration: BoxDecoration(
               color: const Color.fromARGB(255, 128, 128, 128),
@@ -38,7 +35,7 @@ void main() {
               child: Container(
                 width: 40,
                 height: 40,
-                color: Colors.black,
+                color: const Color(0xFF000000),
                 child: GestureDetector(
                   onTapDown: (TapDownDetails details) {
                     taps.add(details.globalPosition);
@@ -83,16 +80,16 @@ void main() {
   testWidgets(
     'Should show event indicator for pointer events with setSurfaceSize',
     (WidgetTester tester) async {
-      final AnimationSheetBuilder animationSheet = AnimationSheetBuilder(
+      final animationSheet = AnimationSheetBuilder(
         frameSize: const Size(200, 200),
         allLayers: true,
       );
       addTearDown(animationSheet.dispose);
-      final List<Offset> taps = <Offset>[];
+      final taps = <Offset>[];
       Widget target({bool recording = true}) => Container(
         padding: const EdgeInsets.fromLTRB(20, 10, 25, 20),
         child: animationSheet.record(
-          MaterialApp(
+          TestWidgetsApp(
             home: Container(
               decoration: BoxDecoration(
                 color: const Color.fromARGB(255, 128, 128, 128),
@@ -102,7 +99,7 @@ void main() {
                 child: Container(
                   width: 40,
                   height: 40,
-                  color: Colors.black,
+                  color: const Color(0xFF000000),
                   child: GestureDetector(
                     onTapDown: (TapDownDetails details) {
                       taps.add(details.globalPosition);

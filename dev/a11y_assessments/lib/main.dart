@@ -15,26 +15,40 @@ void main() {
   }
 }
 
+ThemeData _buildTheme({required Brightness brightness, double contrastLevel = 0.0}) {
+  final scheme = ColorScheme.fromSeed(
+    brightness: brightness,
+    seedColor: const Color(0xff6750a4),
+    contrastLevel: contrastLevel,
+  );
+  return ThemeData(
+    colorScheme: scheme,
+    appBarTheme: AppBarTheme(backgroundColor: scheme.primary, foregroundColor: scheme.onPrimary),
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: <TargetPlatform, PageTransitionsBuilder>{
+        for (final TargetPlatform platform in TargetPlatform.values)
+          platform: const FadeForwardsPageTransitionsBuilder(),
+      },
+    ),
+  );
+}
+
+final ThemeData _lightTheme = _buildTheme(brightness: Brightness.light);
+final ThemeData _darkTheme = _buildTheme(brightness: Brightness.dark);
+final ThemeData _highContrastTheme = _buildTheme(brightness: Brightness.light, contrastLevel: 1.0);
+final ThemeData _highContrastDarkTheme = _buildTheme(
+  brightness: Brightness.dark,
+  contrastLevel: 1.0,
+);
+
 class App extends StatelessWidget {
-  const App({super.key});
+  const App({super.key, this.initialTags = const <Tag>{Tag.batch2}});
+
+  final Set<Tag> initialTags;
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData lightTheme = ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xff6750a4),
-        contrastLevel: MediaQuery.highContrastOf(context) ? 1.0 : 0.0,
-      ),
-    );
-    final ThemeData darkTheme = ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        brightness: Brightness.dark,
-        seedColor: const Color(0xff6750a4),
-        contrastLevel: MediaQuery.highContrastOf(context) ? 1.0 : 0.0,
-      ),
-    );
-
-    final Map<String, WidgetBuilder> routes = Map<String, WidgetBuilder>.fromEntries(
+    final routes = Map<String, WidgetBuilder>.fromEntries(
       useCases.map(
         (UseCase useCase) => MapEntry<String, WidgetBuilder>(
           useCase.route,
@@ -44,16 +58,24 @@ class App extends StatelessWidget {
     );
 
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Accessibility Assessments Home Page',
-      theme: lightTheme,
-      darkTheme: darkTheme,
-      routes: <String, WidgetBuilder>{'/': (_) => const HomePage(), ...routes},
+      theme: _lightTheme,
+      darkTheme: _darkTheme,
+      highContrastTheme: _highContrastTheme,
+      highContrastDarkTheme: _highContrastDarkTheme,
+      routes: <String, WidgetBuilder>{
+        '/': (_) => HomePage(initialTags: initialTags),
+        ...routes,
+      },
     );
   }
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, required this.initialTags});
+
+  final Set<Tag> initialTags;
 
   @override
   State<HomePage> createState() => HomePageState();
@@ -61,6 +83,14 @@ class HomePage extends StatefulWidget {
 
 class HomePageState extends State<HomePage> {
   final ScrollController scrollController = ScrollController();
+
+  late Set<Tag> _selectedTags;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedTags = Set<Tag>.from(widget.initialTags);
+  }
 
   @override
   void dispose() {
@@ -75,8 +105,8 @@ class HomePageState extends State<HomePage> {
         builder: (BuildContext context) {
           return TextButton(
             key: Key(useCase.name),
-            onPressed:
-                () => Navigator.of(context).pushNamed(useCase.route, arguments: useCase.name),
+            onPressed: () =>
+                Navigator.of(context).pushNamed(useCase.route, arguments: useCase.name),
             child: Text(useCase.name),
           );
         },
@@ -86,16 +116,53 @@ class HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final List<UseCase> effectiveUseCases = useCases.where((UseCase useCase) {
+      return _selectedTags.isEmpty || _selectedTags.every((Tag tag) => useCase.tags.contains(tag));
+    }).toList();
+
     return Scaffold(
       appBar: AppBar(
         title: Semantics(headingLevel: 1, child: const Text('Accessibility Assessments')),
+        actions: <Widget>[
+          MenuAnchor(
+            builder: (BuildContext context, MenuController controller, Widget? child) {
+              return IconButton(
+                tooltip: 'Filter by tags',
+                icon: const Icon(Icons.filter_list),
+                onPressed: () {
+                  if (controller.isOpen) {
+                    controller.close();
+                  } else {
+                    controller.open();
+                  }
+                },
+              );
+            },
+            menuChildren: Tag.values.map((Tag tag) {
+              return CheckboxMenuButton(
+                closeOnActivate: false,
+                value: _selectedTags.contains(tag),
+                onChanged: (bool? value) {
+                  setState(() {
+                    if (value ?? false) {
+                      _selectedTags.add(tag);
+                    } else {
+                      _selectedTags.remove(tag);
+                    }
+                  });
+                },
+                child: Tooltip(message: tag.description, child: Text(tag.name)),
+              );
+            }).toList(),
+          ),
+        ],
       ),
       body: Center(
         child: ListView(
           controller: scrollController,
           children: List<Widget>.generate(
-            useCases.length,
-            (int index) => _buildUseCaseItem(index, useCases[index]),
+            effectiveUseCases.length,
+            (int index) => _buildUseCaseItem(index, effectiveUseCases[index]),
           ),
         ),
       ),

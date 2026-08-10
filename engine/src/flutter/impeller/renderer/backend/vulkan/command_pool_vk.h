@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "impeller/base/thread.h"
+#include "impeller/renderer/backend/vulkan/device_holder_vk.h"
 #include "impeller/renderer/backend/vulkan/vk.h"  // IWYU pragma: keep.
 #include "vulkan/vulkan_handles.hpp"
 
@@ -39,10 +40,12 @@ class CommandPoolVK final {
   /// @param[in]  recycler  The context that will be notified on destruction.
   CommandPoolVK(vk::UniqueCommandPool pool,
                 std::vector<vk::UniqueCommandBuffer>&& buffers,
-                std::weak_ptr<ContextVK>& context)
+                std::weak_ptr<ContextVK> context,
+                std::weak_ptr<DeviceHolderVK> device_holder)
       : pool_(std::move(pool)),
         unused_command_buffers_(std::move(buffers)),
-        context_(context) {}
+        context_(std::move(context)),
+        device_holder_(std::move(device_holder)) {}
 
   /// @brief      Creates and returns a new |vk::CommandBuffer|.
   ///
@@ -58,10 +61,12 @@ class CommandPoolVK final {
   /// @see        |GarbageCollectBuffersIfAble|
   void CollectCommandBuffer(vk::UniqueCommandBuffer&& buffer);
 
+ private:
+  friend CommandPoolRecyclerVK;
+
   /// @brief      Delete all Vulkan objects in this command pool.
   void Destroy();
 
- private:
   CommandPoolVK(const CommandPoolVK&) = delete;
 
   CommandPoolVK& operator=(const CommandPoolVK&) = delete;
@@ -69,11 +74,12 @@ class CommandPoolVK final {
   Mutex pool_mutex_;
   vk::UniqueCommandPool pool_ IPLR_GUARDED_BY(pool_mutex_);
   std::vector<vk::UniqueCommandBuffer> unused_command_buffers_;
-  std::weak_ptr<ContextVK>& context_;
+  std::weak_ptr<ContextVK> context_;
+  std::weak_ptr<DeviceHolderVK> device_holder_;
 
   // Used to retain a reference on these until the pool is reset.
-  std::vector<vk::UniqueCommandBuffer> collected_buffers_ IPLR_GUARDED_BY(
-      pool_mutex_);
+  std::vector<vk::UniqueCommandBuffer> collected_buffers_
+      IPLR_GUARDED_BY(pool_mutex_);
 };
 
 //------------------------------------------------------------------------------
@@ -103,8 +109,6 @@ class CommandPoolVK final {
 class CommandPoolRecyclerVK final
     : public std::enable_shared_from_this<CommandPoolRecyclerVK> {
  public:
-  ~CommandPoolRecyclerVK();
-
   /// A unique command pool and zero or more recycled command buffers.
   struct RecycledData {
     vk::UniqueCommandPool pool;
@@ -112,16 +116,13 @@ class CommandPoolRecyclerVK final
   };
 
   /// @brief      Clean up resources held by all per-thread command pools
-  ///             associated with the given context.
-  ///
-  /// @param[in]  context The context.
-  static void DestroyThreadLocalPools(const ContextVK* context);
+  ///             associated with the context.
+  void DestroyThreadLocalPools();
 
   /// @brief      Creates a recycler for the given |ContextVK|.
   ///
   /// @param[in]  context The context to create the recycler for.
-  explicit CommandPoolRecyclerVK(std::weak_ptr<ContextVK> context)
-      : context_(std::move(context)) {}
+  explicit CommandPoolRecyclerVK(const std::shared_ptr<ContextVK>& context);
 
   /// @brief      Gets a command pool for the current thread.
   ///
@@ -137,11 +138,15 @@ class CommandPoolRecyclerVK final
                std::vector<vk::UniqueCommandBuffer>&& buffers,
                bool should_trim = false);
 
-  /// @brief      Clears all recycled command pools to let them be reclaimed.
+  /// @brief      Clears this context's thread-local command pool.
   void Dispose();
+
+  // Visible for testing.
+  static int GetGlobalPoolCount(const ContextVK& context);
 
  private:
   std::weak_ptr<ContextVK> context_;
+  uint64_t context_hash_;
 
   Mutex recycled_mutex_;
   std::vector<RecycledData> recycled_ IPLR_GUARDED_BY(recycled_mutex_);

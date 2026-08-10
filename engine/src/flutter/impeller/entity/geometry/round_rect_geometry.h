@@ -8,6 +8,7 @@
 #include "impeller/entity/geometry/fill_path_geometry.h"
 #include "impeller/entity/geometry/geometry.h"
 #include "impeller/entity/geometry/stroke_path_geometry.h"
+#include "impeller/geometry/round_rect.h"
 
 namespace impeller {
 
@@ -28,7 +29,7 @@ class RoundRectGeometry final : public Geometry {
   ~RoundRectGeometry() override;
 
   // |Geometry|
-  bool CoversArea(const Matrix& transform, const Rect& rect) const override;
+  bool CoversArea(const Matrix& transform, const IRect& rect) const override;
 
   // |Geometry|
   bool IsAxisAlignedRect() const override;
@@ -60,7 +61,7 @@ class FillRoundRectGeometry final : public FillPathSourceGeometry {
   explicit FillRoundRectGeometry(const RoundRect& round_rect);
 
   // |Geometry|
-  bool CoversArea(const Matrix& transform, const Rect& rect) const override;
+  bool CoversArea(const Matrix& transform, const IRect& rect) const override;
 
  protected:
   // |FillPathSourceGeometry|

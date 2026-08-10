@@ -10,41 +10,19 @@ import 'package:ui/src/engine.dart';
 import 'package:ui/src/engine/skwasm/skwasm_impl.dart';
 import 'package:ui/ui.dart' as ui;
 
-class SkwasmImage extends SkwasmObjectWrapper<RawImage> implements ui.Image {
-  SkwasmImage(ImageHandle handle) : super(handle, _registry) {
-    ui.Image.onCreate?.call(this);
-  }
+/// A WebAssembly-backed implementation of [BackendImage] using Skwasm.
+///
+/// This class wraps a native C/C++ image reference ([ImageHandle]) allocated
+/// inside the Skwasm WebAssembly module.
+class SkwasmImage implements BackendImage {
+  SkwasmImage(this.handle);
 
-  factory SkwasmImage.fromPixels(
-    Uint8List pixels,
-    int width,
-    int height,
-    ui.PixelFormat format, {
-    int? rowBytes,
-  }) {
-    final SkDataHandle dataHandle = skDataCreate(pixels.length);
-    final Pointer<Uint8> dataPointer = skDataGetPointer(dataHandle).cast<Uint8>();
-    for (int i = 0; i < pixels.length; i++) {
-      dataPointer[i] = pixels[i];
-    }
-    final ImageHandle imageHandle = imageCreateFromPixels(
-      dataHandle,
-      width,
-      height,
-      format.index,
-      rowBytes ?? 4 * width,
-    );
-    skDataDispose(dataHandle);
-    return SkwasmImage(imageHandle);
-  }
-
-  static final SkwasmFinalizationRegistry<RawImage> _registry =
-      SkwasmFinalizationRegistry<RawImage>((ImageHandle handle) => imageDispose(handle));
+  /// The native pointer/handle to the image inside the Skwasm instance.
+  final ImageHandle handle;
 
   @override
   void dispose() {
-    super.dispose();
-    ui.Image.onDispose?.call(this);
+    imageDispose(handle);
   }
 
   @override
@@ -54,49 +32,45 @@ class SkwasmImage extends SkwasmObjectWrapper<RawImage> implements ui.Image {
   int get height => imageGetHeight(handle);
 
   @override
-  Future<ByteData?> toByteData({ui.ImageByteFormat format = ui.ImageByteFormat.rawRgba}) async {
-    if (format == ui.ImageByteFormat.png) {
-      final ui.PictureRecorder recorder = ui.PictureRecorder();
-      final ui.Canvas canvas = ui.Canvas(recorder);
-      canvas.drawImage(this, ui.Offset.zero, ui.Paint());
-      final DomImageBitmap bitmap =
-          (await (renderer as SkwasmRenderer).surface.renderPictures(<SkwasmPicture>[
-            recorder.endRecording() as SkwasmPicture,
-          ])).imageBitmaps.single;
-      final DomOffscreenCanvas offscreenCanvas = createDomOffscreenCanvas(
-        bitmap.width,
-        bitmap.height,
-      );
-      final DomImageBitmapRenderingContext context =
-          offscreenCanvas.getContext('bitmaprenderer')! as DomImageBitmapRenderingContext;
-      context.transferFromImageBitmap(bitmap);
-      final DomBlob blob = await offscreenCanvas.convertToBlob();
-      final JSArrayBuffer arrayBuffer = (await blob.arrayBuffer().toDart)! as JSArrayBuffer;
-
-      // Zero out the contents of the canvas so that resources can be reclaimed
-      // by the browser.
-      context.transferFromImageBitmap(null);
-      return ByteData.view(arrayBuffer.toDart);
-    } else {
-      return (renderer as SkwasmRenderer).surface.rasterizeImage(this, format);
-    }
+  bool isCloneOf(BackendImage other) {
+    // Check if the other backend image is a SkwasmImage referencing the identical native handle.
+    return other is SkwasmImage && handle == other.handle;
   }
+}
 
-  @override
-  ui.ColorSpace get colorSpace => ui.ColorSpace.sRGB;
+/// Creates a new [EngineImage] backed by a Skwasm image from a raw pixel buffer.
+///
+/// The [pixels] argument contains the raw image bytes.
+/// The [width] and [height] are the dimensions of the image.
+/// The [format] specifies the layout of color channels in the buffer.
+/// The optional [rowBytes] defines the step length between two scan lines.
+SkwasmImage createSkwasmImageFromPixels(
+  Uint8List pixels,
+  int width,
+  int height,
+  ui.PixelFormat format, {
+  int? rowBytes,
+}) {
+  final SkDataHandle dataHandle = skDataCreate(pixels.length);
+  try {
+    final int dataAddress = skDataGetPointer(dataHandle).cast<Uint8>().address;
 
-  @override
-  SkwasmImage clone() {
-    imageRef(handle);
-    return SkwasmImage(handle);
+    // To avoid a slow element-by-element copy in Dart, we obtain the raw memory
+    // address of the WASM buffer, create a JSUint8Array view pointing directly
+    // to the Skwasm WASM linear memory heap, and perform a high-performance,
+    // browser-native bulk copy (memcpy) of the pixel bytes.
+    final wasmMemory = JSUint8Array(skwasmInstance.wasmMemory.buffer);
+    wasmMemory.set(pixels.toJS, dataAddress);
+
+    final ImageHandle imageHandle = imageCreateFromPixels(
+      dataHandle,
+      width,
+      height,
+      format.index,
+      rowBytes ?? 4 * width,
+    );
+    return SkwasmImage(imageHandle);
+  } finally {
+    skDataDispose(dataHandle);
   }
-
-  @override
-  bool isCloneOf(ui.Image other) => other is SkwasmImage && handle == other.handle;
-
-  @override
-  List<StackTrace>? debugGetOpenHandleStackTraces() => null;
-
-  @override
-  String toString() => '[$width\u00D7$height]';
 }

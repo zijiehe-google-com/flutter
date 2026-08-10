@@ -4,6 +4,7 @@
 
 /// @docImport 'package:flutter/cupertino.dart';
 /// @docImport 'package:flutter/material.dart';
+/// @docImport 'package:flutter/semantics.dart';
 /// @docImport 'package:flutter/services.dart';
 ///
 /// @docImport 'app.dart';
@@ -100,8 +101,14 @@ enum _MediaQueryAspect {
   /// Specifies the aspect corresponding to [MediaQueryData.disableAnimations].
   disableAnimations,
 
+  /// Specifies the aspect corresponding to [MediaQueryData.reduceMotion].
+  reduceMotion,
+
   /// Specifies the aspect corresponding to [MediaQueryData.boldText].
   boldText,
+
+  /// Specifies the aspect corresponding to [MediaQueryData.supportsAnnounce].
+  supportsAnnounce,
 
   /// Specifies the aspect corresponding to [MediaQueryData.navigationMode].
   navigationMode,
@@ -114,6 +121,21 @@ enum _MediaQueryAspect {
 
   /// Specifies the aspect corresponding to [MediaQueryData.supportsShowingSystemContextMenu].
   supportsShowingSystemContextMenu,
+
+  /// Specifies the aspect corresponding to [MediaQueryData.lineHeightScaleFactorOverride].
+  lineHeightScaleFactorOverride,
+
+  /// Specifies the aspect corresponding to [MediaQueryData.letterSpacingOverride].
+  letterSpacingOverride,
+
+  /// Specifies the aspect corresponding to [MediaQueryData.wordSpacingOverride].
+  wordSpacingOverride,
+
+  /// Specifies the aspect corresponding to [MediaQueryData.paragraphSpacingOverride].
+  paragraphSpacingOverride,
+
+  /// Specifies the aspect corresponding to [MediaQueryData.displayCornerRadii].
+  displayCornerRadii,
 }
 
 /// Information about a piece of media (e.g., a window).
@@ -209,11 +231,18 @@ class MediaQueryData {
     this.highContrast = false,
     this.onOffSwitchLabels = false,
     this.disableAnimations = false,
+    this.reduceMotion = false,
     this.boldText = false,
+    this.supportsAnnounce = false,
     this.navigationMode = NavigationMode.traditional,
     this.gestureSettings = const DeviceGestureSettings(touchSlop: kTouchSlop),
     this.displayFeatures = const <ui.DisplayFeature>[],
     this.supportsShowingSystemContextMenu = false,
+    this.lineHeightScaleFactorOverride,
+    this.letterSpacingOverride,
+    this.wordSpacingOverride,
+    this.paragraphSpacingOverride,
+    this.displayCornerRadii,
   }) : _textScaleFactor = textScaleFactor,
        _textScaler = textScaler,
        assert(
@@ -294,7 +323,12 @@ class MediaQueryData {
       disableAnimations =
           platformData?.disableAnimations ??
           view.platformDispatcher.accessibilityFeatures.disableAnimations,
+      reduceMotion =
+          platformData?.reduceMotion ?? view.platformDispatcher.accessibilityFeatures.reduceMotion,
       boldText = platformData?.boldText ?? view.platformDispatcher.accessibilityFeatures.boldText,
+      supportsAnnounce =
+          platformData?.supportsAnnounce ??
+          view.platformDispatcher.accessibilityFeatures.supportsAnnounce,
       highContrast =
           platformData?.highContrast ?? view.platformDispatcher.accessibilityFeatures.highContrast,
       onOffSwitchLabels =
@@ -307,12 +341,35 @@ class MediaQueryData {
       displayFeatures = view.displayFeatures,
       supportsShowingSystemContextMenu =
           platformData?.supportsShowingSystemContextMenu ??
-          view.platformDispatcher.supportsShowingSystemContextMenu;
+          view.platformDispatcher.supportsShowingSystemContextMenu,
+      lineHeightScaleFactorOverride =
+          platformData?.lineHeightScaleFactorOverride ??
+          view.platformDispatcher.lineHeightScaleFactorOverride,
+      letterSpacingOverride =
+          platformData?.letterSpacingOverride ?? view.platformDispatcher.letterSpacingOverride,
+      wordSpacingOverride =
+          platformData?.wordSpacingOverride ?? view.platformDispatcher.wordSpacingOverride,
+      paragraphSpacingOverride =
+          platformData?.paragraphSpacingOverride ??
+          view.platformDispatcher.paragraphSpacingOverride,
+      displayCornerRadii = _displayCornerRadiiFromView(view);
 
   static TextScaler _textScalerFromView(ui.FlutterView view, MediaQueryData? platformData) {
-    final double scaleFactor =
-        platformData?.textScaleFactor ?? view.platformDispatcher.textScaleFactor;
-    return scaleFactor == 1.0 ? TextScaler.noScaling : TextScaler.linear(scaleFactor);
+    return platformData?.textScaler ?? SystemTextScaler._(view.platformDispatcher);
+  }
+
+  static BorderRadius? _displayCornerRadiiFromView(ui.FlutterView view) {
+    final ui.DisplayCornerRadii? displayCornerRadii = view.displayCornerRadii;
+    if (displayCornerRadii == null) {
+      return null;
+    }
+    final double devicePixelRatio = view.devicePixelRatio;
+    return BorderRadius.only(
+      topLeft: Radius.circular(displayCornerRadii.topLeft / devicePixelRatio),
+      topRight: Radius.circular(displayCornerRadii.topRight / devicePixelRatio),
+      bottomRight: Radius.circular(displayCornerRadii.bottomRight / devicePixelRatio),
+      bottomLeft: Radius.circular(displayCornerRadii.bottomLeft / devicePixelRatio),
+    );
   }
 
   /// The size of the media in logical pixels (e.g, the size of the screen).
@@ -354,9 +411,13 @@ class MediaQueryData {
   ///   a [BuildContext].
   final Size size;
 
-  /// The number of device pixels for each logical pixel. This number might not
-  /// be a power of two. Indeed, it might not even be an integer. For example,
-  /// the Nexus 6 has a device pixel ratio of 3.5.
+  /// The number of device pixels for each logical pixel of the encompassing [FlutterView].
+  /// This number might not be a power of two. Indeed, it might not even be an integer.
+  /// For example, the Nexus 6 has a device pixel ratio of 3.5.
+  ///
+  /// This property is typically only informational. Overriding this property does not
+  /// rescale the app as the Flutter framework or its rendering pipeline usually
+  /// does not read this value.
   final double devicePixelRatio;
 
   /// Deprecated. Will be removed in a future version of Flutter. Use
@@ -529,6 +590,21 @@ class MediaQueryData {
   /// - On iOS this flag is set to true when the user setting called "24-Hour
   ///   Time" is set or the system-wide locale's default uses 24-hour
   ///   formatting.
+  /// - On macOS this flag reflects the current system locale's time format,
+  ///   which incorporates the "24-Hour Time" preference in System Settings.
+  ///   As on iOS, this only takes effect for the system locale; a custom
+  ///   locale passed to the application will ignore the 24-hour preference.
+  /// - On Windows this flag is derived from the user's "Short time" format
+  ///   in the Region settings; it is true when the configured format uses a
+  ///   24-hour pattern.
+  /// - On Linux this flag reflects the desktop environment's clock-format
+  ///   setting where available (for example,
+  ///   `org.gnome.desktop.interface.clock-format` on GNOME). On desktops
+  ///   that do not expose such a setting, it defaults to true (24-hour).
+  /// - On Web this flag is always false. The Flutter web engine does not
+  ///   currently populate it from the browser's locale settings, even though
+  ///   the browser exposes a preferred hour cycle via
+  ///   `Intl.DateTimeFormat.resolvedOptions().hourCycle`.
   final bool alwaysUse24HourFormat;
 
   /// Whether the user is using an accessibility service like TalkBack or
@@ -542,7 +618,15 @@ class MediaQueryData {
   ///  * [dart:ui.PlatformDispatcher.accessibilityFeatures], where the setting originates.
   final bool accessibleNavigation;
 
-  /// Whether the device is inverting the colors of the platform.
+  /// Whether the operating system is currently inverting the colors of the platform.
+  ///
+  /// This flag indicates that the underlying OS is already performing a global
+  /// color inversion at the screen level. It does not mean the Flutter framework
+  /// will automatically invert its own layout painting.
+  ///
+  /// Instead, this flag allows the application to react to the inversion. For
+  /// example, by selectively re-inverting images, maps, or video playback so that
+  /// they display with natural colors instead of looking like a film negative.
   ///
   /// This flag is currently only updated on iOS devices.
   ///
@@ -552,11 +636,25 @@ class MediaQueryData {
   ///    originates.
   final bool invertColors;
 
-  /// Whether the user requested a high contrast between foreground and background
-  /// content on iOS, via Settings -> Accessibility -> Increase Contrast.
+  /// Whether the platform is requesting a high contrast between foreground and
+  /// background content.
   ///
-  /// This flag is currently only updated on iOS devices that are running iOS 13
-  /// or above.
+  /// On iOS, this corresponds to the "Increase Contrast" setting in
+  /// Settings -> Accessibility. On Android, this corresponds to the "High
+  /// contrast text" or similar accessibility settings.
+  ///
+  /// This flag indicates that the operating system is already performing
+  /// high-contrast adjustments or expects the application to adjust its
+  /// color palette to meet higher accessibility standards.
+  ///
+  /// Changing this value manually in a [MediaQuery] override will not
+  /// automatically trigger a theme change in [MaterialApp]. Instead, [MaterialApp]
+  /// uses this value to decide whether to use [MaterialApp.highContrastTheme]
+  /// or [MaterialApp.highContrastDarkTheme].
+
+  ///
+  /// This flag is currently only updated on iOS devices running iOS 13+
+  /// and Android devices running API 34+.
   final bool highContrast;
 
   /// Whether the user requested to show on/off labels inside switches on iOS,
@@ -571,11 +669,57 @@ class MediaQueryData {
   /// Whether the platform is requesting that animations be disabled or reduced
   /// as much as possible.
   ///
+  /// This corresponds to Android's "Remove animations" accessibility setting.
+  ///
+  /// On iOS, reduced motion is exposed separately via
+  /// [dart:ui.AccessibilityFeatures.reduceMotion] and does not set this flag.
+  ///
+  /// This value is read directly from the engine via
+  /// [SemanticsBinding.disableAnimations]. As a result, it is used by
+  /// framework-level animation APIs such as [AnimationController] and cannot be
+  /// overridden using [MediaQuery].
+  ///
+  /// Manually overriding this value in a [MediaQuery] widget will not affect
+  /// framework animations (for example those driven by [AnimationController]).
+  /// However, it can still be useful for testing or for custom widgets that
+  /// explicitly read [MediaQueryData.disableAnimations].
+  ///
+  /// When implementing custom explicit animations, you should check this
+  /// property and adjust behavior accordingly (for example, by reducing
+  /// duration or skipping non-essential animations when it is true).
+  ///
   /// See also:
   ///
+  ///  * [AnimationController], which adjusts its playback behavior based on this setting.
+  ///  * [AnimationBehavior], which defines how animations behave when this setting is active.
+  ///  * [dart:ui.AccessibilityFeatures.disableAnimations], the underlying primitive
+  ///    flag provided by the platform.
   ///  * [dart:ui.PlatformDispatcher.accessibilityFeatures], where the setting
   ///    originates.
   final bool disableAnimations;
+
+  /// Whether the platform is requesting that animations be reduced or replaced
+  /// with cross-fades in preference to motion effects.
+  ///
+  /// This corresponds to the iOS "Reduce Motion" accessibility setting.
+  ///
+  /// Unlike [disableAnimations], this flag does not automatically alter
+  /// framework animations such as those controlled via [AnimationController].
+  /// Instead, it is intended to be read by widgets that want to tone down or
+  /// replace non-essential motion, for example by substituting a cross-fade
+  /// for a slide transition.
+  ///
+  /// When implementing custom animations, you should check this property and
+  /// adjust behavior accordingly; for example, by preferring a fade over
+  /// movement when it is true.
+  ///
+  /// See also:
+  ///
+  ///  * [dart:ui.AccessibilityFeatures.reduceMotion], the underlying primitive
+  ///    flag provided by the platform.
+  ///  * [dart:ui.PlatformDispatcher.accessibilityFeatures], where the setting
+  ///    originates.
+  final bool reduceMotion;
 
   /// Whether the platform is requesting that text be drawn with a bold font
   /// weight.
@@ -585,6 +729,21 @@ class MediaQueryData {
   ///  * [dart:ui.PlatformDispatcher.accessibilityFeatures], where the setting
   ///    originates.
   final bool boldText;
+
+  /// Whether accessibility announcements (like [SemanticsService.sendAnnouncement])
+  /// are supported on the current platform.
+  ///
+  /// Returns `false` on platforms where announcements are deprecated or
+  /// unsupported by the underlying platform.
+  ///
+  /// Returns `true` on platforms where such announcements are
+  /// generally supported without discouragement. (iOS, web etc)
+  ///
+  /// See also:
+  ///
+  ///  * [dart:ui.PlatformDispatcher.accessibilityFeatures], where the setting
+  ///    originates.
+  final bool supportsAnnounce;
 
   /// Describes the navigation mode requested by the platform.
   ///
@@ -634,6 +793,64 @@ class MediaQueryData {
   ///    supported.
   final bool supportsShowingSystemContextMenu;
 
+  /// Overrides the height of the text, as a multiple of the font size.
+  ///
+  /// Returns `null` when the platform has not set an override
+  /// for text height.
+  ///
+  /// See also:
+  ///
+  ///  * [Text], [SelectableText], and [EditableText], all of whose
+  ///  [TextStyle.height] and [StrutStyle.height] are overridden by
+  ///  [lineHeightScaleFactorOverride].
+  final double? lineHeightScaleFactorOverride;
+
+  /// Overrides the amount of space (in logical pixels) to add between each
+  /// letter in a piece of text.
+  ///
+  /// A negative value can be used to bring the letters closer.
+  ///
+  /// Returns `null` when the platform has not set an override
+  /// for text letter spacing.
+  ///
+  /// See also:
+  ///
+  ///  * [Text], [SelectableText], and [EditableText], all of whose
+  ///  [TextStyle.letterSpacing] is overridden by [letterSpacingOverride].
+  final double? letterSpacingOverride;
+
+  /// Overrides the amount of space (in logical pixels) to add at each
+  /// sequence of white-space (i.e. between each word) in a piece of text.
+  ///
+  /// A negative value can be used to bring the words closer.
+  ///
+  /// Returns `null` when the platform has not set an override
+  /// for text word spacing.
+  ///
+  /// See also:
+  ///
+  ///  * [Text], [SelectableText], and [EditableText], all of whose
+  ///  [TextStyle.wordSpacing] is overridden by [wordSpacingOverride].
+  final double? wordSpacingOverride;
+
+  /// The amount of space (in logical pixels) to add following each paragraph
+  /// in a piece of text.
+  ///
+  /// Returns `null` when the platform has not set an override
+  /// for text paragraph spacing.
+  final double? paragraphSpacingOverride;
+
+  /// The radii of the display corners in logical pixels.
+  ///
+  /// This is currently populated only on Android API 31+. On earlier Android
+  /// versions, iOS, and other platforms, this value is `null`.
+  ///
+  /// See also:
+  ///
+  ///  * [FlutterView.displayCornerRadii], which returns the display corner
+  ///    radii in physical pixels.
+  final BorderRadius? displayCornerRadii;
+
   /// The orientation of the media (e.g., whether the device is in landscape or
   /// portrait mode).
   Orientation get orientation {
@@ -664,9 +881,11 @@ class MediaQueryData {
     bool? highContrast,
     bool? onOffSwitchLabels,
     bool? disableAnimations,
+    bool? reduceMotion,
     bool? invertColors,
     bool? accessibleNavigation,
     bool? boldText,
+    bool? supportsAnnounce,
     NavigationMode? navigationMode,
     DeviceGestureSettings? gestureSettings,
     List<ui.DisplayFeature>? displayFeatures,
@@ -690,13 +909,104 @@ class MediaQueryData {
       highContrast: highContrast ?? this.highContrast,
       onOffSwitchLabels: onOffSwitchLabels ?? this.onOffSwitchLabels,
       disableAnimations: disableAnimations ?? this.disableAnimations,
+      reduceMotion: reduceMotion ?? this.reduceMotion,
       accessibleNavigation: accessibleNavigation ?? this.accessibleNavigation,
       boldText: boldText ?? this.boldText,
+      supportsAnnounce: supportsAnnounce ?? this.supportsAnnounce,
       navigationMode: navigationMode ?? this.navigationMode,
       gestureSettings: gestureSettings ?? this.gestureSettings,
       displayFeatures: displayFeatures ?? this.displayFeatures,
       supportsShowingSystemContextMenu:
           supportsShowingSystemContextMenu ?? this.supportsShowingSystemContextMenu,
+      lineHeightScaleFactorOverride: lineHeightScaleFactorOverride,
+      letterSpacingOverride: letterSpacingOverride,
+      wordSpacingOverride: wordSpacingOverride,
+      paragraphSpacingOverride: paragraphSpacingOverride,
+      displayCornerRadii: displayCornerRadii,
+    );
+  }
+
+  /// Creates a copy of this media query data but with the
+  /// `lineHeightScaleFactorOverride`, `letterSpacingOverride`,
+  /// `wordSpacingOverride`, and `paragraphSpacingOverride` replaced
+  /// with the given values.
+  ///
+  /// If an argument is null (the default), then this [MediaQueryData]
+  /// is returned with the corresponding override set to null.
+  ///
+  /// See also:
+  ///
+  ///  * [MediaQuery.applyTextStyleOverrides], which uses this method to apply
+  ///    text style overrides to the ambient [MediaQuery].
+  MediaQueryData applyTextStyleOverrides({
+    required double? lineHeightScaleFactorOverride,
+    required double? letterSpacingOverride,
+    required double? wordSpacingOverride,
+    required double? paragraphSpacingOverride,
+  }) {
+    return MediaQueryData(
+      size: size,
+      devicePixelRatio: devicePixelRatio,
+      textScaler: textScaler,
+      platformBrightness: platformBrightness,
+      padding: padding,
+      viewPadding: viewPadding,
+      viewInsets: viewInsets,
+      systemGestureInsets: systemGestureInsets,
+      alwaysUse24HourFormat: alwaysUse24HourFormat,
+      invertColors: invertColors,
+      highContrast: highContrast,
+      onOffSwitchLabels: onOffSwitchLabels,
+      disableAnimations: disableAnimations,
+      reduceMotion: reduceMotion,
+      accessibleNavigation: accessibleNavigation,
+      boldText: boldText,
+      supportsAnnounce: supportsAnnounce,
+      navigationMode: navigationMode,
+      gestureSettings: gestureSettings,
+      displayFeatures: displayFeatures,
+      supportsShowingSystemContextMenu: supportsShowingSystemContextMenu,
+      lineHeightScaleFactorOverride: lineHeightScaleFactorOverride,
+      letterSpacingOverride: letterSpacingOverride,
+      wordSpacingOverride: wordSpacingOverride,
+      paragraphSpacingOverride: paragraphSpacingOverride,
+      displayCornerRadii: displayCornerRadii,
+    );
+  }
+
+  /// Creates a copy of this media query data but with the `displayCornerRadii`
+  /// replaced with the given value.
+  ///
+  /// If the argument is null (the default), then this [MediaQueryData]
+  /// is returned with the `displayCornerRadii` set to null.
+  MediaQueryData applyDisplayCornerRadii(BorderRadius? displayCornerRadii) {
+    return MediaQueryData(
+      size: size,
+      devicePixelRatio: devicePixelRatio,
+      textScaler: textScaler,
+      platformBrightness: platformBrightness,
+      padding: padding,
+      viewPadding: viewPadding,
+      viewInsets: viewInsets,
+      systemGestureInsets: systemGestureInsets,
+      alwaysUse24HourFormat: alwaysUse24HourFormat,
+      invertColors: invertColors,
+      highContrast: highContrast,
+      onOffSwitchLabels: onOffSwitchLabels,
+      disableAnimations: disableAnimations,
+      reduceMotion: reduceMotion,
+      accessibleNavigation: accessibleNavigation,
+      boldText: boldText,
+      supportsAnnounce: supportsAnnounce,
+      navigationMode: navigationMode,
+      gestureSettings: gestureSettings,
+      displayFeatures: displayFeatures,
+      supportsShowingSystemContextMenu: supportsShowingSystemContextMenu,
+      lineHeightScaleFactorOverride: lineHeightScaleFactorOverride,
+      letterSpacingOverride: letterSpacingOverride,
+      wordSpacingOverride: wordSpacingOverride,
+      paragraphSpacingOverride: paragraphSpacingOverride,
+      displayCornerRadii: displayCornerRadii,
     );
   }
 
@@ -864,12 +1174,9 @@ class MediaQueryData {
         right: math.max(0.0, viewInsets.right - rightInset),
         bottom: math.max(0.0, viewInsets.bottom - bottomInset),
       ),
-      displayFeatures:
-          displayFeatures
-              .where(
-                (ui.DisplayFeature displayFeature) => subScreen.overlaps(displayFeature.bounds),
-              )
-              .toList(),
+      displayFeatures: displayFeatures
+          .where((ui.DisplayFeature displayFeature) => subScreen.overlaps(displayFeature.bounds))
+          .toList(),
     );
   }
 
@@ -891,13 +1198,20 @@ class MediaQueryData {
         other.highContrast == highContrast &&
         other.onOffSwitchLabels == onOffSwitchLabels &&
         other.disableAnimations == disableAnimations &&
+        other.reduceMotion == reduceMotion &&
         other.invertColors == invertColors &&
         other.accessibleNavigation == accessibleNavigation &&
         other.boldText == boldText &&
+        other.supportsAnnounce == supportsAnnounce &&
         other.navigationMode == navigationMode &&
         other.gestureSettings == gestureSettings &&
         listEquals(other.displayFeatures, displayFeatures) &&
-        other.supportsShowingSystemContextMenu == supportsShowingSystemContextMenu;
+        other.supportsShowingSystemContextMenu == supportsShowingSystemContextMenu &&
+        other.lineHeightScaleFactorOverride == lineHeightScaleFactorOverride &&
+        other.letterSpacingOverride == letterSpacingOverride &&
+        other.wordSpacingOverride == wordSpacingOverride &&
+        other.paragraphSpacingOverride == paragraphSpacingOverride &&
+        other.displayCornerRadii == displayCornerRadii;
   }
 
   @override
@@ -913,6 +1227,7 @@ class MediaQueryData {
     highContrast,
     onOffSwitchLabels,
     disableAnimations,
+    reduceMotion,
     invertColors,
     accessibleNavigation,
     boldText,
@@ -920,11 +1235,18 @@ class MediaQueryData {
     gestureSettings,
     Object.hashAll(displayFeatures),
     supportsShowingSystemContextMenu,
+    Object.hash(
+      lineHeightScaleFactorOverride,
+      letterSpacingOverride,
+      wordSpacingOverride,
+      paragraphSpacingOverride,
+      displayCornerRadii,
+    ),
   );
 
   @override
   String toString() {
-    final List<String> properties = <String>[
+    final properties = <String>[
       'size: $size',
       'devicePixelRatio: ${devicePixelRatio.toStringAsFixed(1)}',
       'textScaler: $textScaler',
@@ -938,12 +1260,18 @@ class MediaQueryData {
       'highContrast: $highContrast',
       'onOffSwitchLabels: $onOffSwitchLabels',
       'disableAnimations: $disableAnimations',
+      'reduceMotion: $reduceMotion',
       'invertColors: $invertColors',
       'boldText: $boldText',
       'navigationMode: ${navigationMode.name}',
       'gestureSettings: $gestureSettings',
       'displayFeatures: $displayFeatures',
       'supportsShowingSystemContextMenu: $supportsShowingSystemContextMenu',
+      'lineHeightScaleFactorOverride: $lineHeightScaleFactorOverride',
+      'letterSpacingOverride: $letterSpacingOverride',
+      'wordSpacingOverride: $wordSpacingOverride',
+      'paragraphSpacingOverride: $paragraphSpacingOverride',
+      'displayCornerRadii: $displayCornerRadii',
     ];
     return '${objectRuntimeType(this, 'MediaQueryData')}(${properties.join(', ')})';
   }
@@ -1093,6 +1421,46 @@ class MediaQuery extends InheritedModel<_MediaQueryAspect> {
          removeRight: removeRight,
          removeBottom: removeBottom,
        );
+
+  /// Wraps the `child` in a [MediaQuery] with its [MediaQueryData.lineHeightScaleFactorOverride],
+  /// [MediaQueryData.letterSpacingOverride], [MediaQueryData.wordSpacingOverride],
+  /// [MediaQueryData.paragraphSpacingOverride] set to the specified values.
+  ///
+  /// If a text style override argument is null (the default), then the
+  /// corresponding override in the updated [MediaQueryData] is set to null.
+  ///
+  /// The returned widget must be inserted in a widget tree below an existing
+  /// [MediaQuery] widget.
+  ///
+  /// See also:
+  ///
+  ///  * [MediaQueryData.lineHeightScaleFactorOverride], [MediaQueryData.letterSpacingOverride],
+  ///    [MediaQueryData.wordSpacingOverride], [MediaQueryData.paragraphSpacingOverride], the
+  ///    affected properties of the [MediaQueryData].
+  static Widget applyTextStyleOverrides({
+    Key? key,
+    required double? lineHeightScaleFactorOverride,
+    required double? letterSpacingOverride,
+    required double? wordSpacingOverride,
+    required double? paragraphSpacingOverride,
+    required Widget child,
+  }) {
+    return Builder(
+      key: key,
+      builder: (BuildContext context) {
+        assert(debugCheckHasMediaQuery(context));
+        return MediaQuery(
+          data: MediaQuery.of(context).applyTextStyleOverrides(
+            lineHeightScaleFactorOverride: lineHeightScaleFactorOverride,
+            letterSpacingOverride: letterSpacingOverride,
+            wordSpacingOverride: wordSpacingOverride,
+            paragraphSpacingOverride: paragraphSpacingOverride,
+          ),
+          child: child,
+        );
+      },
+    );
+  }
 
   /// Deprecated. Use [MediaQuery.fromView] instead.
   ///
@@ -1694,6 +2062,28 @@ class MediaQuery extends InheritedModel<_MediaQueryAspect> {
   static bool? maybeDisableAnimationsOf(BuildContext context) =>
       _maybeOf(context, _MediaQueryAspect.disableAnimations)?.disableAnimations;
 
+  /// Returns [MediaQueryData.reduceMotion] for the nearest [MediaQuery]
+  /// ancestor or false, if no such ancestor exists.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.reduceMotion] property of the ancestor
+  /// [MediaQuery] changes.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseOf}
+  static bool reduceMotionOf(BuildContext context) =>
+      _of(context, _MediaQueryAspect.reduceMotion).reduceMotion;
+
+  /// Returns [MediaQueryData.reduceMotion] for the nearest [MediaQuery]
+  /// ancestor or null, if no such ancestor exists.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.reduceMotion] property of the ancestor
+  /// [MediaQuery] changes.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseMaybeOf}
+  static bool? maybeReduceMotionOf(BuildContext context) =>
+      _maybeOf(context, _MediaQueryAspect.reduceMotion)?.reduceMotion;
+
   /// Returns the [MediaQueryData.boldText] accessibility setting for the
   /// nearest [MediaQuery] ancestor or false, if no such ancestor exists.
   ///
@@ -1714,6 +2104,30 @@ class MediaQuery extends InheritedModel<_MediaQueryAspect> {
   /// {@macro flutter.widgets.media_query.MediaQuery.dontUseMaybeOf}
   static bool? maybeBoldTextOf(BuildContext context) =>
       _maybeOf(context, _MediaQueryAspect.boldText)?.boldText;
+
+  /// Returns the [MediaQueryData.supportsAnnounce] accessibility setting for the
+  /// nearest [MediaQuery] ancestor or false, if no such ancestor exists.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.supportsAnnounce] property of the ancestor [MediaQuery]
+  /// changes. This is especially important for supportsAnnounce because supportsAnnounce has a
+  /// low frequency change rate. The performance difference between rebuilding
+  /// for all media query data changes and only rebuilding for supportsAnnounce is a
+  /// dramatic difference.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseOf}
+  static bool supportsAnnounceOf(BuildContext context) => maybeSupportsAnnounceOf(context) ?? false;
+
+  /// Returns the [MediaQueryData.supportsAnnounce] accessibility setting for the
+  /// nearest [MediaQuery] ancestor or null, if no such ancestor exists.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.supportsAnnounce] property of the ancestor [MediaQuery]
+  /// changes.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseMaybeOf}
+  static bool? maybeSupportsAnnounceOf(BuildContext context) =>
+      _maybeOf(context, _MediaQueryAspect.supportsAnnounce)?.supportsAnnounce;
 
   /// Returns [MediaQueryData.navigationMode] for the nearest [MediaQuery]
   /// ancestor or throws an exception, if no such ancestor exists.
@@ -1789,11 +2203,10 @@ class MediaQuery extends InheritedModel<_MediaQueryAspect> {
   /// ancestor [MediaQuery] changes.
   ///
   /// {@macro flutter.widgets.media_query.MediaQuery.dontUseOf}
-  static bool supportsShowingSystemContextMenu(BuildContext context) =>
-      _of(
-        context,
-        _MediaQueryAspect.supportsShowingSystemContextMenu,
-      ).supportsShowingSystemContextMenu;
+  static bool supportsShowingSystemContextMenu(BuildContext context) => _of(
+    context,
+    _MediaQueryAspect.supportsShowingSystemContextMenu,
+  ).supportsShowingSystemContextMenu;
 
   /// Returns [MediaQueryData.supportsShowingSystemContextMenu] for the nearest
   /// [MediaQuery] ancestor or null, if no such ancestor exists.
@@ -1803,11 +2216,85 @@ class MediaQuery extends InheritedModel<_MediaQueryAspect> {
   /// ancestor [MediaQuery] changes.
   ///
   /// {@macro flutter.widgets.media_query.MediaQuery.dontUseMaybeOf}
-  static bool? maybeSupportsShowingSystemContextMenu(BuildContext context) =>
-      _maybeOf(
-        context,
-        _MediaQueryAspect.supportsShowingSystemContextMenu,
-      )?.supportsShowingSystemContextMenu;
+  static bool? maybeSupportsShowingSystemContextMenu(BuildContext context) => _maybeOf(
+    context,
+    _MediaQueryAspect.supportsShowingSystemContextMenu,
+  )?.supportsShowingSystemContextMenu;
+
+  /// Returns the [MediaQueryData.lineHeightScaleFactorOverride] for the nearest
+  /// [MediaQuery] ancestor or null, if no such ancestor exists or if the platform
+  /// has not specified an override.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.lineHeightScaleFactorOverride] property of the ancestor [MediaQuery]
+  /// changes.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseMaybeOf}
+  static double? maybeLineHeightScaleFactorOverrideOf(BuildContext context) => _maybeOf(
+    context,
+    _MediaQueryAspect.lineHeightScaleFactorOverride,
+  )?.lineHeightScaleFactorOverride;
+
+  /// Returns the [MediaQueryData.letterSpacingOverride] for the nearest
+  /// [MediaQuery] ancestor or null, if no such ancestor exists or if the platform
+  /// has not specified an override.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.letterSpacingOverride] property of the ancestor [MediaQuery]
+  /// changes.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseMaybeOf}
+  static double? maybeLetterSpacingOverrideOf(BuildContext context) =>
+      _maybeOf(context, _MediaQueryAspect.letterSpacingOverride)?.letterSpacingOverride;
+
+  /// Returns the [MediaQueryData.wordSpacingOverride] for the nearest
+  /// [MediaQuery] ancestor or null, if no such ancestor exists or if the platform
+  /// has not specified an override.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.wordSpacingOverride] property of the ancestor [MediaQuery]
+  /// changes.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseMaybeOf}
+  static double? maybeWordSpacingOverrideOf(BuildContext context) =>
+      _maybeOf(context, _MediaQueryAspect.wordSpacingOverride)?.wordSpacingOverride;
+
+  /// Returns the [MediaQueryData.paragraphSpacingOverride] for the nearest
+  /// [MediaQuery] ancestor or null, if no such ancestor exists or if the platform
+  /// has not specified an override.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.paragraphSpacingOverride] property of the ancestor [MediaQuery]
+  /// changes.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseMaybeOf}
+  // TODO(Renzo-Olivares): Investigate ways the framework can automatically
+  // apply this override to its own text components.
+  // See: https://github.com/flutter/flutter/issues/177953 and https://github.com/flutter/flutter/issues/177408.
+  static double? maybeParagraphSpacingOverrideOf(BuildContext context) =>
+      _maybeOf(context, _MediaQueryAspect.paragraphSpacingOverride)?.paragraphSpacingOverride;
+
+  /// Returns [MediaQueryData.displayCornerRadii] for the nearest [MediaQuery]
+  /// ancestor or throws an exception, if no such ancestor exists.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.displayCornerRadii] property of the ancestor [MediaQuery]
+  /// changes.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseOf}
+  static BorderRadius? displayCornerRadiiOf(BuildContext context) =>
+      _of(context, _MediaQueryAspect.displayCornerRadii).displayCornerRadii;
+
+  /// Returns [MediaQueryData.displayCornerRadii] for the nearest [MediaQuery]
+  /// ancestor or null, if no such ancestor exists.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [MediaQueryData.displayCornerRadii] property of the ancestor [MediaQuery]
+  /// changes.
+  ///
+  /// {@macro flutter.widgets.media_query.MediaQuery.dontUseMaybeOf}
+  static BorderRadius? maybeDisplayCornerRadiiOf(BuildContext context) =>
+      _maybeOf(context, _MediaQueryAspect.displayCornerRadii)?.displayCornerRadii;
 
   @override
   bool updateShouldNotify(MediaQuery oldWidget) => data != oldWidget.data;
@@ -1844,7 +2331,10 @@ class MediaQuery extends InheritedModel<_MediaQueryAspect> {
               data.onOffSwitchLabels != oldWidget.data.onOffSwitchLabels,
             _MediaQueryAspect.disableAnimations =>
               data.disableAnimations != oldWidget.data.disableAnimations,
+            _MediaQueryAspect.reduceMotion => data.reduceMotion != oldWidget.data.reduceMotion,
             _MediaQueryAspect.boldText => data.boldText != oldWidget.data.boldText,
+            _MediaQueryAspect.supportsAnnounce =>
+              data.supportsAnnounce != oldWidget.data.supportsAnnounce,
             _MediaQueryAspect.navigationMode =>
               data.navigationMode != oldWidget.data.navigationMode,
             _MediaQueryAspect.gestureSettings =>
@@ -1860,6 +2350,16 @@ class MediaQuery extends InheritedModel<_MediaQueryAspect> {
             _MediaQueryAspect.supportsShowingSystemContextMenu =>
               data.supportsShowingSystemContextMenu !=
                   oldWidget.data.supportsShowingSystemContextMenu,
+            _MediaQueryAspect.lineHeightScaleFactorOverride =>
+              data.lineHeightScaleFactorOverride != oldWidget.data.lineHeightScaleFactorOverride,
+            _MediaQueryAspect.letterSpacingOverride =>
+              data.letterSpacingOverride != oldWidget.data.letterSpacingOverride,
+            _MediaQueryAspect.wordSpacingOverride =>
+              data.wordSpacingOverride != oldWidget.data.wordSpacingOverride,
+            _MediaQueryAspect.paragraphSpacingOverride =>
+              data.paragraphSpacingOverride != oldWidget.data.paragraphSpacingOverride,
+            _MediaQueryAspect.displayCornerRadii =>
+              data.displayCornerRadii != oldWidget.data.displayCornerRadii,
           },
     );
   }
@@ -1945,7 +2445,7 @@ class _MediaQueryFromViewState extends State<_MediaQueryFromView> with WidgetsBi
   }
 
   void _updateData() {
-    final MediaQueryData newData = MediaQueryData.fromView(widget.view, platformData: _parentData);
+    final newData = MediaQueryData.fromView(widget.view, platformData: _parentData);
     if (newData != _data) {
       setState(() {
         _data = newData;
@@ -2019,12 +2519,58 @@ class _UnspecifiedTextScaler implements TextScaler {
   const _UnspecifiedTextScaler();
 
   @override
-  TextScaler clamp({double minScaleFactor = 0, double maxScaleFactor = double.infinity}) =>
+  Never clamp({double minScaleFactor = 0, double maxScaleFactor = double.infinity}) =>
       throw UnimplementedError();
+  @override
+  Never scale(double fontSize) => throw UnimplementedError();
+  @override
+  Never get textScaleFactor => throw UnimplementedError();
+}
+
+/// A [TextScaler] that reflects the user's font scale preferences from the
+/// platform's accessibility settings.
+final class SystemTextScaler extends TextScaler {
+  SystemTextScaler._(this._platformDispatcher)
+    : textScaleFactor = _platformDispatcher.textScaleFactor;
+
+  final ui.PlatformDispatcher _platformDispatcher;
+  @override
+  double scale(double fontSize) => _platformDispatcher.scaleFontSize(fontSize);
+
+  /// A value that represents the current user preference for the scaling factor
+  /// for fonts.
+  ///
+  /// This numeric value is typically used to compare [SystemTextScaler]s. Two
+  /// [SystemTextScaler] instances with the same [textScaleFactor] are considered
+  /// equal as their [scale] methods produce the same output when given the same
+  /// input font size. However, [textScaleFactor] should not be used in arithmetic
+  /// operations.
+  // TODO(LongCatIsLooong): consider changing the type to Comparable<OpaqueWrapper>
+  // once  `MediaQueryData.textScaleFactor` is removed:
+  // https://github.com/flutter/flutter/issues/128825.
+  @override
+  final double textScaleFactor;
 
   @override
-  double scale(double fontSize) => throw UnimplementedError();
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return switch (other) {
+      // The system's text scale factor is used for the equality check because the
+      // `scale` function's output monotonically increases with the text scale factor.
+      SystemTextScaler(:final double textScaleFactor) => this.textScaleFactor == textScaleFactor,
+      // When textScaleFactor is 1.0, the two TextScalers are extensionally
+      // equivalent.
+      TextScaler.noScaling => textScaleFactor == 1.0,
+      _ => false,
+    };
+  }
 
   @override
-  double get textScaleFactor => throw UnimplementedError();
+  int get hashCode => textScaleFactor.hashCode;
+
+  @override
+  String toString() =>
+      'SystemTextScaler (${textScaleFactor == 1.0 ? "no scaling" : "${textScaleFactor}x"})';
 }

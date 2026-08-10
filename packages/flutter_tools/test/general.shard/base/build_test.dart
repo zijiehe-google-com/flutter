@@ -12,35 +12,14 @@ import 'package:flutter_tools/src/macos/xcode.dart';
 import '../../src/common.dart';
 import '../../src/fake_process_manager.dart';
 
-const FakeCommand kWhichSysctlCommand = FakeCommand(command: <String>['which', 'sysctl']);
-
-const FakeCommand kARMCheckCommand = FakeCommand(
-  command: <String>['sysctl', 'hw.optional.arm64'],
-  exitCode: 1,
-);
-
-const List<String> kDefaultClang = <String>[
-  '-miphoneos-version-min=13.0',
-  '-isysroot',
-  'path/to/sdk',
-  '-dynamiclib',
-  '-Xlinker',
-  '-rpath',
-  '-Xlinker',
-  '@executable_path/Frameworks',
-  '-Xlinker',
-  '-rpath',
-  '-Xlinker',
-  '@loader_path/Frameworks',
-  '-fapplication-extension',
-  '-install_name',
-  '@rpath/App.framework/App',
-  '-o',
-  'build/foo/App.framework/App',
-  'build/foo/snapshot_assembly.o',
-];
-
 void main() {
+  const kWhichSysctlCommand = FakeCommand(command: <String>['which', 'sysctl']);
+
+  // x64 host.
+  const kx64CheckCommand = FakeCommand(
+    command: <String>['sysctl', 'hw.optional.arm64'],
+    exitCode: 1,
+  );
   group('GenSnapshot', () {
     late GenSnapshot genSnapshot;
     late Artifacts artifacts;
@@ -91,7 +70,7 @@ void main() {
 
       final int result = await genSnapshot.run(
         snapshotType: SnapshotType(TargetPlatform.ios, BuildMode.release),
-        darwinArch: DarwinArch.arm64,
+        cpuArch: CpuArch.arm64,
         additionalArgs: <String>['--additional_arg'],
       );
       expect(result, 0);
@@ -151,7 +130,7 @@ void main() {
       expect(
         await snapshotter.build(
           platform: TargetPlatform.ios,
-          darwinArch: DarwinArch.arm64,
+          cpuArch: CpuArch.arm64,
           sdkRoot: 'path/to/sdk',
           buildMode: BuildMode.debug,
           mainPath: 'main.dill',
@@ -194,7 +173,6 @@ void main() {
 
     testWithoutContext('builds iOS snapshot with dwarfStackTraces', () async {
       final String outputPath = fileSystem.path.join('build', 'foo');
-      final String assembly = fileSystem.path.join(outputPath, 'snapshot_assembly.S');
       final String debugPath = fileSystem.path.join('foo', 'app.ios-arm64.symbols');
       final String genSnapshotPath = artifacts.getArtifactPath(
         Artifact.genSnapshotArm64,
@@ -206,8 +184,12 @@ void main() {
           command: <String>[
             genSnapshotPath,
             '--deterministic',
-            '--snapshot_kind=app-aot-assembly',
-            '--assembly=$assembly',
+            '--snapshot_kind=app-aot-macho-dylib',
+            '--macho=$outputPath/App.framework/App',
+            '--macho-object=$outputPath/app.o',
+            '--macho-min-os-version=15.0',
+            '--macho-rpath=@executable_path/Frameworks,@loader_path/Frameworks',
+            '--macho-install-name=@rpath/App.framework/App',
             '--dwarf-stack-traces',
             '--resolve-dwarf-paths',
             '--save-debugging-info=$debugPath',
@@ -215,40 +197,24 @@ void main() {
           ],
         ),
         kWhichSysctlCommand,
-        kARMCheckCommand,
-        const FakeCommand(
-          command: <String>[
-            'xcrun',
-            'cc',
-            '-arch',
-            'arm64',
-            '-miphoneos-version-min=13.0',
-            '-isysroot',
-            'path/to/sdk',
-            '-c',
-            'build/foo/snapshot_assembly.S',
-            '-o',
-            'build/foo/snapshot_assembly.o',
-          ],
-        ),
-        const FakeCommand(command: <String>['xcrun', 'clang', '-arch', 'arm64', ...kDefaultClang]),
-        const FakeCommand(
+        kx64CheckCommand,
+        FakeCommand(
           command: <String>[
             'xcrun',
             'dsymutil',
             '-o',
-            'build/foo/App.framework.dSYM',
-            'build/foo/App.framework/App',
+            '$outputPath/App.framework.dSYM',
+            '$outputPath/App.framework/App',
           ],
         ),
-        const FakeCommand(
+        FakeCommand(
           command: <String>[
             'xcrun',
             'strip',
             '-x',
-            'build/foo/App.framework/App',
+            '$outputPath/App.framework/App',
             '-o',
-            'build/foo/App.framework/App',
+            '$outputPath/App.framework/App',
           ],
         ),
       ]);
@@ -258,7 +224,7 @@ void main() {
         buildMode: BuildMode.profile,
         mainPath: 'main.dill',
         outputPath: outputPath,
-        darwinArch: DarwinArch.arm64,
+        cpuArch: CpuArch.arm64,
         sdkRoot: 'path/to/sdk',
         splitDebugInfo: 'foo',
         dartObfuscation: false,
@@ -270,7 +236,6 @@ void main() {
 
     testWithoutContext('builds iOS snapshot with obfuscate', () async {
       final String outputPath = fileSystem.path.join('build', 'foo');
-      final String assembly = fileSystem.path.join(outputPath, 'snapshot_assembly.S');
       final String genSnapshotPath = artifacts.getArtifactPath(
         Artifact.genSnapshotArm64,
         platform: TargetPlatform.ios,
@@ -281,47 +246,35 @@ void main() {
           command: <String>[
             genSnapshotPath,
             '--deterministic',
-            '--snapshot_kind=app-aot-assembly',
-            '--assembly=$assembly',
+            '--snapshot_kind=app-aot-macho-dylib',
+            '--macho=$outputPath/App.framework/App',
+            '--macho-object=$outputPath/app.o',
+            '--macho-min-os-version=15.0',
+            '--macho-rpath=@executable_path/Frameworks,@loader_path/Frameworks',
+            '--macho-install-name=@rpath/App.framework/App',
             '--obfuscate',
             'main.dill',
           ],
         ),
         kWhichSysctlCommand,
-        kARMCheckCommand,
-        const FakeCommand(
-          command: <String>[
-            'xcrun',
-            'cc',
-            '-arch',
-            'arm64',
-            '-miphoneos-version-min=13.0',
-            '-isysroot',
-            'path/to/sdk',
-            '-c',
-            'build/foo/snapshot_assembly.S',
-            '-o',
-            'build/foo/snapshot_assembly.o',
-          ],
-        ),
-        const FakeCommand(command: <String>['xcrun', 'clang', '-arch', 'arm64', ...kDefaultClang]),
-        const FakeCommand(
+        kx64CheckCommand,
+        FakeCommand(
           command: <String>[
             'xcrun',
             'dsymutil',
             '-o',
-            'build/foo/App.framework.dSYM',
-            'build/foo/App.framework/App',
+            '$outputPath/App.framework.dSYM',
+            '$outputPath/App.framework/App',
           ],
         ),
-        const FakeCommand(
+        FakeCommand(
           command: <String>[
             'xcrun',
             'strip',
             '-x',
-            'build/foo/App.framework/App',
+            '$outputPath/App.framework/App',
             '-o',
-            'build/foo/App.framework/App',
+            '$outputPath/App.framework/App',
           ],
         ),
       ]);
@@ -331,7 +284,7 @@ void main() {
         buildMode: BuildMode.profile,
         mainPath: 'main.dill',
         outputPath: outputPath,
-        darwinArch: DarwinArch.arm64,
+        cpuArch: CpuArch.arm64,
         sdkRoot: 'path/to/sdk',
         dartObfuscation: true,
       );
@@ -352,46 +305,34 @@ void main() {
           command: <String>[
             genSnapshotPath,
             '--deterministic',
-            '--snapshot_kind=app-aot-assembly',
-            '--assembly=${fileSystem.path.join(outputPath, 'snapshot_assembly.S')}',
+            '--snapshot_kind=app-aot-macho-dylib',
+            '--macho=$outputPath/App.framework/App',
+            '--macho-object=$outputPath/app.o',
+            '--macho-min-os-version=15.0',
+            '--macho-rpath=@executable_path/Frameworks,@loader_path/Frameworks',
+            '--macho-install-name=@rpath/App.framework/App',
             'main.dill',
           ],
         ),
         kWhichSysctlCommand,
-        kARMCheckCommand,
-        const FakeCommand(
-          command: <String>[
-            'xcrun',
-            'cc',
-            '-arch',
-            'arm64',
-            '-miphoneos-version-min=13.0',
-            '-isysroot',
-            'path/to/sdk',
-            '-c',
-            'build/foo/snapshot_assembly.S',
-            '-o',
-            'build/foo/snapshot_assembly.o',
-          ],
-        ),
-        const FakeCommand(command: <String>['xcrun', 'clang', '-arch', 'arm64', ...kDefaultClang]),
-        const FakeCommand(
+        kx64CheckCommand,
+        FakeCommand(
           command: <String>[
             'xcrun',
             'dsymutil',
             '-o',
-            'build/foo/App.framework.dSYM',
-            'build/foo/App.framework/App',
+            '$outputPath/App.framework.dSYM',
+            '$outputPath/App.framework/App',
           ],
         ),
-        const FakeCommand(
+        FakeCommand(
           command: <String>[
             'xcrun',
             'strip',
             '-x',
-            'build/foo/App.framework/App',
+            '$outputPath/App.framework/App',
             '-o',
-            'build/foo/App.framework/App',
+            '$outputPath/App.framework/App',
           ],
         ),
       ]);
@@ -401,7 +342,7 @@ void main() {
         buildMode: BuildMode.release,
         mainPath: 'main.dill',
         outputPath: outputPath,
-        darwinArch: DarwinArch.arm64,
+        cpuArch: CpuArch.arm64,
         sdkRoot: 'path/to/sdk',
         dartObfuscation: false,
       );
@@ -423,7 +364,6 @@ void main() {
             '--deterministic',
             '--snapshot_kind=app-aot-elf',
             '--elf=build/foo/app.so',
-            '--strip',
             '--no-sim-use-hardfp',
             '--no-use-integer-division',
             'main.dill',
@@ -457,7 +397,6 @@ void main() {
             '--deterministic',
             '--snapshot_kind=app-aot-elf',
             '--elf=build/foo/app.so',
-            '--strip',
             '--no-sim-use-hardfp',
             '--no-use-integer-division',
             '--dwarf-stack-traces',
@@ -494,7 +433,6 @@ void main() {
             '--deterministic',
             '--snapshot_kind=app-aot-elf',
             '--elf=build/foo/app.so',
-            '--strip',
             '--no-sim-use-hardfp',
             '--no-use-integer-division',
             '--obfuscate',
@@ -530,7 +468,6 @@ void main() {
               '--deterministic',
               '--snapshot_kind=app-aot-elf',
               '--elf=build/foo/app.so',
-              '--strip',
               '--no-sim-use-hardfp',
               '--no-use-integer-division',
               'main.dill',
@@ -565,7 +502,6 @@ void main() {
             '--deterministic',
             '--snapshot_kind=app-aot-elf',
             '--elf=build/foo/app.so',
-            '--strip',
             'main.dill',
           ],
         ),

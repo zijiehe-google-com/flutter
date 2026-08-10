@@ -32,6 +32,7 @@ namespace egl {
 enum class GpuPreference {
   NoPreference,
   LowPowerPreference,
+  HighPerformancePreference,
 };
 
 // A manager for initializing ANGLE correctly and using it to create and
@@ -70,6 +71,9 @@ class Manager {
   // Gets the |EGLDisplay|.
   EGLDisplay egl_display() const { return display_; };
 
+  // Gets the |EGLConfig|.
+  EGLConfig egl_config() const { return config_; };
+
   // Gets the |ID3D11Device| chosen by ANGLE.
   bool GetDevice(ID3D11Device** device);
 
@@ -81,6 +85,8 @@ class Manager {
 
   static std::optional<LUID> GetLowPowerGpuLuid();
 
+  static std::optional<LUID> GetHighPerformanceGpuLuid();
+
  protected:
   // Creates a new surface manager retaining reference to the passed-in target
   // for the lifetime of the manager.
@@ -89,6 +95,10 @@ class Manager {
  private:
   // Number of active instances of Manager
   static int instance_count_;
+
+  // Helper function to get GPU LUID by preference.
+  static std::optional<LUID> GetGpuLuidByPreference(
+      DXGI_GPU_PREFERENCE preference);
 
   // Initialize the EGL display.
   bool InitializeDisplay(GpuPreference gpu_preference);

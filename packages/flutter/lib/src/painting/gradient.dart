@@ -53,10 +53,9 @@ _ColorsAndStops _interpolateColorsAndStops(
   assert(bColors.length >= 2);
   assert(aStops.length == aColors.length);
   assert(bStops.length == bColors.length);
-  final SplayTreeSet<double> stops =
-      SplayTreeSet<double>()
-        ..addAll(aStops)
-        ..addAll(bStops);
+  final stops = SplayTreeSet<double>()
+    ..addAll(aStops)
+    ..addAll(bStops);
   final List<double> interpolatedStops = stops.toList(growable: false);
   final List<Color> interpolatedColors = interpolatedStops
       .map<Color>(
@@ -121,7 +120,7 @@ class GradientRotation extends GradientTransform {
     final double originY = -sinRadians * center.dx + oneMinusCosRadians * center.dy;
 
     return Matrix4.identity()
-      ..translate(originX, originY)
+      ..translateByDouble(originX, originY, 0, 1)
       ..rotateZ(radians);
   }
 
@@ -238,6 +237,26 @@ abstract class Gradient {
 
   /// Returns a new [Gradient] with each color set to the given opacity.
   Gradient withOpacity(double opacity);
+
+  /// Returns a copy of this gradient with all of its [colors] replaced by the
+  /// given `color`.
+  ///
+  /// The geometry of the gradient (such as its [stops] and the
+  /// subclass-specific positioning) is preserved, so the result paints as a
+  /// uniform `color`. This is useful to represent a solid color as a gradient,
+  /// for example when interpolating between a color and a gradient with [lerp].
+  ///
+  /// Subclasses should override this method to preserve their own geometry. The
+  /// base implementation returns a [LinearGradient]; this is sufficient because
+  /// a gradient with uniform colors paints as a solid color regardless of its
+  /// geometry.
+  Gradient fromColor(Color color) {
+    return LinearGradient(
+      colors: List<Color>.filled(colors.length, color),
+      stops: stops,
+      transform: transform,
+    );
+  }
 
   /// Linearly interpolates from another [Gradient] to `this`.
   ///
@@ -453,6 +472,19 @@ class LinearGradient extends Gradient {
       colors: colors.map<Color>((Color color) => Color.lerp(null, color, factor)!).toList(),
       stops: stops,
       tileMode: tileMode,
+      transform: transform,
+    );
+  }
+
+  @override
+  LinearGradient fromColor(Color color) {
+    return LinearGradient(
+      begin: begin,
+      end: end,
+      colors: List<Color>.filled(colors.length, color),
+      stops: stops,
+      tileMode: tileMode,
+      transform: transform,
     );
   }
 
@@ -547,7 +579,7 @@ class LinearGradient extends Gradient {
 
   @override
   String toString() {
-    final List<String> description = <String>[
+    final description = <String>[
       'begin: $begin',
       'end: $end',
       'colors: $colors',
@@ -746,6 +778,21 @@ class RadialGradient extends Gradient {
       tileMode: tileMode,
       focal: focal,
       focalRadius: focalRadius,
+      transform: transform,
+    );
+  }
+
+  @override
+  RadialGradient fromColor(Color color) {
+    return RadialGradient(
+      center: center,
+      radius: radius,
+      colors: List<Color>.filled(colors.length, color),
+      stops: stops,
+      tileMode: tileMode,
+      focal: focal,
+      focalRadius: focalRadius,
+      transform: transform,
     );
   }
 
@@ -846,7 +893,7 @@ class RadialGradient extends Gradient {
 
   @override
   String toString() {
-    final List<String> description = <String>[
+    final description = <String>[
       'center: $center',
       'radius: ${debugFormatDouble(radius)}',
       'colors: $colors',
@@ -985,18 +1032,41 @@ class SweepGradient extends Gradient {
 
   /// The angle in radians at which stop 0.0 of the gradient is placed.
   ///
+  /// The angle is measured in radians clockwise from the positive x-axis.
+  ///
+  /// Values outside the range `[0, 2π]` are normalized to the equivalent angle
+  /// within this range using modulo arithmetic.
+  ///
+  /// The gradient will be painted in the sector between [startAngle] and [endAngle].
+  /// The behavior outside this sector is determined by [tileMode].
+  ///
   /// Defaults to 0.0.
   final double startAngle;
 
   /// The angle in radians at which stop 1.0 of the gradient is placed.
   ///
-  /// Defaults to math.pi * 2.
+  /// The angle is measured in radians clockwise from the positive x-axis.
+  ///
+  /// Values outside the range `[0, 2π]` are normalized to the equivalent angle
+  /// within this range using modulo arithmetic.
+  ///
+  /// The gradient will be painted in the sector between [startAngle] and [endAngle].
+  /// The behavior outside this sector is determined by [tileMode].
+  ///
+  /// Defaults to math.pi * 2 (2π = a full circle).
   final double endAngle;
 
-  /// How this gradient should tile the plane beyond in the region before
+  /// How this gradient should tile the plane in the region before
   /// [startAngle] and after [endAngle].
   ///
-  /// For details, see [TileMode].
+  /// The gradient will be painted in the sector between [startAngle] and
+  /// [endAngle]. The [tileMode] determines what happens in the remaining area:
+  ///
+  /// * [TileMode.clamp]: The edge colors are extended to fill the remaining area.
+  /// * [TileMode.repeated]: The gradient is repeated in the angular direction.
+  /// * [TileMode.mirror]: The gradient is mirrored in the angular direction.
+  /// * [TileMode.decal]: Only the gradient is drawn, leaving the remaining area
+  ///   transparent.
   ///
   /// ![](https://flutter.github.io/assets-for-api-docs/assets/dart-ui/tile_mode_clamp_sweep.png)
   /// ![](https://flutter.github.io/assets-for-api-docs/assets/dart-ui/tile_mode_decal_sweep.png)
@@ -1030,6 +1100,20 @@ class SweepGradient extends Gradient {
       colors: colors.map<Color>((Color color) => Color.lerp(null, color, factor)!).toList(),
       stops: stops,
       tileMode: tileMode,
+      transform: transform,
+    );
+  }
+
+  @override
+  SweepGradient fromColor(Color color) {
+    return SweepGradient(
+      center: center,
+      startAngle: startAngle,
+      endAngle: endAngle,
+      colors: List<Color>.filled(colors.length, color),
+      stops: stops,
+      tileMode: tileMode,
+      transform: transform,
     );
   }
 
@@ -1126,7 +1210,7 @@ class SweepGradient extends Gradient {
 
   @override
   String toString() {
-    final List<String> description = <String>[
+    final description = <String>[
       'center: $center',
       'startAngle: ${debugFormatDouble(startAngle)}',
       'endAngle: ${debugFormatDouble(endAngle)}',

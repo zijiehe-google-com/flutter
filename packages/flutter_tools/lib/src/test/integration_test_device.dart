@@ -15,9 +15,9 @@ import '../globals.dart' as globals;
 import '../vmservice.dart';
 import 'test_device.dart';
 
-const String kIntegrationTestExtension = 'Flutter.IntegrationTest';
-const String kIntegrationTestData = 'data';
-const String kIntegrationTestMethod = 'ext.flutter.integrationTest';
+const kIntegrationTestExtension = 'Flutter.IntegrationTest';
+const kIntegrationTestData = 'data';
+const kIntegrationTestMethod = 'ext.flutter.integrationTest';
 
 class IntegrationTestTestDevice implements TestDevice {
   IntegrationTestTestDevice({
@@ -26,6 +26,7 @@ class IntegrationTestTestDevice implements TestDevice {
     required this.debuggingOptions,
     required this.userIdentifier,
     required this.compileExpression,
+    this.ddsShutdownTimeout = const Duration(seconds: 5),
   });
 
   final int id;
@@ -33,11 +34,12 @@ class IntegrationTestTestDevice implements TestDevice {
   final DebuggingOptions debuggingOptions;
   final String? userIdentifier;
   final CompileExpression? compileExpression;
-  late final DartDevelopmentService _ddsLauncher = DartDevelopmentService(logger: globals.logger);
+  final Duration ddsShutdownTimeout;
+  late final _ddsLauncher = DartDevelopmentService(logger: globals.logger);
 
   ApplicationPackage? _applicationPackage;
-  final Completer<void> _finished = Completer<void>();
-  final Completer<Uri> _gotProcessVmServiceUri = Completer<Uri>();
+  final _finished = Completer<void>();
+  final _gotProcessVmServiceUri = Completer<Uri>();
 
   /// Starts the device.
   ///
@@ -79,6 +81,9 @@ class IntegrationTestTestDevice implements TestDevice {
       globals.printTrace('test $id: Starting Dart Development Service');
       await _ddsLauncher.startDartDevelopmentServiceFromDebuggingOptions(
         vmServiceUri,
+        appName:
+            'Kind: Flutter - Device: ${device.displayName} - '
+            'Package: ${package.name}',
         debuggingOptions: debuggingOptions,
       );
       globals.printTrace(
@@ -90,14 +95,15 @@ class IntegrationTestTestDevice implements TestDevice {
     _gotProcessVmServiceUri.complete(vmServiceUri);
 
     globals.printTrace('test $id: Connecting to vm service');
-    final FlutterVmService vmService = await connectToVmService(
-      vmServiceUri!,
-      logger: globals.logger,
-      compileExpression: compileExpression,
-    ).timeout(
-      const Duration(seconds: 5),
-      onTimeout: () => throw TimeoutException('Connecting to the VM Service timed out.'),
-    );
+    final FlutterVmService vmService =
+        await connectToVmService(
+          vmServiceUri!,
+          logger: globals.logger,
+          compileExpression: compileExpression,
+        ).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => throw TimeoutException('Connecting to the VM Service timed out.'),
+        );
 
     globals.printTrace(
       'test $id: Finding the correct isolate with the integration test service extension',
@@ -111,7 +117,7 @@ class IntegrationTestTestDevice implements TestDevice {
         .where((vm_service.Event e) => e.extensionKind == kIntegrationTestExtension)
         .map((vm_service.Event e) => e.extensionData!.data[kIntegrationTestData] as String);
 
-    final StreamChannelController<String> controller = StreamChannelController<String>();
+    final controller = StreamChannelController<String>();
 
     controller.local.stream.listen((String event) {
       vmService.service.callServiceExtension(
@@ -140,13 +146,21 @@ class IntegrationTestTestDevice implements TestDevice {
       if (!await device.stopApp(applicationPackage, userIdentifier: userIdentifier)) {
         globals.printTrace('Could not stop the Integration Test app.');
       }
-      if (!await device.uninstallApp(applicationPackage, userIdentifier: userIdentifier)) {
-        globals.printTrace('Could not uninstall the Integration Test app.');
+      if (debuggingOptions.uninstallApp) {
+        if (!await device.uninstallApp(applicationPackage, userIdentifier: userIdentifier)) {
+          globals.printTrace('Could not uninstall the Integration Test app.');
+        }
       }
     }
 
     await device.dispose();
-    _ddsLauncher.shutdown();
+    try {
+      await _ddsLauncher.shutdown().timeout(ddsShutdownTimeout);
+    } on TimeoutException {
+      globals.printTrace('Warning: Dart Development Service shutdown timed out.');
+    } on Object catch (error) {
+      globals.printTrace('Warning: Failed to shut down Dart Development Service: $error');
+    }
     _finished.complete();
   }
 

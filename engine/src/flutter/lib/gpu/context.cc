@@ -9,6 +9,9 @@
 #include "flutter/lib/gpu/formats.h"
 #include "flutter/lib/ui/ui_dart_state.h"
 #include "fml/make_copyable.h"
+#include "impeller/core/allocator.h"
+#include "impeller/core/formats.h"
+#include "impeller/core/texture_descriptor.h"
 #include "impeller/renderer/context.h"
 #include "tonic/converter/dart_converter.h"
 
@@ -41,14 +44,21 @@ std::shared_ptr<impeller::Context> Context::GetDefaultContext(
   }
 
   auto dart_state = flutter::UIDartState::Current();
+  if (!dart_state->IsImpellerEnabled()) {
+    out_error =
+        "Flutter GPU requires the Impeller rendering backend, but Impeller is "
+        "not enabled. For more details about where Impeller is available and "
+        "how to enable it, see: https://docs.flutter.dev/perf/impeller";
+    return nullptr;
+  }
   if (!dart_state->IsFlutterGPUEnabled()) {
     out_error =
         "Flutter GPU must be enabled via the Flutter GPU manifest "
         "setting. This can be done either via command line argument "
         "--enable-flutter-gpu or "
-        "by adding the FLTEnableFlutterGPU key set to true on iOS or "
-        "io.flutter.embedding.android.EnableFlutterGPU metadata key to true on "
-        "Android.";
+        "by adding the FLTEnableFlutterGPU key set to true in the Info.plist "
+        "on iOS/macOS, or the io.flutter.embedding.android.EnableFlutterGPU "
+        "metadata key to true in the AndroidManifest.xml on Android.";
     return nullptr;
   }
   // Grab the Impeller context from the IO manager.
@@ -74,7 +84,11 @@ Context::Context(std::shared_ptr<impeller::Context> context)
 
 Context::~Context() = default;
 
-std::shared_ptr<impeller::Context> Context::GetContext() {
+impeller::Context& Context::GetContext() {
+  return *context_;
+}
+
+std::shared_ptr<impeller::Context>& Context::GetContextShared() {
   return context_;
 }
 
@@ -101,29 +115,79 @@ Dart_Handle InternalFlutterGpu_Context_InitializeDefault(Dart_Handle wrapper) {
 extern int InternalFlutterGpu_Context_GetDefaultColorFormat(
     flutter::gpu::Context* wrapper) {
   return static_cast<int>(flutter::gpu::FromImpellerPixelFormat(
-      wrapper->GetContext()->GetCapabilities()->GetDefaultColorFormat()));
+      wrapper->GetContext().GetCapabilities()->GetDefaultColorFormat()));
 }
 
 extern int InternalFlutterGpu_Context_GetDefaultStencilFormat(
     flutter::gpu::Context* wrapper) {
   return static_cast<int>(flutter::gpu::FromImpellerPixelFormat(
-      wrapper->GetContext()->GetCapabilities()->GetDefaultStencilFormat()));
+      wrapper->GetContext().GetCapabilities()->GetDefaultStencilFormat()));
 }
 
 extern int InternalFlutterGpu_Context_GetDefaultDepthStencilFormat(
     flutter::gpu::Context* wrapper) {
   return static_cast<int>(flutter::gpu::FromImpellerPixelFormat(
-      wrapper->GetContext()
-          ->GetCapabilities()
-          ->GetDefaultDepthStencilFormat()));
+      wrapper->GetContext().GetCapabilities()->GetDefaultDepthStencilFormat()));
 }
 
 extern int InternalFlutterGpu_Context_GetMinimumUniformByteAlignment(
     flutter::gpu::Context* wrapper) {
-  return wrapper->GetContext()->GetCapabilities()->GetMinimumUniformAlignment();
+  return wrapper->GetContext().GetCapabilities()->GetMinimumUniformAlignment();
 }
 
 extern bool InternalFlutterGpu_Context_GetSupportsOffscreenMSAA(
     flutter::gpu::Context* wrapper) {
-  return flutter::gpu::SupportsNormalOffscreenMSAA(*wrapper->GetContext());
+  return flutter::gpu::SupportsNormalOffscreenMSAA(wrapper->GetContext());
+}
+
+extern bool InternalFlutterGpu_Context_GetSupportsFramebufferRenderMipmap(
+    flutter::gpu::Context* wrapper) {
+  return wrapper->GetContext()
+      .GetCapabilities()
+      ->SupportsFramebufferRenderMipmap();
+}
+
+extern bool InternalFlutterGpu_Context_GetSupportsManuallyMippedTextures(
+    flutter::gpu::Context* wrapper) {
+  return wrapper->GetContext()
+      .GetCapabilities()
+      ->SupportsManuallyMippedTextures();
+}
+
+extern int InternalFlutterGpu_Context_GetMaxSamplerAnisotropy(
+    flutter::gpu::Context* wrapper) {
+  return wrapper->GetContext().GetCapabilities()->GetMaxSamplerAnisotropy();
+}
+
+extern bool InternalFlutterGpu_Context_SupportsTextureCompression(
+    flutter::gpu::Context* wrapper,
+    int family) {
+  return wrapper->GetContext().GetCapabilities()->SupportsTextureCompression(
+      flutter::gpu::ToImpellerCompressedTextureFamily(family));
+}
+
+extern bool InternalFlutterGpu_Context_SupportsTextureFormat(
+    flutter::gpu::Context* wrapper,
+    int format,
+    bool render_target,
+    bool shader_read,
+    bool shader_write) {
+  const impeller::PixelFormat impeller_format =
+      flutter::gpu::ToImpellerPixelFormat(format);
+  if (impeller_format == impeller::PixelFormat::kUnknown) {
+    return false;
+  }
+  // Compressed formats are sample-only: shader_read must be true, and
+  // render-target or shader-write usage is never available.
+  if (impeller::IsCompressed(impeller_format)) {
+    if (render_target || shader_write || !shader_read) {
+      return false;
+    }
+    return wrapper->GetContext().GetCapabilities()->SupportsTextureCompression(
+        impeller::CompressedTextureFamilyForFormat(impeller_format));
+  }
+  // For uncompressed formats, today's Impeller capability surface does not
+  // expose a per-format usage query, so this returns true. As that surface
+  // grows it should be wired in here.
+  return true;
 }

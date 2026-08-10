@@ -21,7 +21,7 @@ class FillPathSourceGeometry : public Geometry {
   ~FillPathSourceGeometry() override;
 
   // |Geometry|
-  bool CoversArea(const Matrix& transform, const Rect& rect) const override;
+  bool CoversArea(const Matrix& transform, const IRect& rect) const override;
 
  protected:
   explicit FillPathSourceGeometry(std::optional<Rect> inner_rect);
@@ -49,14 +49,24 @@ class FillPathSourceGeometry : public Geometry {
   FillPathSourceGeometry& operator=(const FillPathSourceGeometry&) = delete;
 };
 
-/// @brief A Geometry that produces fillable vertices from a |DlPath| or
-///        |impeller::Path| object using the |FillPathSourceGeometry|
-///        base class and a |DlPath| object to perform path iteration.
+/// @brief A Geometry that produces fillable vertices from a |PathSource| object
+///        using the |FillPathSourceGeometry|.
+class FillPathFromSourceGeometry final : public FillPathSourceGeometry {
+ public:
+  explicit FillPathFromSourceGeometry(const PathSource& source);
+
+ protected:
+  const PathSource& GetSource() const override;
+
+ private:
+  const PathSource& source_;
+};
+
+/// @brief A Geometry that produces fillable vertices from a |DlPath| object
+///        using the |FillPathSourceGeometry| base class and the inherent
+///        ability for a |DlPath| object to perform path iteration.
 class FillPathGeometry final : public FillPathSourceGeometry {
  public:
-  explicit FillPathGeometry(const Path& path,
-                            std::optional<Rect> inner_rect = std::nullopt);
-
   explicit FillPathGeometry(const flutter::DlPath& path,
                             std::optional<Rect> inner_rect = std::nullopt);
 
@@ -65,6 +75,21 @@ class FillPathGeometry final : public FillPathSourceGeometry {
 
  private:
   const flutter::DlPath path_;
+};
+
+/// @brief A Geometry that produces fillable vertices for the gap between
+///        a pair of |RoundRect| objects using the |FillPathSourceGeometry|
+///        base class.
+class FillDiffRoundRectGeometry final : public FillPathSourceGeometry {
+ public:
+  explicit FillDiffRoundRectGeometry(const RoundRect& outer,
+                                     const RoundRect& inner);
+
+ protected:
+  const PathSource& GetSource() const override;
+
+ private:
+  const DiffRoundRectPathSource source_;
 };
 
 }  // namespace impeller

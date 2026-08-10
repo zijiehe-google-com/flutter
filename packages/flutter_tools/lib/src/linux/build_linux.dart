@@ -27,7 +27,7 @@ import '../migrations/cmake_native_assets_migration.dart';
 // - <file path>:<line>:<column>: warning: <warning...>
 // - clang: error: <link error...>
 // - Error: <tool error...>
-final RegExp errorMatcher = RegExp(
+final errorMatcher = RegExp(
   r'(?:(?:.*:\d+:\d+|clang):\s)?(fatal\s)?(?:error|warning):\s.*',
   caseSensitive: false,
 );
@@ -42,6 +42,7 @@ Future<void> buildLinux(
   required TargetPlatform targetPlatform,
   String targetSysroot = '/',
   required Logger logger,
+  bool configOnly = false,
 }) async {
   target ??= 'lib/main.dart';
   if (!linuxProject.cmakeFile.existsSync()) {
@@ -52,12 +53,12 @@ Future<void> buildLinux(
     );
   }
 
-  final List<ProjectMigrator> migrators = <ProjectMigrator>[
+  final migrators = <ProjectMigrator>[
     CmakeCustomCommandMigration(linuxProject, logger),
     CmakeNativeAssetsMigration(linuxProject, 'linux', logger),
   ];
 
-  final ProjectMigration migration = ProjectMigration(migrators);
+  final migration = ProjectMigration(migrators);
   await migration.run();
 
   // Build the environment that needs to be set for the re-entrant flutter build
@@ -82,7 +83,7 @@ Future<void> buildLinux(
   final String buildModeName = buildInfo.mode.cliName;
   final Directory platformBuildDirectory = globals.fs
       .directory(linuxProject.parent.directory.path)
-      .childDirectory(getLinuxBuildDirectory(targetPlatform));
+      .childDirectory(getLinuxBuildDirectory(targetPlatform, buildInfo.flavor));
   final Directory buildDirectory = platformBuildDirectory.childDirectory(buildModeName);
   try {
     await _runCmake(
@@ -93,13 +94,19 @@ Future<void> buildLinux(
       targetPlatform,
       targetSysroot,
     );
+    if (configOnly) {
+      return;
+    }
     await _runBuild(buildDirectory);
   } finally {
     status.cancel();
   }
 
   final String? binaryName = getCmakeExecutableName(linuxProject);
-  final File binaryFile = buildDirectory.childDirectory('bundle').childFile('$binaryName');
+  if (binaryName == null) {
+    throwToolExit('Unable to find BINARY_NAME in ${linuxProject.cmakeFile.path}');
+  }
+  final File binaryFile = buildDirectory.childDirectory('bundle').childFile(binaryName);
   final FileSystemEntity buildOutput = binaryFile.existsSync() ? binaryFile : binaryFile.parent;
   // We don't print a size because the output directory can contain
   // optional files not needed by the user and because the binary is not
@@ -111,7 +118,7 @@ Future<void> buildLinux(
   );
 
   if (buildInfo.codeSizeDirectory != null && sizeAnalyzer != null) {
-    final String arch = getNameForTargetPlatform(targetPlatform);
+    final String arch = targetPlatform.getName();
     final File codeSizeFile = globals.fs
         .directory(buildInfo.codeSizeDirectory)
         .childFile('snapshot.$arch.json');
@@ -122,7 +129,11 @@ Future<void> buildLinux(
       aotSnapshot: codeSizeFile,
       // This analysis is only supported for release builds.
       outputDirectory: globals.fs.directory(
-        globals.fs.path.join(getLinuxBuildDirectory(targetPlatform), 'release', 'bundle'),
+        globals.fs.path.join(
+          getLinuxBuildDirectory(targetPlatform, buildInfo.flavor),
+          'release',
+          'bundle',
+        ),
       ),
       precompilerTrace: precompilerTrace,
       type: 'linux',
@@ -152,13 +163,15 @@ Future<void> _runCmake(
   TargetPlatform targetPlatform,
   String targetSysroot,
 ) async {
-  final Stopwatch sw = Stopwatch()..start();
+  final sw = Stopwatch()..start();
 
   await buildDir.create(recursive: true);
 
   final String buildFlag = sentenceCase(buildModeName);
   final bool needCrossBuildOptionsForArm64 =
       needCrossBuild && targetPlatform == TargetPlatform.linux_arm64;
+  final bool needCrossBuildOptionsForRiscv64 =
+      needCrossBuild && targetPlatform == TargetPlatform.linux_riscv64;
   int result;
   if (!globals.processManager.canRun('cmake')) {
     throwToolExit(globals.userMessages.cmakeMissing);
@@ -169,12 +182,15 @@ Future<void> _runCmake(
       '-G',
       'Ninja',
       '-DCMAKE_BUILD_TYPE=$buildFlag',
-      '-DFLUTTER_TARGET_PLATFORM=${getNameForTargetPlatform(targetPlatform)}',
+      '-DFLUTTER_TARGET_PLATFORM=${targetPlatform.getName()}',
       // Support cross-building for arm64 targets on x64 hosts.
       // (Cross-building for x64 on arm64 hosts isn't supported now.)
       if (needCrossBuild) '-DFLUTTER_TARGET_PLATFORM_SYSROOT=$targetSysroot',
       if (needCrossBuildOptionsForArm64) '-DCMAKE_C_COMPILER_TARGET=aarch64-linux-gnu',
       if (needCrossBuildOptionsForArm64) '-DCMAKE_CXX_COMPILER_TARGET=aarch64-linux-gnu',
+      // Support cross-building for riscv64 targets on x64 hosts.
+      if (needCrossBuildOptionsForRiscv64) '-DCMAKE_C_COMPILER_TARGET=riscv64-linux-gnu',
+      if (needCrossBuildOptionsForRiscv64) '-DCMAKE_CXX_COMPILER_TARGET=riscv64-linux-gnu',
       sourceDir.path,
     ],
     workingDirectory: buildDir.path,
@@ -195,7 +211,7 @@ Future<void> _runCmake(
 }
 
 Future<void> _runBuild(Directory buildDir) async {
-  final Stopwatch sw = Stopwatch()..start();
+  final sw = Stopwatch()..start();
 
   int result;
   try {

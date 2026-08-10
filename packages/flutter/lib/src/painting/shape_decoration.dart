@@ -228,9 +228,26 @@ class ShapeDecoration extends Decoration {
         return b;
       }
     }
+    // A ShapeDecoration's color and gradient are mutually exclusive (see the
+    // assert in the constructor). When interpolating between a decoration that
+    // uses a color and one that uses a gradient, represent the color as a
+    // uniform-color gradient (built from the other side's gradient) so the two
+    // can be interpolated smoothly as gradients, rather than producing both a
+    // color and a gradient at the same time.
+    // See https://github.com/flutter/flutter/issues/93953
+    Gradient? aGradient = a?.gradient;
+    Gradient? bGradient = b?.gradient;
+    if (aGradient == null && bGradient != null && a?.color != null) {
+      aGradient = bGradient.fromColor(a!.color!);
+    } else if (bGradient == null && aGradient != null && b?.color != null) {
+      bGradient = aGradient.fromColor(b!.color!);
+    }
+    final Gradient? gradient = Gradient.lerp(aGradient, bGradient, t);
     return ShapeDecoration(
-      color: Color.lerp(a?.color, b?.color, t),
-      gradient: Gradient.lerp(a?.gradient, b?.gradient, t),
+      // color and gradient are mutually exclusive, so only fall back to a color
+      // when the interpolation did not produce a gradient.
+      color: gradient == null ? Color.lerp(a?.color, b?.color, t) : null,
+      gradient: gradient,
       image: DecorationImage.lerp(a?.image, b?.image, t),
       shadows: BoxShadow.lerpList(a?.shadows, b?.shadows, t),
       shape: ShapeBorder.lerp(a?.shape, b?.shape, t)!,
@@ -277,7 +294,7 @@ class ShapeDecoration extends Decoration {
 
   @override
   bool hitTest(Size size, Offset position, {TextDirection? textDirection}) {
-    return shape.getOuterPath(Offset.zero & size, textDirection: textDirection).contains(position);
+    return shape.hitTest(Offset.zero & size, position, textDirection: textDirection);
   }
 
   @override
@@ -375,7 +392,7 @@ class _ShapeDecorationPainter extends BoxPainter {
     bool debugHandleDisabledShadowStart(Canvas canvas, BoxShadow boxShadow, Path path) {
       if (debugDisableShadows && boxShadow.blurStyle == BlurStyle.outer) {
         canvas.save();
-        final Path clipPath = Path();
+        final clipPath = Path();
         clipPath.fillType = PathFillType.evenOdd;
         clipPath.addRect(Rect.largest);
         clipPath.addPath(path, Offset.zero);
@@ -393,7 +410,7 @@ class _ShapeDecorationPainter extends BoxPainter {
 
     if (_shadowCount != null) {
       if (_decoration.shape.preferPaintInterior) {
-        for (int index = 0; index < _shadowCount!; index += 1) {
+        for (var index = 0; index < _shadowCount!; index += 1) {
           assert(
             debugHandleDisabledShadowStart(
               canvas,
@@ -410,7 +427,7 @@ class _ShapeDecorationPainter extends BoxPainter {
           assert(debugHandleDisabledShadowEnd(canvas, _decoration.shadows![index]));
         }
       } else {
-        for (int index = 0; index < _shadowCount!; index += 1) {
+        for (var index = 0; index < _shadowCount!; index += 1) {
           assert(
             debugHandleDisabledShadowStart(
               canvas,

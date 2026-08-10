@@ -11,7 +11,10 @@ Future<Size> _getSize(WidgetTester tester, BoxConstraints constraints, double as
     Center(
       child: ConstrainedBox(
         constraints: constraints,
-        child: AspectRatio(aspectRatio: aspectRatio, child: Container(key: childKey)),
+        child: AspectRatio(
+          aspectRatio: aspectRatio,
+          child: Container(key: childKey),
+        ),
       ),
     ),
   );
@@ -46,5 +49,17 @@ void main() {
     );
     final RenderBox box = tester.renderObject(find.byKey(childKey));
     expect(box.size, equals(const Size(1200.0, 600.0)));
+  });
+
+  testWidgets('AspectRatio does not crash at zero area', (WidgetTester tester) async {
+    tester.view.physicalSize = Size.zero;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(child: AspectRatio(aspectRatio: 2.0, child: Placeholder())),
+      ),
+    );
+    expect(tester.getSize(find.byType(AspectRatio)), Size.zero);
   });
 }

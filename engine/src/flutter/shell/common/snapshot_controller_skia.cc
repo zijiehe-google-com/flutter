@@ -42,7 +42,7 @@ sk_sp<SkImage> DrawSnapshot(
 
   {
     TRACE_EVENT0("flutter", "DeviceHostTransfer");
-    if (auto raster_image = device_snapshot->makeRasterImage()) {
+    if (auto raster_image = device_snapshot->makeRasterImage(nullptr)) {
       return raster_image;
     }
   }
@@ -51,20 +51,48 @@ sk_sp<SkImage> DrawSnapshot(
 }
 }  // namespace
 
-void SnapshotControllerSkia::MakeRasterSnapshot(
+void SnapshotControllerSkia::MakeSkiaSnapshot(
     sk_sp<DisplayList> display_list,
-    SkISize picture_size,
-    std::function<void(const sk_sp<DlImage>&)> callback) {
-  callback(MakeRasterSnapshotSync(display_list, picture_size));
+    DlISize picture_size,
+    std::function<void(const sk_sp<SkImage>&)> callback,
+    SnapshotPixelFormat pixel_format) {
+  callback(MakeSkiaSnapshotSync(display_list, picture_size, pixel_format));
 }
 
-sk_sp<DlImage> SnapshotControllerSkia::DoMakeRasterSnapshot(
-    SkISize size,
+sk_sp<SkImage> SnapshotControllerSkia::MakeSkiaSnapshotSync(
+    sk_sp<DisplayList> display_list,
+    DlISize size,
+    SnapshotPixelFormat pixel_format) {
+  auto draw_callback = [&display_list](SkCanvas* canvas) {
+    DlSkCanvasAdapter adapter(canvas);
+    adapter.DrawDisplayList(display_list);
+  };
+  return DoMakeRasterSnapshot(size, draw_callback);
+}
+
+void SnapshotControllerSkia::MakeImpellerSnapshot(
+    sk_sp<DisplayList> display_list,
+    DlISize picture_size,
+    std::function<void(const std::shared_ptr<impeller::Texture>&)> callback,
+    SnapshotPixelFormat pixel_format) {
+  FML_UNREACHABLE();
+}
+
+std::shared_ptr<impeller::Texture>
+SnapshotControllerSkia::MakeImpellerSnapshotSync(
+    sk_sp<DisplayList> display_list,
+    DlISize size,
+    SnapshotPixelFormat pixel_format) {
+  FML_UNREACHABLE();
+}
+
+sk_sp<SkImage> SnapshotControllerSkia::DoMakeRasterSnapshot(
+    DlISize size,
     std::function<void(SkCanvas*)> draw_callback) {
   TRACE_EVENT0("flutter", __FUNCTION__);
   sk_sp<SkImage> result;
-  SkImageInfo image_info = SkImageInfo::MakeN32Premul(
-      size.width(), size.height(), SkColorSpace::MakeSRGB());
+  SkImageInfo image_info = SkImageInfo::MakeN32Premul(size.width, size.height,
+                                                      SkColorSpace::MakeSRGB());
 
   std::unique_ptr<Surface> pbuffer_surface;
   Surface* snapshot_surface = nullptr;
@@ -133,17 +161,22 @@ sk_sp<DlImage> SnapshotControllerSkia::DoMakeRasterSnapshot(
             }));
   }
 
-  // It is up to the caller to create a DlImageGPU version of this image
-  // if the result will interact with the UI thread.
-  return DlImage::Make(result);
+  // It is up to the caller to create a DlImage if the result
+  // will interact with the UI thread.
+  return result;
 }
 
-sk_sp<DlImage> SnapshotControllerSkia::MakeRasterSnapshotSync(
-    sk_sp<DisplayList> display_list,
-    SkISize size) {
-  return DoMakeRasterSnapshot(size, [display_list](SkCanvas* canvas) {
-    DlSkCanvasAdapter(canvas).DrawDisplayList(display_list);
-  });
+sk_sp<SkImage> SnapshotControllerSkia::MakeSkiaTextureImage(
+    sk_sp<SkImage> image,
+    SnapshotPixelFormat pixel_format) {
+  return image;
+}
+
+std::shared_ptr<impeller::Texture>
+SnapshotControllerSkia::MakeImpellerTextureImage(
+    sk_sp<SkImage> image,
+    SnapshotPixelFormat pixel_format) {
+  return nullptr;
 }
 
 sk_sp<SkImage> SnapshotControllerSkia::ConvertToRasterImage(
@@ -160,17 +193,21 @@ sk_sp<SkImage> SnapshotControllerSkia::ConvertToRasterImage(
     return nullptr;
   }
 
-  SkISize image_size = image->dimensions();
+  DlISize image_size = ToDlISize(image->dimensions());
 
   auto result = DoMakeRasterSnapshot(
       image_size, [image = std::move(image)](SkCanvas* canvas) {
         canvas->drawImage(image, 0, 0);
       });
-  return result->skia_image();
+  return result;
 }
 
 void SnapshotControllerSkia::CacheRuntimeStage(
     const std::shared_ptr<impeller::RuntimeStage>& runtime_stage) {}
+
+bool SnapshotControllerSkia::MakeRenderContextCurrent() {
+  FML_UNREACHABLE();
+}
 
 }  // namespace flutter
 

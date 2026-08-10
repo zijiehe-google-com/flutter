@@ -9,15 +9,11 @@
 #include <Metal/Metal.h>
 #include <UIKit/UIKit.h>
 
-#include "flutter/fml/logging.h"
+#import "flutter/shell/platform/darwin/common/InternalFlutterSwiftCommon/InternalFlutterSwiftCommon.h"
 #import "flutter/shell/platform/darwin/common/framework/Headers/FlutterMacros.h"
+#import "flutter/shell/platform/darwin/ios/InternalFlutterSwift/InternalFlutterSwift.h"
 
 FLUTTER_ASSERT_ARC
-
-@interface DisplayLinkManager : NSObject
-@property(class, nonatomic, readonly) BOOL maxRefreshRateEnabledOnIPhone;
-+ (double)displayRefreshRate;
-@end
 
 @class FlutterTexture;
 @class FlutterDrawable;
@@ -27,12 +23,13 @@ extern CFTimeInterval display_link_target;
 @interface FlutterMetalLayer () {
   id<MTLDevice> _preferredDevice;
   CGSize _drawableSize;
+  FlutterDisplayLinkManager* _displayLinkManager;
 
   NSUInteger _nextDrawableId;
 
+  // Access to these variables must be synchronized.
   NSMutableSet<FlutterTexture*>* _availableTextures;
   NSUInteger _totalTextures;
-
   FlutterTexture* _front;
 
   // There must be a CADisplayLink scheduled *on main thread* otherwise
@@ -135,15 +132,16 @@ extern CFTimeInterval display_link_target;
 }
 
 - (void)addPresentedHandler:(nonnull MTLDrawablePresentedHandler)block {
-  FML_LOG(WARNING) << "FlutterMetalLayer drawable does not implement addPresentedHandler:";
+  [FlutterLogger logWarning:@"FlutterMetalLayer drawable does not implement addPresentedHandler:"];
 }
 
 - (void)presentAtTime:(CFTimeInterval)presentationTime {
-  FML_LOG(WARNING) << "FlutterMetalLayer drawable does not implement presentAtTime:";
+  [FlutterLogger logWarning:@"FlutterMetalLayer drawable does not implement presentAtTime:"];
 }
 
 - (void)presentAfterMinimumDuration:(CFTimeInterval)duration {
-  FML_LOG(WARNING) << "FlutterMetalLayer drawable does not implement presentAfterMinimumDuration:";
+  [FlutterLogger
+      logWarning:@"FlutterMetalLayer drawable does not implement presentAfterMinimumDuration:"];
 }
 
 - (void)flutterPrepareForPresent:(nonnull id<MTLCommandBuffer>)commandBuffer {
@@ -184,11 +182,12 @@ extern CFTimeInterval display_link_target;
     self.device = self.preferredDevice;
     self.pixelFormat = MTLPixelFormatBGRA8Unorm;
     _availableTextures = [[NSMutableSet alloc] init];
+    _displayLinkManager = FlutterDisplayLinkManager.shared;
 
     FlutterMetalLayerDisplayLinkProxy* proxy =
         [[FlutterMetalLayerDisplayLinkProxy alloc] initWithLayer:self];
     _displayLink = [CADisplayLink displayLinkWithTarget:proxy selector:@selector(onDisplayLink:)];
-    [self setMaxRefreshRate:DisplayLinkManager.displayRefreshRate forceMax:NO];
+    [self setMaxRefreshRate:_displayLinkManager.displayRefreshRate forceMax:NO];
     [_displayLink addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSRunLoopCommonModes];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(didEnterBackground:)
@@ -208,17 +207,13 @@ extern CFTimeInterval display_link_target;
   // thread which does not trigger actual core animation frame. As a workaround FlutterMetalLayer
   // has it's own displaylink scheduled on main thread, which is used to trigger core animation
   // frame allowing for 120hz updates.
-  if (!DisplayLinkManager.maxRefreshRateEnabledOnIPhone) {
+  if (!_displayLinkManager.maxRefreshRateEnabledOnIPhone) {
     return;
   }
   double maxFrameRate = fmax(refreshRate, 60);
   double minFrameRate = fmax(maxFrameRate / 2, 60);
-  if (@available(iOS 15.0, *)) {
-    _displayLink.preferredFrameRateRange =
-        CAFrameRateRangeMake(forceMax ? maxFrameRate : minFrameRate, maxFrameRate, maxFrameRate);
-  } else {
-    _displayLink.preferredFramesPerSecond = maxFrameRate;
-  }
+  _displayLink.preferredFrameRateRange =
+      CAFrameRateRangeMake(forceMax ? maxFrameRate : minFrameRate, maxFrameRate, maxFrameRate);
 }
 
 - (void)onDisplayLink:(CADisplayLink*)link {
@@ -227,7 +222,7 @@ extern CFTimeInterval display_link_target;
   if (_displayLinkPauseCountdown == 3) {
     _displayLink.paused = YES;
     if (_displayLinkForcedMaxRate) {
-      [self setMaxRefreshRate:DisplayLinkManager.displayRefreshRate forceMax:NO];
+      [self setMaxRefreshRate:_displayLinkManager.displayRefreshRate forceMax:NO];
       _displayLinkForcedMaxRate = NO;
     }
   } else {
@@ -247,20 +242,26 @@ extern CFTimeInterval display_link_target;
 }
 
 - (void)setDrawableSize:(CGSize)drawableSize {
-  [_availableTextures removeAllObjects];
-  _front = nil;
-  _totalTextures = 0;
-  _drawableSize = drawableSize;
+  @synchronized(self) {
+    [_availableTextures removeAllObjects];
+    _front = nil;
+    _totalTextures = 0;
+    _drawableSize = drawableSize;
+  }
 }
 
 - (void)didEnterBackground:(id)notification {
-  [_availableTextures removeAllObjects];
-  _totalTextures = _front != nil ? 1 : 0;
+  @synchronized(self) {
+    [_availableTextures removeAllObjects];
+    _totalTextures = _front != nil ? 1 : 0;
+  }
   _displayLink.paused = YES;
 }
 
 - (CGSize)drawableSize {
-  return _drawableSize;
+  @synchronized(self) {
+    return _drawableSize;
+  }
 }
 
 - (IOSurface*)createIOSurface {
@@ -276,7 +277,9 @@ extern CFTimeInterval display_link_target;
     pixelFormat = kCVPixelFormatType_40ARGBLEWideGamut;
     bytesPerElement = 8;
   } else {
-    FML_LOG(ERROR) << "Unsupported pixel format: " << self.pixelFormat;
+    NSString* errorMessage =
+        [NSString stringWithFormat:@"Unsupported pixel format: %lu", self.pixelFormat];
+    [FlutterLogger logError:errorMessage];
     return nil;
   }
   size_t bytesPerRow =
@@ -294,8 +297,9 @@ extern CFTimeInterval display_link_target;
 
   IOSurfaceRef res = IOSurfaceCreate((CFDictionaryRef)options);
   if (res == nil) {
-    FML_LOG(ERROR) << "Failed to create IOSurface with options "
-                   << options.debugDescription.UTF8String;
+    NSString* errorMessage = [NSString
+        stringWithFormat:@"Failed to create IOSurface with options %@", options.debugDescription];
+    [FlutterLogger logError:errorMessage];
     return nil;
   }
 
@@ -394,6 +398,14 @@ extern CFTimeInterval display_link_target;
 }
 
 - (void)presentOnMainThread:(FlutterTexture*)texture {
+  if (texture.texture.width != _drawableSize.width ||
+      texture.texture.height != _drawableSize.height) {
+    // This texture was created with an old size, but the view has since been
+    // resized. Do not present this stale frame to avoid distortion. The texture
+    // will be correctly recycled on the next frame.
+    return;
+  }
+
   // This is needed otherwise frame gets skipped on touch begin / end. Go figure.
   // Might also be placebo
   [self setNeedsDisplay];
@@ -408,12 +420,16 @@ extern CFTimeInterval display_link_target;
     _didSetContentsDuringThisDisplayLinkPeriod = YES;
   } else if (!_displayLinkForcedMaxRate) {
     _displayLinkForcedMaxRate = YES;
-    [self setMaxRefreshRate:DisplayLinkManager.displayRefreshRate forceMax:YES];
+    [self setMaxRefreshRate:_displayLinkManager.displayRefreshRate forceMax:YES];
   }
 }
 
 - (void)presentTexture:(FlutterTexture*)texture {
   @synchronized(self) {
+    if (texture.texture.width != _drawableSize.width ||
+        texture.texture.height != _drawableSize.height) {
+      return;
+    }
     if (_front != nil) {
       [_availableTextures addObject:_front];
     }
@@ -431,8 +447,14 @@ extern CFTimeInterval display_link_target;
 }
 
 - (void)returnTexture:(FlutterTexture*)texture {
+  if (texture == nil) {
+    return;
+  }
   @synchronized(self) {
-    [_availableTextures addObject:texture];
+    if (texture.texture.width == _drawableSize.width &&
+        texture.texture.height == _drawableSize.height) {
+      [_availableTextures addObject:texture];
+    }
   }
 }
 

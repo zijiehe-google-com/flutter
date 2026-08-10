@@ -91,7 +91,7 @@ class Multiple extends Transition {
 
   @override
   bool matches(String line) {
-    for (int index = 0; index < patterns.length; index += 1) {
+    for (var index = 0; index < patterns.length; index += 1) {
       if (lineMatchesPattern(line, patterns[index], contains)) {
         patterns.removeAt(index);
         break;
@@ -136,11 +136,12 @@ class LogLine {
             0x09 => '<BS>',
             0x0A => '<LF>',
             0x0D => '<CR>',
-            _ => '<${rune.toRadixString(16).padLeft(rune <= 0xFF
-                ? 2
-                : rune <= 0xFFFF
-                ? 4
-                : 5, '0')}>',
+            _ =>
+              '<${rune.toRadixString(16).padLeft(rune <= 0xFF
+                  ? 2
+                  : rune <= 0xFFFF
+                  ? 4
+                  : 5, '0')}>',
           },
         )
         .join();
@@ -180,20 +181,23 @@ Future<ProcessTestResult> runFlutter(
     minutes: 10,
   ), // must be less than test timeout of 15 minutes! See ../../dart_test.yaml.
 }) async {
-  const LocalPlatform platform = LocalPlatform();
-  final Stopwatch clock = Stopwatch()..start();
+  const platform = LocalPlatform();
+  final clock = Stopwatch()..start();
   final Process process = await processManager.start(<String>[
     // In a container with no X display, use the virtual framebuffer.
-    if (platform.isLinux && (platform.environment['DISPLAY'] ?? '').isEmpty) '/usr/bin/xvfb-run',
+    if (platform.isLinux && (platform.environment['DISPLAY'] ?? '').isEmpty) ...<String>[
+      '/usr/bin/xvfb-run',
+      '-a',
+    ],
     flutterBin,
     ...arguments,
   ], workingDirectory: workingDirectory);
-  final List<LogLine> logs = <LogLine>[];
-  int nextTransition = 0;
+  final logs = <LogLine>[];
+  var nextTransition = 0;
   void describeStatus() {
     if (transitions.isNotEmpty) {
       debugPrint('Expected state transitions:');
-      for (int index = 0; index < transitions.length; index += 1) {
+      for (var index = 0; index < transitions.length; index += 1) {
         debugPrint(
           '${index.toString().padLeft(5)} '
           '${index < nextTransition
@@ -212,13 +216,13 @@ Future<ProcessTestResult> runFlutter(
       debugPrint(
         'Log${debug ? "" : " (only contains logged lines; use debug:true to print all output)"}:',
       );
-      for (final LogLine log in logs) {
+      for (final log in logs) {
         log.printClearly();
       }
     }
   }
 
-  bool streamingLogs = false;
+  var streamingLogs = false;
   Timer? timeout;
   void processTimeout() {
     if (!streamingLogs) {
@@ -234,8 +238,8 @@ Future<ProcessTestResult> runFlutter(
   }
 
   String stamp() => '[${(clock.elapsed.inMilliseconds / 1000.0).toStringAsFixed(1).padLeft(5)}s]';
-  void processStdout(String line) {
-    final LogLine log = LogLine('stdout', stamp(), line);
+
+  void logLine(LogLine log, String line) {
     if (logging) {
       logs.add(log);
     }
@@ -262,7 +266,7 @@ Future<ProcessTestResult> runFlutter(
       if (transitions[nextTransition].handler != null) {
         final String? command = transitions[nextTransition].handler!(line);
         if (command != null) {
-          final LogLine inLog = LogLine('stdin', stamp(), command);
+          final inLog = LogLine('stdin', stamp(), command);
           logs.add(inLog);
           if (streamingLogs) {
             inLog.printClearly();
@@ -279,12 +283,14 @@ Future<ProcessTestResult> runFlutter(
     }
   }
 
+  void processStdout(String line) {
+    final log = LogLine('stdout', stamp(), line);
+    logLine(log, line);
+  }
+
   void processStderr(String line) {
-    final LogLine log = LogLine('stdout', stamp(), line);
-    logs.add(log);
-    if (streamingLogs) {
-      log.printClearly();
-    }
+    final log = LogLine('stderr', stamp(), line);
+    logLine(log, line);
   }
 
   if (debug) {
@@ -313,12 +319,18 @@ Future<ProcessTestResult> runFlutter(
               '${stamp()} (process is not quitting, trying to send a "q" just in case that helps)',
             );
             debugPrint('(a functional test should never reach this point)');
-            final LogLine inLog = LogLine('stdin', stamp(), 'q');
+            final inLog = LogLine('stdin', stamp(), 'q');
             logs.add(inLog);
             if (streamingLogs) {
               inLog.printClearly();
             }
             process.stdin.write('q');
+            // Start a timer to kill the process if it still hasn't exited after 5 seconds.
+            final timer = Timer(const Duration(seconds: 5), () {
+              debugPrint('${stamp()} (process still did not quit, killing forcefully)');
+              process.kill(ProcessSignal.sigkill);
+            });
+            process.exitCode.whenComplete(timer.cancel);
             return -1; // discarded
           },
         )
@@ -356,4 +368,4 @@ Future<ProcessTestResult> runFlutter(
   return ProcessTestResult(exitCode, logs);
 }
 
-const int progressMessageWidth = 64;
+const progressMessageWidth = 64;

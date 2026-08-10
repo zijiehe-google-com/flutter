@@ -16,18 +16,41 @@ class SnapshotControllerImpeller : public SnapshotController {
       const SnapshotController::Delegate& delegate)
       : SnapshotController(delegate) {}
 
-  void MakeRasterSnapshot(
-      sk_sp<DisplayList> display_list,
-      SkISize picture_size,
-      std::function<void(const sk_sp<DlImage>&)> callback) override;
+  void MakeSkiaSnapshot(sk_sp<DisplayList> display_list,
+                        DlISize picture_size,
+                        std::function<void(const sk_sp<SkImage>&)> callback,
+                        SnapshotPixelFormat pixel_format) override;
 
-  sk_sp<DlImage> MakeRasterSnapshotSync(sk_sp<DisplayList> display_list,
-                                        SkISize picture_size) override;
+  sk_sp<SkImage> MakeSkiaSnapshotSync(
+      sk_sp<DisplayList> display_list,
+      DlISize size,
+      SnapshotPixelFormat pixel_format) override;
+
+  void MakeImpellerSnapshot(
+      sk_sp<DisplayList> display_list,
+      DlISize picture_size,
+      std::function<void(const std::shared_ptr<impeller::Texture>&)> callback,
+      SnapshotPixelFormat pixel_format) override;
+
+  std::shared_ptr<impeller::Texture> MakeImpellerSnapshotSync(
+      sk_sp<DisplayList> display_list,
+      DlISize picture_size,
+      SnapshotPixelFormat pixel_format) override;
+
+  sk_sp<SkImage> MakeSkiaTextureImage(
+      sk_sp<SkImage> image,
+      SnapshotPixelFormat pixel_format) override;
+
+  std::shared_ptr<impeller::Texture> MakeImpellerTextureImage(
+      sk_sp<SkImage> image,
+      SnapshotPixelFormat pixel_format) override;
 
   sk_sp<SkImage> ConvertToRasterImage(sk_sp<SkImage> image) override;
 
   void CacheRuntimeStage(
       const std::shared_ptr<impeller::RuntimeStage>& runtime_stage) override;
+
+  virtual bool MakeRenderContextCurrent() override;
 
  private:
   FML_DISALLOW_COPY_AND_ASSIGN(SnapshotControllerImpeller);

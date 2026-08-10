@@ -100,7 +100,7 @@ template("embedder_source_set") {
     public_deps = [ ":embedder_headers" ]
     deps = [
       ":embedder_gpu_configuration",
-      "$dart_src/runtime/bin:dart_io_api",
+      "$dart_src/runtime/bin:common_embedder_dart_io",
       "$dart_src/runtime/bin:elf_loader",
       "//flutter/assets",
       "//flutter/common",
@@ -249,11 +249,13 @@ test_fixtures("fixtures") {
     "fixtures/dpr_noxform.png",
     "fixtures/dpr_xform.png",
     "fixtures/gradient.png",
+    "fixtures/impeller_render_platform_view.png",
     "fixtures/impeller_test.png",
     "fixtures/impeller_text_test.png",
     "fixtures/vk_dpr_noxform.png",
     "fixtures/vk_gradient.png",
     "fixtures/gradient_metal.png",
+    "fixtures/external_texture_impeller.png",
     "fixtures/external_texture_metal.png",
     "fixtures/gradient_xform.png",
     "fixtures/scene_without_custom_compositor.png",
@@ -315,6 +317,8 @@ if (enable_unittests) {
 
     if (test_enable_gl) {
       sources += [
+        "//flutter/impeller/renderer/backend/gles/test/mock_gles.cc",
+        "//flutter/impeller/renderer/backend/gles/test/mock_gles.h",
         "tests/embedder_test_backingstore_producer_gl.cc",
         "tests/embedder_test_backingstore_producer_gl.h",
         "tests/embedder_test_compositor_gl.cc",
@@ -322,9 +326,11 @@ if (enable_unittests) {
         "tests/embedder_test_context_gl.cc",
         "tests/embedder_test_context_gl.h",
         "tests/embedder_test_gl.cc",
+        "tests/embedder_test_surface_gl_impeller.cc",
       ]
 
       public_deps += [
+        "//flutter/impeller/renderer/backend/gles",
         "//flutter/testing:opengl",
         "//flutter/third_party/vulkan-deps/vulkan-headers/src:vulkan_headers",
       ]
@@ -454,7 +460,8 @@ shared_library("flutter_engine_library") {
     ldflags += [ "-Wl,-install_name,@rpath/FlutterEmbedder.framework/$_framework_binary_subpath" ]
   }
   if (is_linux) {
-    ldflags += [ "-Wl,--version-script=" + rebase_path("embedder_exports.lst") ]
+    ldflags += [ "-Wl,--version-script=" +
+                 rebase_path("embedder_exports.lst", root_build_dir) ]
   }
 
   deps = [ ":embedder" ]
@@ -602,7 +609,7 @@ if (is_mac) {
   }
 }
 
-if (host_os == "linux" || host_os == "win") {
+if (host_os == "linux" || host_os == "win" || is_android) {
   zip_bundle("embedder-archive") {
     output =
         "$full_target_platform_name/$full_target_platform_name-embedder.zip"
@@ -616,7 +623,7 @@ if (host_os == "linux" || host_os == "win") {
         destination = "flutter_embedder.h"
       },
     ]
-    if (host_os == "linux") {
+    if (host_os == "linux" || is_android) {
       files += [
         {
           source = "$root_out_dir/libflutter_engine.so"

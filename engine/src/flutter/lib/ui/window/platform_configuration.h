@@ -14,7 +14,9 @@
 #include "flutter/assets/asset_manager.h"
 #include "flutter/fml/time/time_point.h"
 #include "flutter/lib/ui/semantics/semantics_update.h"
+#include "flutter/lib/ui/window/hit_test_response.h"
 #include "flutter/lib/ui/window/platform_message_response.h"
+#include "flutter/lib/ui/window/point_data.h"
 #include "flutter/lib/ui/window/pointer_data_packet.h"
 #include "flutter/lib/ui/window/view_focus.h"
 #include "flutter/lib/ui/window/viewport_metrics.h"
@@ -48,6 +50,10 @@ enum class AccessibilityFeatureFlag : int32_t {
   kReduceMotion = 1 << 4,
   kHighContrast = 1 << 5,
   kOnOffSwitchLabels = 1 << 6,
+  kNoAnnounce = 1 << 7,
+  kNoAutoPlayAnimatedImages = 1 << 8,
+  kNoAutoPlayVideos = 1 << 9,
+  kDeterministicCursor = 1 << 10,
 };
 
 //--------------------------------------------------------------------------
@@ -96,6 +102,20 @@ class PlatformConfigurationClient {
   /// @param[in] update The updated semantic tree to apply.
   ///
   virtual void UpdateSemantics(int64_t viewId, SemanticsUpdate* update) = 0;
+
+  //--------------------------------------------------------------------------
+  /// @brief      Framework sets the application locale
+  ///
+  /// @param[in] locale The application locale in BCP 47 format.
+  ///
+  virtual void SetApplicationLocale(std::string locale) = 0;
+
+  //--------------------------------------------------------------------------
+  /// @brief      Notifies whether Framework starts generating semantics tree.
+  ///
+  /// @param[in] enabled True if Framework starts generating semantics tree.
+  ///
+  virtual void SetSemanticsTreeEnabled(bool enabled) = 0;
 
   //--------------------------------------------------------------------------
   /// @brief      When the Flutter application has a message to send to the
@@ -447,6 +467,17 @@ class PlatformConfiguration final {
   void DispatchPointerDataPacket(const PointerDataPacket& packet);
 
   //----------------------------------------------------------------------------
+  /// @brief      Requests to perform framework hit test from the engine.
+  ///
+  /// @param[in]  view_id The identifier of the flutter view that
+  ///                     should be hit tested.
+  /// @param[in]  offset  The position in the view that should be hit tested.
+  ///
+  /// @return     The hit test response.
+  ///
+  HitTestResponse HitTest(int64_t view_id, const flutter::PointData offset);
+
+  //----------------------------------------------------------------------------
   /// @brief      Notifies the framework that the embedder encountered an
   ///             accessibility related action on the specified node. This call
   ///             originates on the platform view and has been forwarded to the
@@ -569,6 +600,7 @@ class PlatformConfiguration final {
   tonic::DartPersistentValue update_accessibility_features_;
   tonic::DartPersistentValue dispatch_platform_message_;
   tonic::DartPersistentValue dispatch_pointer_data_packet_;
+  tonic::DartPersistentValue hit_test_;
   tonic::DartPersistentValue dispatch_semantics_action_;
   tonic::DartPersistentValue begin_frame_;
   tonic::DartPersistentValue draw_frame_;
@@ -624,6 +656,10 @@ class PlatformConfigurationNativeApi {
                      double height);
 
   static void UpdateSemantics(int64_t viewId, SemanticsUpdate* update);
+
+  static void SetApplicationLocale(std::string locale);
+
+  static void SetSemanticsTreeEnabled(bool enabled);
 
   static void SetNeedsReportTimings(bool value);
 

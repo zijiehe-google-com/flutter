@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import 'package:flutter_tools/src/base/logger.dart';
+import 'package:flutter_tools/src/base/os.dart';
 import 'package:flutter_tools/src/base/platform.dart';
 import 'package:flutter_tools/src/cache.dart';
 import 'package:flutter_tools/src/commands/precache.dart';
@@ -21,9 +22,22 @@ void main() {
     cache.isUpToDateValue = false;
   });
 
+  testUsingContext('precache description explains currently enabled platforms', () {
+    final command = PrecacheCommand(
+      cache: cache,
+      logger: BufferLogger.test(),
+      platform: FakePlatform(environment: <String, String>{}),
+      featureFlags: TestFeatureFlags(),
+    );
+
+    expect(command.description, contains('enabled by the current host and Flutter configuration'));
+    expect(command.description, contains('flutter config --list'));
+    expect(command.description, contains('(Not set)'));
+  });
+
   testUsingContext('precache should acquire lock', () async {
     final Platform platform = FakePlatform(environment: <String, String>{});
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       platform: platform,
@@ -39,7 +53,7 @@ void main() {
       operatingSystem: 'windows',
       environment: <String, String>{'FLUTTER_ROOT': 'flutter', 'FLUTTER_ALREADY_LOCKED': 'true'},
     );
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       featureFlags: TestFeatureFlags(),
@@ -53,7 +67,7 @@ void main() {
   testUsingContext(
     'precache downloads web artifacts on dev branch when feature is enabled.',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(isWebEnabled: true),
@@ -66,6 +80,7 @@ void main() {
       expect(
         cache.artifacts,
         unorderedEquals(<DevelopmentArtifact>{
+          DevelopmentArtifact.informative,
           DevelopmentArtifact.universal,
           DevelopmentArtifact.web,
         }),
@@ -76,7 +91,7 @@ void main() {
   testUsingContext(
     'precache does not download web artifacts on dev branch when feature is enabled.',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(),
@@ -88,7 +103,10 @@ void main() {
 
       expect(
         cache.artifacts,
-        unorderedEquals(<DevelopmentArtifact>{DevelopmentArtifact.universal}),
+        unorderedEquals(<DevelopmentArtifact>{
+          DevelopmentArtifact.universal,
+          DevelopmentArtifact.informative,
+        }),
       );
     },
   );
@@ -96,7 +114,7 @@ void main() {
   testUsingContext(
     'precache downloads macOS artifacts on dev branch when macOS is enabled.',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(isMacOSEnabled: true),
@@ -109,6 +127,7 @@ void main() {
       expect(
         cache.artifacts,
         unorderedEquals(<DevelopmentArtifact>{
+          DevelopmentArtifact.informative,
           DevelopmentArtifact.universal,
           DevelopmentArtifact.macOS,
         }),
@@ -119,7 +138,7 @@ void main() {
   testUsingContext(
     'precache does not download macOS artifacts on dev branch when feature is enabled.',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(),
@@ -131,7 +150,10 @@ void main() {
 
       expect(
         cache.artifacts,
-        unorderedEquals(<DevelopmentArtifact>{DevelopmentArtifact.universal}),
+        unorderedEquals(<DevelopmentArtifact>{
+          DevelopmentArtifact.universal,
+          DevelopmentArtifact.informative,
+        }),
       );
     },
   );
@@ -139,7 +161,7 @@ void main() {
   testUsingContext(
     'precache downloads Windows artifacts on dev branch when feature is enabled.',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(isWindowsEnabled: true),
@@ -152,6 +174,7 @@ void main() {
       expect(
         cache.artifacts,
         unorderedEquals(<DevelopmentArtifact>{
+          DevelopmentArtifact.informative,
           DevelopmentArtifact.universal,
           DevelopmentArtifact.windows,
         }),
@@ -162,7 +185,7 @@ void main() {
   testUsingContext(
     'precache does not download Windows artifacts on dev branch when feature is enabled.',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(),
@@ -174,7 +197,10 @@ void main() {
 
       expect(
         cache.artifacts,
-        unorderedEquals(<DevelopmentArtifact>{DevelopmentArtifact.universal}),
+        unorderedEquals(<DevelopmentArtifact>{
+          DevelopmentArtifact.universal,
+          DevelopmentArtifact.informative,
+        }),
       );
     },
   );
@@ -182,7 +208,7 @@ void main() {
   testUsingContext(
     'precache downloads Linux artifacts on dev branch when feature is enabled.',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(isLinuxEnabled: true),
@@ -195,6 +221,7 @@ void main() {
       expect(
         cache.artifacts,
         unorderedEquals(<DevelopmentArtifact>{
+          DevelopmentArtifact.informative,
           DevelopmentArtifact.universal,
           DevelopmentArtifact.linux,
         }),
@@ -205,7 +232,7 @@ void main() {
   testUsingContext(
     'precache does not download Linux artifacts on dev branch when feature is enabled.',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(),
@@ -217,13 +244,16 @@ void main() {
 
       expect(
         cache.artifacts,
-        unorderedEquals(<DevelopmentArtifact>{DevelopmentArtifact.universal}),
+        unorderedEquals(<DevelopmentArtifact>{
+          DevelopmentArtifact.universal,
+          DevelopmentArtifact.informative,
+        }),
       );
     },
   );
 
   testUsingContext('precache exits if requesting mismatched artifacts.', () async {
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       featureFlags: TestFeatureFlags(),
@@ -239,7 +269,7 @@ void main() {
   });
 
   testUsingContext('precache adds artifact flags to requested artifacts', () async {
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       featureFlags: TestFeatureFlags(
@@ -265,6 +295,7 @@ void main() {
     expect(
       cache.artifacts,
       unorderedEquals(<DevelopmentArtifact>{
+        DevelopmentArtifact.informative,
         DevelopmentArtifact.universal,
         DevelopmentArtifact.iOS,
         DevelopmentArtifact.androidGenSnapshot,
@@ -281,7 +312,7 @@ void main() {
   });
 
   testUsingContext('precache expands android artifacts when the android flag is used', () async {
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       featureFlags: TestFeatureFlags(),
@@ -291,6 +322,7 @@ void main() {
     expect(
       cache.artifacts,
       unorderedEquals(<DevelopmentArtifact>{
+        DevelopmentArtifact.informative,
         DevelopmentArtifact.universal,
         DevelopmentArtifact.androidGenSnapshot,
         DevelopmentArtifact.androidMaven,
@@ -300,7 +332,7 @@ void main() {
   });
 
   testUsingContext('precache adds artifact flags to requested android artifacts', () async {
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       featureFlags: TestFeatureFlags(),
@@ -317,6 +349,7 @@ void main() {
     expect(
       cache.artifacts,
       unorderedEquals(<DevelopmentArtifact>{
+        DevelopmentArtifact.informative,
         DevelopmentArtifact.universal,
         DevelopmentArtifact.androidGenSnapshot,
         DevelopmentArtifact.androidMaven,
@@ -326,7 +359,7 @@ void main() {
   });
 
   testUsingContext('precache downloads iOS and Android artifacts by default', () async {
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       featureFlags: TestFeatureFlags(),
@@ -338,6 +371,7 @@ void main() {
     expect(
       cache.artifacts,
       unorderedEquals(<DevelopmentArtifact>{
+        DevelopmentArtifact.informative,
         DevelopmentArtifact.universal,
         DevelopmentArtifact.iOS,
         DevelopmentArtifact.androidGenSnapshot,
@@ -348,7 +382,7 @@ void main() {
   });
 
   testUsingContext('precache --all-platforms gets all artifacts', () async {
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       featureFlags: TestFeatureFlags(
@@ -366,6 +400,7 @@ void main() {
     expect(
       cache.artifacts,
       unorderedEquals(<DevelopmentArtifact>{
+        DevelopmentArtifact.informative,
         DevelopmentArtifact.universal,
         DevelopmentArtifact.iOS,
         DevelopmentArtifact.androidGenSnapshot,
@@ -384,7 +419,7 @@ void main() {
   testUsingContext(
     'precache with default artifacts does not override platform filtering',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(),
@@ -400,7 +435,7 @@ void main() {
   testUsingContext(
     'precache with explicit artifact options overrides platform filtering',
     () async {
-      final PrecacheCommand command = PrecacheCommand(
+      final command = PrecacheCommand(
         cache: cache,
         logger: BufferLogger.test(),
         featureFlags: TestFeatureFlags(isMacOSEnabled: true),
@@ -420,6 +455,7 @@ void main() {
       expect(
         cache.artifacts,
         unorderedEquals(<DevelopmentArtifact>{
+          DevelopmentArtifact.informative,
           DevelopmentArtifact.universal,
           DevelopmentArtifact.macOS,
         }),
@@ -430,7 +466,7 @@ void main() {
 
   testUsingContext('precache deletes artifact stampfiles when --force is provided', () async {
     cache.isUpToDateValue = true;
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       featureFlags: TestFeatureFlags(isMacOSEnabled: true),
@@ -442,7 +478,7 @@ void main() {
   });
 
   testUsingContext('precache downloads all enabled platforms if no flags are provided.', () async {
-    final PrecacheCommand command = PrecacheCommand(
+    final command = PrecacheCommand(
       cache: cache,
       logger: BufferLogger.test(),
       featureFlags: TestFeatureFlags(
@@ -463,11 +499,23 @@ void main() {
         DevelopmentArtifact.web,
         DevelopmentArtifact.macOS,
         DevelopmentArtifact.windows,
-        DevelopmentArtifact.linux,
+        DevelopmentArtifact.linux, DevelopmentArtifact.informative,
         DevelopmentArtifact.universal,
         // iOS and android specifically excluded
       }),
     );
+  });
+
+  testUsingContext('precache --host-arch overrides cache hostPlatformOverride', () async {
+    final command = PrecacheCommand(
+      cache: cache,
+      logger: BufferLogger.test(),
+      featureFlags: TestFeatureFlags(),
+      platform: FakePlatform(operatingSystem: 'macos', environment: <String, String>{}),
+    );
+    await createTestCommandRunner(command).run(const <String>['precache', '--host-arch=x64']);
+
+    expect(cache.osUtils.hostPlatformOverride, HostPlatform.darwin_x64);
   });
 }
 
@@ -505,4 +553,7 @@ class FakeCache extends Fake implements Cache {
 
   @override
   bool includeAllPlatforms = false;
+
+  @override
+  late final OperatingSystemUtils osUtils = FakeOperatingSystemUtils();
 }

@@ -6,7 +6,6 @@ import 'package:archive/archive.dart';
 
 import '../application_package.dart';
 import '../base/file_system.dart';
-import '../base/utils.dart';
 import '../build_info.dart';
 import '../cmake.dart';
 import '../cmake_project.dart';
@@ -50,7 +49,7 @@ abstract class WindowsApp extends ApplicationPackage {
       globals.printError('Invalid prebuilt Windows app. Unable to extract from archive.');
       return null;
     }
-    final List<FileSystemEntity> exeFilesFound = <FileSystemEntity>[
+    final exeFilesFound = <FileSystemEntity>[
       for (final FileSystemEntity file in tempDir.listSync())
         if (file.basename.endsWith('.exe')) file,
     ];
@@ -74,7 +73,7 @@ abstract class WindowsApp extends ApplicationPackage {
   @override
   String get displayName => id;
 
-  String executable(BuildMode buildMode, TargetPlatform targetPlatform);
+  String executable(BuildMode buildMode, TargetPlatform targetPlatform, [String? flavor]);
 }
 
 class PrebuiltWindowsApp extends WindowsApp implements PrebuiltApplicationPackage {
@@ -85,7 +84,7 @@ class PrebuiltWindowsApp extends WindowsApp implements PrebuiltApplicationPackag
   final String _executable;
 
   @override
-  String executable(BuildMode buildMode, TargetPlatform targetPlatform) => _executable;
+  String executable(BuildMode buildMode, TargetPlatform targetPlatform, [String? flavor]) => _executable;
 
   @override
   String get name => _executable;
@@ -101,12 +100,12 @@ class BuildableWindowsApp extends WindowsApp {
   final WindowsProject project;
 
   @override
-  String executable(BuildMode buildMode, TargetPlatform targetPlatform) {
+  String executable(BuildMode buildMode, TargetPlatform targetPlatform, [String? flavor]) {
     final String? binaryName = getCmakeExecutableName(project);
     return globals.fs.path.join(
-      getWindowsBuildDirectory(targetPlatform),
+      getWindowsBuildDirectory(targetPlatform, flavor),
       'runner',
-      sentenceCase(buildMode.cliName),
+      buildMode.uppercaseName,
       '$binaryName.exe',
     );
   }

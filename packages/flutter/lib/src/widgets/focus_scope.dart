@@ -16,9 +16,12 @@ library;
 import 'package:flutter/foundation.dart';
 
 import 'basic.dart';
+import 'container.dart';
+import 'debug.dart';
 import 'focus_manager.dart';
 import 'framework.dart';
 import 'inherited_notifier.dart';
+import 'transitions.dart';
 
 /// A widget that manages a [FocusNode] to allow keyboard focus to be given
 /// to this widget and its descendants.
@@ -454,10 +457,9 @@ class Focus extends StatefulWidget {
     bool scopeOk = false,
     bool createDependency = true,
   }) {
-    final _FocusInheritedScope? scope =
-        createDependency
-            ? context.dependOnInheritedWidgetOfExactType<_FocusInheritedScope>()
-            : context.getInheritedWidgetOfExactType<_FocusInheritedScope>();
+    final _FocusInheritedScope? scope = createDependency
+        ? context.dependOnInheritedWidgetOfExactType<_FocusInheritedScope>()
+        : context.getInheritedWidgetOfExactType<_FocusInheritedScope>();
 
     return switch (scope?.notifier) {
       null => null,
@@ -721,15 +723,20 @@ class _FocusState extends State<Focus> {
         // node will gain focus and take focus from this widget.
         // TODO(gspencergoog): Allow this to be set on iOS once the issue is
         // addressed: https://github.com/flutter/flutter/issues/150030
-        onFocus:
-            defaultTargetPlatform != TargetPlatform.iOS && _couldRequestFocus
-                ? focusNode.requestFocus
-                : null,
+        onFocus: defaultTargetPlatform != TargetPlatform.iOS && _couldRequestFocus
+            ? focusNode.requestFocus
+            : null,
         focusable: _couldRequestFocus,
-        focused: _hadPrimaryFocus,
+        focused: _couldRequestFocus ? _hadPrimaryFocus : null,
         child: widget.child,
       );
     }
+    assert(() {
+      if (debugPaintFocusBoxes) {
+        child = _DebugFocusBorder(node: focusNode, child: child);
+      }
+      return true;
+    }());
     return _FocusInheritedScope(node: focusNode, child: child);
   }
 }
@@ -895,6 +902,43 @@ class _FocusScopeState extends _FocusState {
       result = Semantics(explicitChildNodes: true, child: result);
     }
     return result;
+  }
+}
+
+/// Wraps a child with a colored border indicating the focus state of the node.
+/// Only used when [debugPaintFocusBoxes] is true.
+class _DebugFocusBorder extends StatelessWidget {
+  const _DebugFocusBorder({required this.node, required this.child});
+
+  final FocusNode node;
+  final Widget child;
+
+  Color get _borderColor {
+    if (node.hasPrimaryFocus) {
+      return const Color(0xF000FF00);
+    } else if (node.hasFocus) {
+      return const Color(0xF00000FF);
+    } else if (!node.canRequestFocus) {
+      return const Color(0xF0FF0000);
+    } else if (node.skipTraversal) {
+      return const Color(0xF0FFFF00);
+    } else {
+      return const Color(0xF000FFFF);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: node,
+      builder: (BuildContext context, _) {
+        return DecoratedBox(
+          decoration: BoxDecoration(border: Border.all(color: _borderColor, width: 3.0)),
+          position: DecorationPosition.foreground,
+          child: child,
+        );
+      },
+    );
   }
 }
 

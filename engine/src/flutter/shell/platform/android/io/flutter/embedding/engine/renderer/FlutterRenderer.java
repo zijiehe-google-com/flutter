@@ -6,7 +6,6 @@ package io.flutter.embedding.engine.renderer;
 
 import static io.flutter.Build.API_LEVELS;
 
-import android.annotation.TargetApi;
 import android.content.ComponentCallbacks2;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
@@ -23,10 +22,8 @@ import android.view.Surface;
 import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 import androidx.annotation.VisibleForTesting;
-import androidx.lifecycle.DefaultLifecycleObserver;
-import androidx.lifecycle.LifecycleOwner;
-import androidx.lifecycle.ProcessLifecycleOwner;
 import io.flutter.Log;
 import io.flutter.embedding.engine.FlutterJNI;
 import io.flutter.view.TextureRegistry;
@@ -66,6 +63,31 @@ public class FlutterRenderer implements TextureRegistry {
    */
   @VisibleForTesting public static boolean debugForceSurfaceProducerGlTextures = false;
 
+  /**
+   * Returns true if this device has a known {@link android.hardware.HardwareBuffer} defect.
+   *
+   * <p>Huawei devices on API 29 or below have {@link android.media.ImageReader} issues that cause
+   * video playback failures due to defective HardwareBuffer implementations.
+   *
+   * @see <a href="https://github.com/flutter/flutter/issues/166481">#166481</a> See <a
+   *     href="https://github.com/flutter/flutter/issues/156459">#156459</a> See <a
+   *     href="https://github.com/flutter/flutter/issues/154068">#154068</a> See <a
+   *     href="https://github.com/flutter/engine/pull/54879">engine pr #54879</a>
+   */
+  private static boolean hasAndroidHardwareBufferDefect() {
+    // To test if some device should be added from this list app developers first should attempt to
+    // play a video and see a failure in the logs.
+    /// ```E/ACodec: Failed to allocate buffers after transitioning to IDLE state (error 0xfffffc0e)
+    /// W/ACodec: [OMX.hisi.video.decoder.avc] setting nBufferCountActual to 12 failed: -1010
+    // E/MediaCodecVideoRenderer: Video codec error```
+    /// Then try setting `FlutterRenderer.debugForceSurfaceProducerGlTextures = true` in an example
+    // app.
+    /// If the video plays then that is a strong signal that this method should be updated to
+    // include the tested device.
+    return Build.VERSION.SDK_INT <= API_LEVELS.API_29
+        && "HUAWEI".equalsIgnoreCase(Build.MANUFACTURER);
+  }
+
   /** Whether to disable clearing of the Surface used to render platform views. */
   @VisibleForTesting public static boolean debugDisableSurfaceClear = false;
 
@@ -100,21 +122,23 @@ public class FlutterRenderer implements TextureRegistry {
   public FlutterRenderer(@NonNull FlutterJNI flutterJNI) {
     this.flutterJNI = flutterJNI;
     this.flutterJNI.addIsDisplayingFlutterUiListener(flutterUiDisplayListener);
-    ProcessLifecycleOwner.get()
-        .getLifecycle()
-        .addObserver(
-            new DefaultLifecycleObserver() {
-              @Override
-              public void onResume(@NonNull LifecycleOwner owner) {
-                Log.v(TAG, "onResume called; notifying SurfaceProducers");
-                for (ImageReaderSurfaceProducer producer : imageReaderProducers) {
-                  if (producer.callback != null && producer.notifiedDestroy) {
-                    producer.notifiedDestroy = false;
-                    producer.callback.onSurfaceAvailable();
-                  }
-                }
-              }
-            });
+  }
+
+  /**
+   * Restores {@code ImageReaderSurfaceProducer}s that were previously notified to be destroyed due
+   * to a call to {@code onTrimMemory} as part of an {@code onResume} app lifecycle event.
+   *
+   * <p>All {@code FlutterActivity}s and {@code FlutterFragment}s are expected to call this {@code
+   * onResume} to ensure surface producers are restored when the app returns to the foreground.
+   */
+  public void restoreSurfaceProducers() {
+    Log.v(TAG, "restoreSurfaceProducers called; notifying SurfaceProducers");
+    for (ImageReaderSurfaceProducer producer : imageReaderProducers) {
+      if (producer.callback != null && producer.notifiedDestroy) {
+        producer.notifiedDestroy = false;
+        producer.callback.onSurfaceAvailable();
+      }
+    }
   }
 
   /**
@@ -123,6 +147,18 @@ public class FlutterRenderer implements TextureRegistry {
    */
   public boolean isDisplayingFlutterUi() {
     return isDisplayingFlutterUi;
+  }
+
+  /**
+   * Adds a listener that is invoked whenever this {@code FlutterRenderer} starts and stops painting
+   * pixels to an Android {@code View} hierarchy.
+   */
+  public void addResizingFlutterUiListener(@NonNull FlutterUiResizeListener listener) {
+    flutterJNI.addResizingFlutterUiListener(listener);
+  }
+
+  public void removeResizingFlutterUiListener(@NonNull FlutterUiResizeListener listener) {
+    flutterJNI.removeResizingFlutterUiListener(listener);
   }
 
   /**
@@ -188,7 +224,9 @@ public class FlutterRenderer implements TextureRegistry {
   @Override
   public SurfaceProducer createSurfaceProducer(SurfaceLifecycle lifecycle) {
     final SurfaceProducer entry;
-    if (!debugForceSurfaceProducerGlTextures && Build.VERSION.SDK_INT >= API_LEVELS.API_29) {
+    if (!debugForceSurfaceProducerGlTextures
+        && Build.VERSION.SDK_INT >= API_LEVELS.API_29
+        && !hasAndroidHardwareBufferDefect()) {
       final long id = nextTextureId.getAndIncrement();
       final ImageReaderSurfaceProducer producer = new ImageReaderSurfaceProducer(id);
       boolean reset = lifecycle == SurfaceLifecycle.resetInBackground;
@@ -408,13 +446,11 @@ public class FlutterRenderer implements TextureRegistry {
   // When we acquire the next image, close any ImageReaders that don't have any
   // more pending images.
   @Keep
-  @TargetApi(API_LEVELS.API_29)
   final class ImageReaderSurfaceProducer
       implements TextureRegistry.SurfaceProducer,
           TextureRegistry.ImageConsumer,
           TextureRegistry.OnTrimMemoryListener {
     private static final String TAG = "ImageReaderSurfaceProducer";
-    private static final int MAX_IMAGES = 6;
     // The ImageReaderSurfaceProducer must not close images until the renderer,
     // either Skia OpenGL, Impeller OpenGL, or Impeller Vulkan is done reading
     // from them. The Vulkan renderer allows up to two frames in flight before
@@ -423,6 +459,7 @@ public class FlutterRenderer implements TextureRegistry {
     // the frame that references them has finished rendering can result in
     // tearing or other incorrect rendering.
     private static final int MAX_DEQUEUED_IMAGES = 2;
+    private static final int MAX_IMAGES = 5 + MAX_DEQUEUED_IMAGES;
 
     // Flip when debugging to see verbose logs.
     private static final boolean VERBOSE_LOGS = false;
@@ -453,7 +490,7 @@ public class FlutterRenderer implements TextureRegistry {
      *
      * <p>Used to avoid signaling {@link Callback#onSurfaceAvailable()} unnecessarily.
      */
-    private boolean notifiedDestroy = false;
+    @VisibleForTesting boolean notifiedDestroy = false;
 
     // State held to track latency of various stages.
     private long lastDequeueTime = 0;
@@ -467,7 +504,8 @@ public class FlutterRenderer implements TextureRegistry {
     private final HashMap<ImageReader, PerImageReader> perImageReaders = new HashMap<>();
     private ArrayList<PerImage> lastDequeuedImage = new ArrayList<PerImage>();
     private PerImageReader lastReaderDequeuedFrom = null;
-    private Callback callback = null;
+
+    @VisibleForTesting Callback callback = null;
 
     /** Internal class: state held per Image produced by ImageReaders. */
     private class PerImage {
@@ -556,10 +594,10 @@ public class FlutterRenderer implements TextureRegistry {
       return (double) deltaNanos / 1000000.0;
     }
 
-    PerImageReader getOrCreatePerImageReader(ImageReader reader) {
+    private PerImageReader getOrCreatePerImageReader(ImageReader reader) {
       PerImageReader r = perImageReaders.get(reader);
       if (r == null) {
-        r = new PerImageReader(reader);
+        r = createPerImageReader(reader);
         perImageReaders.put(reader, r);
         imageReaderQueue.add(r);
         if (VERBOSE_LOGS) {
@@ -567,6 +605,11 @@ public class FlutterRenderer implements TextureRegistry {
         }
       }
       return r;
+    }
+
+    @VisibleForTesting
+    public PerImageReader createPerImageReader(ImageReader reader) {
+      return new PerImageReader(reader);
     }
 
     void pruneImageReaderQueue() {
@@ -741,10 +784,10 @@ public class FlutterRenderer implements TextureRegistry {
       }
     }
 
-    @TargetApi(API_LEVELS.API_33)
-    private void waitOnFence(Image image) {
-      try {
-        SyncFence fence = image.getFence();
+    @RequiresApi(API_LEVELS.API_33)
+    @VisibleForTesting
+    void waitOnFence(Image image) {
+      try (SyncFence fence = image.getFence()) {
         fence.awaitForever();
       } catch (IOException e) {
         // Drop.
@@ -831,6 +874,12 @@ public class FlutterRenderer implements TextureRegistry {
     }
 
     @Override
+    public Surface getForcedNewSurface() {
+      createNewReader = true;
+      return getSurface();
+    }
+
+    @Override
     public void scheduleFrame() {
       if (VERBOSE_LOGS) {
         long now = System.nanoTime();
@@ -844,7 +893,7 @@ public class FlutterRenderer implements TextureRegistry {
     }
 
     @Override
-    @TargetApi(API_LEVELS.API_29)
+    @RequiresApi(API_LEVELS.API_29)
     public Image acquireLatestImage() {
       PerImage r = dequeueImage();
       if (r == null) {
@@ -856,17 +905,23 @@ public class FlutterRenderer implements TextureRegistry {
 
     private PerImageReader getActiveReader() {
       synchronized (lock) {
-        if (createNewReader) {
-          createNewReader = false;
-          // Create a new ImageReader and add it to the queue.
-          ImageReader reader = createImageReader();
-          if (VERBOSE_LOGS) {
-            Log.i(
-                TAG, reader.hashCode() + " created w=" + requestedWidth + " h=" + requestedHeight);
+        if (!createNewReader) {
+          // Verify we don't need a new ImageReader anyway because its Surface has been invalidated.
+          PerImageReader lastPerImageReader = imageReaderQueue.peekLast();
+          Surface lastImageReaderSurface = lastPerImageReader.reader.getSurface();
+          boolean lastImageReaderHasValidSurface = lastImageReaderSurface.isValid();
+          if (lastImageReaderHasValidSurface) {
+            return lastPerImageReader;
           }
-          return getOrCreatePerImageReader(reader);
         }
-        return imageReaderQueue.peekLast();
+
+        createNewReader = false;
+        // Create a new ImageReader and add it to the queue.
+        ImageReader reader = createImageReader();
+        if (VERBOSE_LOGS) {
+          Log.i(TAG, reader.hashCode() + " created w=" + requestedWidth + " h=" + requestedHeight);
+        }
+        return getOrCreatePerImageReader(reader);
       }
     }
 
@@ -883,7 +938,7 @@ public class FlutterRenderer implements TextureRegistry {
       }
     }
 
-    @TargetApi(API_LEVELS.API_33)
+    @RequiresApi(API_LEVELS.API_33)
     private ImageReader createImageReader33() {
       final ImageReader.Builder builder = new ImageReader.Builder(requestedWidth, requestedHeight);
       // Allow for double buffering.
@@ -900,7 +955,7 @@ public class FlutterRenderer implements TextureRegistry {
       return builder.build();
     }
 
-    @TargetApi(API_LEVELS.API_29)
+    @RequiresApi(API_LEVELS.API_29)
     private ImageReader createImageReader29() {
       return ImageReader.newInstance(
           requestedWidth,
@@ -910,7 +965,8 @@ public class FlutterRenderer implements TextureRegistry {
           HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE);
     }
 
-    private ImageReader createImageReader() {
+    @VisibleForTesting
+    public ImageReader createImageReader() {
       if (Build.VERSION.SDK_INT >= API_LEVELS.API_33) {
         return createImageReader33();
       } else if (Build.VERSION.SDK_INT >= API_LEVELS.API_29) {
@@ -1008,17 +1064,16 @@ public class FlutterRenderer implements TextureRegistry {
       }
     }
 
-    @TargetApi(API_LEVELS.API_33)
+    @RequiresApi(API_LEVELS.API_33)
     private void waitOnFence(Image image) {
-      try {
-        SyncFence fence = image.getFence();
+      try (SyncFence fence = image.getFence()) {
         fence.awaitForever();
       } catch (IOException e) {
         // Drop.
       }
     }
 
-    @TargetApi(API_LEVELS.API_29)
+    @RequiresApi(API_LEVELS.API_29)
     private void maybeWaitOnFence(Image image) {
       if (image == null) {
         return;
@@ -1037,7 +1092,7 @@ public class FlutterRenderer implements TextureRegistry {
     }
 
     @Override
-    @TargetApi(API_LEVELS.API_29)
+    @RequiresApi(API_LEVELS.API_29)
     public Image acquireLatestImage() {
       Image r;
       synchronized (this) {
@@ -1182,6 +1237,15 @@ public class FlutterRenderer implements TextureRegistry {
             + " x "
             + viewportMetrics.height
             + "\n"
+            + "Size Constraints: "
+            + viewportMetrics.minWidth
+            + ","
+            + viewportMetrics.maxWidth
+            + " x "
+            + viewportMetrics.minHeight
+            + ","
+            + viewportMetrics.maxHeight
+            + "\n"
             + "Padding - L: "
             + viewportMetrics.viewPaddingLeft
             + ", T: "
@@ -1213,7 +1277,16 @@ public class FlutterRenderer implements TextureRegistry {
             + viewportMetrics.displayFeatures.size()
             + "\n"
             + "Display Cutouts: "
-            + viewportMetrics.displayCutouts.size());
+            + viewportMetrics.displayCutouts.size()
+            + "\n"
+            + "Display Corner Radii - TL: "
+            + viewportMetrics.displayCornerRadiusTopLeft
+            + ", TR: "
+            + viewportMetrics.displayCornerRadiusTopRight
+            + ", BR: "
+            + viewportMetrics.displayCornerRadiusBottomRight
+            + ", BL: "
+            + viewportMetrics.displayCornerRadiusBottomLeft);
 
     int totalFeaturesAndCutouts =
         viewportMetrics.displayFeatures.size() + viewportMetrics.displayCutouts.size();
@@ -1255,7 +1328,15 @@ public class FlutterRenderer implements TextureRegistry {
         viewportMetrics.physicalTouchSlop,
         displayFeaturesBounds,
         displayFeaturesType,
-        displayFeaturesState);
+        displayFeaturesState,
+        viewportMetrics.minWidth,
+        viewportMetrics.maxWidth,
+        viewportMetrics.minHeight,
+        viewportMetrics.maxHeight,
+        viewportMetrics.displayCornerRadiusTopLeft,
+        viewportMetrics.displayCornerRadiusTopRight,
+        viewportMetrics.displayCornerRadiusBottomRight,
+        viewportMetrics.displayCornerRadiusBottomLeft);
   }
 
   public Bitmap getBitmap() {
@@ -1316,6 +1397,10 @@ public class FlutterRenderer implements TextureRegistry {
     public float devicePixelRatio = 1.0f;
     public int width = 0;
     public int height = 0;
+    public int minWidth = 0;
+    public int maxWidth = 0;
+    public int minHeight = 0;
+    public int maxHeight = 0;
     // The fields prefixed with viewPadding and viewInset are used to calculate the padding,
     // viewPadding, and viewInsets of ViewConfiguration in Dart. This calculation is performed at
     // https://github.com/flutter/flutter/blob/main/engine/src/flutter/lib/ui/hooks.dart#L159-L175.
@@ -1332,6 +1417,10 @@ public class FlutterRenderer implements TextureRegistry {
     public int systemGestureInsetBottom = 0;
     public int systemGestureInsetLeft = 0;
     public int physicalTouchSlop = unsetValue;
+    public int displayCornerRadiusTopLeft = unsetValue;
+    public int displayCornerRadiusTopRight = unsetValue;
+    public int displayCornerRadiusBottomRight = unsetValue;
+    public int displayCornerRadiusBottomLeft = unsetValue;
 
     /**
      * Whether this instance contains valid metrics for the Flutter application.
@@ -1339,6 +1428,15 @@ public class FlutterRenderer implements TextureRegistry {
      * @return True if width, height, and devicePixelRatio are > 0; false otherwise.
      */
     boolean validate() {
+      if (width == 0) {
+        Log.d(TAG, "Width is zero. " + minWidth + "," + maxWidth);
+        return minWidth > 0 || maxWidth > 0;
+      }
+
+      if (height == 0) {
+        Log.d(TAG, "Height is zero. " + minHeight + "," + maxHeight);
+        return minHeight > 0 || maxHeight > 0;
+      }
       return width > 0 && height > 0 && devicePixelRatio > 0;
     }
 

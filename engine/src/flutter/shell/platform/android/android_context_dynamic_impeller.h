@@ -23,12 +23,16 @@ namespace flutter {
 class AndroidContextDynamicImpeller : public AndroidContext {
  public:
   explicit AndroidContextDynamicImpeller(
-      const AndroidContext::ContextSettings& settings);
+      const AndroidContext::ContextSettings& settings,
+      std::shared_ptr<fml::BasicTaskRunner> io_task_runner);
 
   ~AndroidContextDynamicImpeller();
 
   // |AndroidContext|
   bool IsValid() const override { return true; }
+
+  // |AndroidContext|
+  bool IsDynamicSelection() const override { return true; }
 
   // |AndroidContext|
   AndroidRenderingAPI RenderingApi() const override;
@@ -48,6 +52,7 @@ class AndroidContextDynamicImpeller : public AndroidContext {
   const AndroidContext::ContextSettings settings_;
   std::shared_ptr<AndroidContextGLImpeller> gl_context_;
   std::shared_ptr<AndroidContextVKImpeller> vk_context_;
+  std::shared_ptr<fml::BasicTaskRunner> io_task_runner_;
 
   FML_DISALLOW_COPY_AND_ASSIGN(AndroidContextDynamicImpeller);
 };

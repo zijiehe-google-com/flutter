@@ -4,10 +4,7 @@
 
 package io.flutter.plugin.platform;
 
-import static io.flutter.Build.API_LEVELS;
-
 import android.annotation.SuppressLint;
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -40,7 +37,6 @@ import io.flutter.util.ViewUtils;
  * <p>Since the view is in the Android view hierarchy, keyboard and accessibility interactions
  * behave normally.
  */
-@TargetApi(API_LEVELS.API_23)
 public class PlatformViewWrapper extends FrameLayout {
   private static final String TAG = "PlatformViewWrapper";
 

@@ -3,9 +3,10 @@
 // found in the LICENSE file.
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:leak_tracker_flutter_testing/leak_tracker_flutter_testing.dart';
 
 class _MockRenderSliver extends RenderSliver {
   @override
@@ -21,7 +22,7 @@ Future<void> test(
   AxisDirection axisDirection,
   TextDirection textDirection,
 ) {
-  final ViewportOffset viewportOffset = ViewportOffset.fixed(offset);
+  final viewportOffset = ViewportOffset.fixed(offset);
   addTearDown(viewportOffset.dispose);
   return tester.pumpWidget(
     Directionality(
@@ -49,20 +50,20 @@ Future<void> test(
 }
 
 void verify(WidgetTester tester, List<Rect> answerKey) {
-  final List<Rect> testAnswers =
-      tester.renderObjectList<RenderBox>(find.byType(SizedBox, skipOffstage: false)).map<Rect>((
-        RenderBox target,
-      ) {
+  final List<Rect> testAnswers = tester
+      .renderObjectList<RenderBox>(find.byType(SizedBox, skipOffstage: false))
+      .map<Rect>((RenderBox target) {
         final Offset topLeft = target.localToGlobal(Offset.zero);
         final Offset bottomRight = target.localToGlobal(target.size.bottomRight(Offset.zero));
         return Rect.fromPoints(topLeft, bottomRight);
-      }).toList();
+      })
+      .toList();
   expect(testAnswers, equals(answerKey));
 }
 
 void main() {
   testWidgets('Viewport+SliverPadding basic test (VISUAL)', (WidgetTester tester) async {
-    const EdgeInsets padding = EdgeInsets.fromLTRB(25.0, 20.0, 15.0, 35.0);
+    const padding = EdgeInsets.fromLTRB(25.0, 20.0, 15.0, 35.0);
     await test(tester, 0.0, padding, AxisDirection.down, TextDirection.ltr);
     expect(
       tester.renderObject<RenderBox>(find.byType(Viewport)).size,
@@ -104,7 +105,7 @@ void main() {
   });
 
   testWidgets('Viewport+SliverPadding basic test (LTR)', (WidgetTester tester) async {
-    const EdgeInsetsDirectional padding = EdgeInsetsDirectional.fromSTEB(25.0, 20.0, 15.0, 35.0);
+    const padding = EdgeInsetsDirectional.fromSTEB(25.0, 20.0, 15.0, 35.0);
     await test(tester, 0.0, padding, AxisDirection.down, TextDirection.ltr);
     expect(
       tester.renderObject<RenderBox>(find.byType(Viewport)).size,
@@ -146,7 +147,7 @@ void main() {
   });
 
   testWidgets('Viewport+SliverPadding basic test (RTL)', (WidgetTester tester) async {
-    const EdgeInsetsDirectional padding = EdgeInsetsDirectional.fromSTEB(25.0, 20.0, 15.0, 35.0);
+    const padding = EdgeInsetsDirectional.fromSTEB(25.0, 20.0, 15.0, 35.0);
     await test(tester, 0.0, padding, AxisDirection.down, TextDirection.rtl);
     expect(
       tester.renderObject<RenderBox>(find.byType(Viewport)).size,
@@ -188,7 +189,7 @@ void main() {
   });
 
   testWidgets('Viewport+SliverPadding hit testing', (WidgetTester tester) async {
-    const EdgeInsets padding = EdgeInsets.all(30.0);
+    const padding = EdgeInsets.all(30.0);
     await test(tester, 350.0, padding, AxisDirection.down, TextDirection.ltr);
     expect(
       tester.renderObject<RenderBox>(find.byType(Viewport)).size,
@@ -214,7 +215,7 @@ void main() {
   });
 
   testWidgets('Viewport+SliverPadding hit testing up', (WidgetTester tester) async {
-    const EdgeInsets padding = EdgeInsets.all(30.0);
+    const padding = EdgeInsets.all(30.0);
     await test(tester, 350.0, padding, AxisDirection.up, TextDirection.ltr);
     expect(
       tester.renderObject<RenderBox>(find.byType(Viewport)).size,
@@ -239,7 +240,7 @@ void main() {
   });
 
   testWidgets('Viewport+SliverPadding hit testing left', (WidgetTester tester) async {
-    const EdgeInsets padding = EdgeInsets.all(30.0);
+    const padding = EdgeInsets.all(30.0);
     await test(tester, 350.0, padding, AxisDirection.left, TextDirection.ltr);
     expect(
       tester.renderObject<RenderBox>(find.byType(Viewport)).size,
@@ -264,7 +265,7 @@ void main() {
   });
 
   testWidgets('Viewport+SliverPadding hit testing right', (WidgetTester tester) async {
-    const EdgeInsets padding = EdgeInsets.all(30.0);
+    const padding = EdgeInsets.all(30.0);
     await test(tester, 350.0, padding, AxisDirection.right, TextDirection.ltr);
     expect(
       tester.renderObject<RenderBox>(find.byType(Viewport)).size,
@@ -289,7 +290,7 @@ void main() {
   });
 
   testWidgets('Viewport+SliverPadding no child', (WidgetTester tester) async {
-    final ViewportOffset offset = ViewportOffset.fixed(0.0);
+    final offset = ViewportOffset.fixed(0.0);
     addTearDown(offset.dispose);
 
     await tester.pumpWidget(
@@ -314,7 +315,7 @@ void main() {
     WidgetTester tester,
   ) async {
     // Regression test for https://github.com/flutter/flutter/issues/64506
-    final ScrollController controller = ScrollController();
+    final controller = ScrollController();
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       Directionality(
@@ -345,7 +346,7 @@ void main() {
   });
 
   testWidgets('Viewport+SliverPadding changing padding', (WidgetTester tester) async {
-    final ViewportOffset offset1 = ViewportOffset.fixed(0.0);
+    final offset1 = ViewportOffset.fixed(0.0);
     addTearDown(offset1.dispose);
 
     await tester.pumpWidget(
@@ -367,7 +368,7 @@ void main() {
       const Offset(399.0, 0.0),
     );
 
-    final ViewportOffset offset2 = ViewportOffset.fixed(0.0);
+    final offset2 = ViewportOffset.fixed(0.0);
     addTearDown(offset2.dispose);
 
     await tester.pumpWidget(
@@ -390,8 +391,33 @@ void main() {
     );
   });
 
+  testWidgets(
+    'Viewport+SliverPadding changing padding to negative asserts',
+    experimentalLeakTesting: LeakTesting.settings
+        .withIgnoredAll(), // leaking by design because of exception
+    (WidgetTester tester) async {
+      final offset = ViewportOffset.fixed(0.0);
+      addTearDown(offset.dispose);
+
+      Widget buildApp(EdgeInsetsGeometry padding) {
+        return Directionality(
+          textDirection: TextDirection.ltr,
+          child: Viewport(
+            offset: offset,
+            slivers: <Widget>[SliverPadding(padding: padding)],
+          ),
+        );
+      }
+
+      await tester.pumpWidget(buildApp(EdgeInsets.zero));
+
+      await tester.pumpWidget(buildApp(const EdgeInsets.all(-1.0)));
+      expect(tester.takeException(), isAssertionError);
+    },
+  );
+
   testWidgets('Viewport+SliverPadding changing direction', (WidgetTester tester) async {
-    final ViewportOffset offset1 = ViewportOffset.fixed(0.0);
+    final offset1 = ViewportOffset.fixed(0.0);
     addTearDown(offset1.dispose);
 
     await tester.pumpWidget(
@@ -407,7 +433,7 @@ void main() {
 
     expect(tester.renderObject<RenderSliverPadding>(find.byType(SliverPadding)).afterPadding, 2.0);
 
-    final ViewportOffset offset2 = ViewportOffset.fixed(0.0);
+    final offset2 = ViewportOffset.fixed(0.0);
     addTearDown(offset2.dispose);
 
     await tester.pumpWidget(
@@ -422,7 +448,7 @@ void main() {
 
     expect(tester.renderObject<RenderSliverPadding>(find.byType(SliverPadding)).afterPadding, 8.0);
 
-    final ViewportOffset offset3 = ViewportOffset.fixed(0.0);
+    final offset3 = ViewportOffset.fixed(0.0);
     addTearDown(offset3.dispose);
 
     await tester.pumpWidget(
@@ -438,7 +464,7 @@ void main() {
 
     expect(tester.renderObject<RenderSliverPadding>(find.byType(SliverPadding)).afterPadding, 4.0);
 
-    final ViewportOffset offset4 = ViewportOffset.fixed(0.0);
+    final offset4 = ViewportOffset.fixed(0.0);
     addTearDown(offset4.dispose);
 
     await tester.pumpWidget(
@@ -454,7 +480,7 @@ void main() {
 
     expect(tester.renderObject<RenderSliverPadding>(find.byType(SliverPadding)).afterPadding, 1.0);
 
-    final ViewportOffset offset5 = ViewportOffset.fixed(99999.9);
+    final offset5 = ViewportOffset.fixed(99999.9);
     addTearDown(offset5.dispose);
 
     await tester.pumpWidget(
@@ -532,7 +558,7 @@ void main() {
     'SliverPadding includes preceding padding in the precedingScrollExtent provided to child',
     (WidgetTester tester) async {
       // Regression test for https://github.com/flutter/flutter/issues/49195
-      final UniqueKey key = UniqueKey();
+      final key = UniqueKey();
       await tester.pumpWidget(
         Directionality(
           textDirection: TextDirection.ltr,
@@ -542,7 +568,7 @@ void main() {
                 padding: const EdgeInsets.only(top: 30),
                 sliver: SliverFillRemaining(
                   hasScrollBody: false,
-                  child: Container(key: key, color: Colors.red),
+                  child: Container(key: key, color: const Color(0xFFFF0000)),
                 ),
               ),
             ],
@@ -563,11 +589,9 @@ void main() {
   testWidgets(
     "SliverPadding consumes only its padding from the overlap of its parent's constraints",
     (WidgetTester tester) async {
-      final _MockRenderSliver mock = _MockRenderSliver();
+      final mock = _MockRenderSliver();
       addTearDown(mock.dispose);
-      final RenderSliverPadding renderObject = RenderSliverPadding(
-        padding: const EdgeInsets.only(top: 20),
-      );
+      final renderObject = RenderSliverPadding(padding: const EdgeInsets.only(top: 20));
       addTearDown(renderObject.dispose);
       renderObject.child = mock;
       renderObject.layout(
@@ -594,11 +618,9 @@ void main() {
   testWidgets("SliverPadding passes the overlap to the child if it's negative", (
     WidgetTester tester,
   ) async {
-    final _MockRenderSliver mock = _MockRenderSliver();
+    final mock = _MockRenderSliver();
     addTearDown(mock.dispose);
-    final RenderSliverPadding renderObject = RenderSliverPadding(
-      padding: const EdgeInsets.only(top: 20),
-    );
+    final renderObject = RenderSliverPadding(padding: const EdgeInsets.only(top: 20));
     addTearDown(renderObject.dispose);
     renderObject.child = mock;
     renderObject.layout(
@@ -622,11 +644,9 @@ void main() {
   });
 
   testWidgets('SliverPadding passes the paintOrigin of the child on', (WidgetTester tester) async {
-    final _MockRenderSliver mock = _MockRenderSliver();
+    final mock = _MockRenderSliver();
     addTearDown(mock.dispose);
-    final RenderSliverPadding renderObject = RenderSliverPadding(
-      padding: const EdgeInsets.only(top: 20),
-    );
+    final renderObject = RenderSliverPadding(padding: const EdgeInsets.only(top: 20));
     addTearDown(renderObject.dispose);
     renderObject.child = mock;
     renderObject.layout(
