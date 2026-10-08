@@ -5,6 +5,7 @@
 /// @docImport 'build_system/build_system.dart';
 library;
 
+import 'package:flutter_tools_core/flutter_tools_core.dart' as tools_core;
 import 'package:meta/meta.dart';
 
 import 'package:package_config/package_config_types.dart';
@@ -14,7 +15,6 @@ import 'base/config.dart';
 import 'base/file_system.dart';
 import 'base/logger.dart';
 import 'base/os.dart';
-import 'base/utils.dart';
 import 'convert.dart';
 import 'darwin/darwin.dart';
 import 'globals.dart' as globals;
@@ -57,6 +57,7 @@ class BuildInfo {
     this.useLocalCanvasKit = false,
     this.includeUnsupportedPlatformLibraryStubs = false,
     this.webEnableHotReload = false,
+    this.deprecatedJsInterop,
   }) : extraFrontEndOptions = extraFrontEndOptions ?? const <String>[],
        extraGenSnapshotOptions = extraGenSnapshotOptions ?? const <String>[],
        fileSystemRoots = fileSystemRoots ?? const <String>[],
@@ -105,6 +106,7 @@ class BuildInfo {
       includeUnsupportedPlatformLibraryStubs:
           includeUnsupportedPlatformLibraryStubs ?? this.includeUnsupportedPlatformLibraryStubs,
       webEnableHotReload: webEnableHotReload,
+      deprecatedJsInterop: deprecatedJsInterop,
       treeShakeIcons: treeShakeIcons,
     );
   }
@@ -261,6 +263,16 @@ class BuildInfo {
   /// If set, web builds with DDC will run with support for hot reload.
   final bool webEnableHotReload;
 
+  /// Whether the web compilers (dart2js and DDC) allow the deprecated JS
+  /// interop libraries, such as `dart:html` and `dart:js`.
+  ///
+  /// When `false`, importing these libraries is a compile-time error and
+  /// conditional imports on them resolve to `false`. When `null`, no flag is
+  /// passed and the compiler's default is used.
+  ///
+  /// See [deprecatedJsInteropCompilerFlags].
+  final bool? deprecatedJsInterop;
+
   /// Can be used when the actual information is not needed.
   static const dummy = BuildInfo(
     BuildMode.debug,
@@ -411,17 +423,17 @@ class BuildInfo {
     return <String, String>{
       if (dartDefines.isNotEmpty) 'DART_DEFINES': encodeDartDefines(dartDefines),
       'DART_OBFUSCATION': dartObfuscation.toString(),
-      if (frontendServerStarterPath != null)
-        'FRONTEND_SERVER_STARTER_PATH': frontendServerStarterPath!,
+      'FRONTEND_SERVER_STARTER_PATH': ?frontendServerStarterPath,
       if (extraFrontEndOptions.isNotEmpty)
         'EXTRA_FRONT_END_OPTIONS': extraFrontEndOptions.join(','),
       if (extraGenSnapshotOptions.isNotEmpty)
         'EXTRA_GEN_SNAPSHOT_OPTIONS': extraGenSnapshotOptions.join(','),
+      'BUILD_NAME': ?buildName,
+      'BUILD_NUMBER': ?buildNumber,
       'SPLIT_DEBUG_INFO': ?splitDebugInfoPath,
       'TRACK_WIDGET_CREATION': trackWidgetCreation.toString(),
       'TREE_SHAKE_ICONS': treeShakeIcons.toString(),
-      if (performanceMeasurementFile != null)
-        'PERFORMANCE_MEASUREMENT_FILE': performanceMeasurementFile!,
+      'PERFORMANCE_MEASUREMENT_FILE': ?performanceMeasurementFile,
       'PACKAGE_CONFIG': packageConfigPath,
       'CODE_SIZE_DIRECTORY': ?codeSizeDirectory,
       'FLAVOR': ?flavor,
@@ -461,6 +473,7 @@ class AndroidBuildInfo {
     this.buildInfo, {
     this.targetArchs = const <CpuArch>[.armv7, .arm64, .x64],
     this.splitPerAbi = false,
+    this.releaseManifestEngineShellArgs,
   });
 
   // The build info containing the mode and flavor.
@@ -475,65 +488,17 @@ class AndroidBuildInfo {
 
   /// The target platforms for the build.
   final Iterable<CpuArch> targetArchs;
+
+  /// Engine shell arguments to be injected into the application's AndroidManifest.xml.
+  ///
+  /// This is exclusively used in release mode to allow the Flutter CLI to pass debugging
+  /// options to the engine without relying on Intent extras. It is only relevant when building
+  /// from source (i.e., not using a prebuilt application binary).
+  final List<String>? releaseManifestEngineShellArgs;
 }
 
 /// A summary of the compilation strategy used for Dart.
-enum BuildMode {
-  /// Built in JIT mode with no optimizations, enabled asserts, and a VM service.
-  debug,
-
-  /// Built in AOT mode with some optimizations and a VM service.
-  profile,
-
-  /// Built in AOT mode with all optimizations and no VM service.
-  release,
-
-  /// Built in JIT mode with all optimizations and no VM service.
-  jitRelease;
-
-  factory BuildMode.fromCliName(String value) => values.singleWhere(
-    (BuildMode element) => element.cliName == value,
-    orElse: () => throw ArgumentError('$value is not a supported build mode'),
-  );
-
-  static const releaseModes = <BuildMode>{release, jitRelease};
-  static const jitModes = <BuildMode>{debug, jitRelease};
-
-  /// Whether this mode is considered release.
-  ///
-  /// Useful for determining whether we should enable/disable asserts or
-  /// other development features.
-  bool get isRelease => releaseModes.contains(this);
-
-  /// Whether this mode is using the JIT runtime.
-  bool get isJit => jitModes.contains(this);
-
-  /// Whether this mode is using the precompiled runtime.
-  bool get isPrecompiled => !isJit;
-
-  /// [name] formatted in snake case.
-  ///
-  /// (e.g. debug, profile, release, jit_release)
-  String get cliName => snakeCase(name);
-
-  /// [cliName] formatted in sentence case.
-  ///
-  /// (e.g. Debug, Profile, Release, Jit_release)
-  String get uppercaseName => sentenceCase(cliName);
-
-  /// [cliName] with `_` replaced with a space.
-  ///
-  /// (e.g. debug, profile, release, jit release)
-  String get friendlyName => cliName.replaceAll('_', ' ');
-
-  /// [friendlyName] formatted in sentence case.
-  ///
-  /// (e.g. Debug, Profile, Release, Jit release)
-  String get uppercaseFriendlyName => sentenceCase(friendlyName);
-
-  @override
-  String toString() => cliName;
-}
+typedef BuildMode = tools_core.BuildMode;
 
 /// Environment type of the target device.
 enum EnvironmentType { physical, simulator }
@@ -921,7 +886,7 @@ String getBuildDirectory([Config? config, FileSystem? fileSystem]) {
 
   final String buildDir = localConfig.getValue('build-dir') as String? ?? 'build';
   if (localFilesystem.path.isAbsolute(buildDir)) {
-    throw Exception('build-dir config setting in ${globals.config.configPath} must be relative');
+    throw Exception('build-dir config setting in ${localConfig.configPath} must be relative');
   }
   return buildDir;
 }
@@ -930,11 +895,6 @@ String getBuildDirectory([Config? config, FileSystem? fileSystem]) {
 String getAndroidBuildDirectory() {
   // TODO(cbracken): move to android subdir.
   return getBuildDirectory();
-}
-
-/// Returns the AOT build output directory.
-String getAotBuildDirectory() {
-  return globals.fs.path.join(getBuildDirectory(), 'aot');
 }
 
 /// Returns the asset build output directory.
@@ -966,8 +926,8 @@ String getMacOSBuildDirectory({Config? config, FileSystem? fileSystem}) {
 }
 
 /// Returns the web build output directory.
-String getWebBuildDirectory() {
-  return globals.fs.path.join(getBuildDirectory(), 'web');
+String getWebBuildDirectory({required Config config, required FileSystem fileSystem}) {
+  return fileSystem.path.join(getBuildDirectory(config, fileSystem), 'web');
 }
 
 /// Returns the Linux build output directory.
@@ -994,11 +954,6 @@ String getWindowsBuildDirectory(TargetPlatform targetPlatform, [String? flavor])
       ? globals.fs.path.join('windows', arch, flavor)
       : globals.fs.path.join('windows', arch);
   return globals.fs.path.join(getBuildDirectory(), subDirs);
-}
-
-/// Returns the Fuchsia build output directory.
-String getFuchsiaBuildDirectory() {
-  return globals.fs.path.join(getBuildDirectory(), 'fuchsia');
 }
 
 /// Defines specified via the `--dart-define` command-line option.
@@ -1148,25 +1103,12 @@ const kBuildNumber = 'BuildNumber';
 const kXcodeAction = 'Action';
 
 // The define of the Xcode Build Script.
-/// This may be [kXcodeBuildScriptValuePrepare], [kXcodeBuildScriptValueBuild], or [kXcodeBuildScriptValueEmbed].
+/// This may be [kXcodeBuildScriptValuePrepare].
 const kXcodeBuildScript = 'XcodeBuildScript';
 
 /// When [kXcodeBuildScript] equals this value, that indicates that the target was trigged to run
 /// by a scheme pre-action.
 const kXcodeBuildScriptValuePrepare = 'prepare';
-
-/// When [kXcodeBuildScript] equals this value, that indicates that the target was trigged to run
-/// by the first Run Script in the Xcode build process that happens before compiling.
-const kXcodeBuildScriptValueBuild = 'build';
-
-/// When [kXcodeBuildScript] equals this value, that indicates that the target was trigged to run
-/// by the second Run Script in the Xcode build process that happens after compiling, linking, and
-/// embedding.
-const kXcodeBuildScriptValueEmbed = 'embed';
-
-/// When [kXcodeBuildScript] equals this value, that indicates that the target was trigged to run
-/// by a Run Script in the Xcode build process in a native app (add-to-app).
-const kXcodeBuildScriptValueAddToAppBuild = 'build-add-to-app';
 
 /// Whether the build is originating from the `flutter build swift-package` command.
 ///
@@ -1213,6 +1155,20 @@ List<String> decodeDartDefines(Map<String, String> environmentDefines, String ke
 /// Indicates the module system DDC is targeting.
 enum DdcModuleFormat { amd, ddc }
 
+/// Returns the compiler flags that select whether the deprecated JS interop
+/// libraries (such as `dart:html` and `dart:js`) may be used.
+///
+/// Both dart2js and the frontend server (for the `dartdevc` target) accept
+/// these flags. Returns no flags when [deprecatedJsInterop] is `null`, so
+/// that the compiler's default is used and Dart SDKs without the flag keep
+/// working.
+List<String> deprecatedJsInteropCompilerFlags(bool? deprecatedJsInterop) =>
+    switch (deprecatedJsInterop) {
+      null => const <String>[],
+      true => const <String>['--deprecated-js-interop'],
+      false => const <String>['--no-deprecated-js-interop'],
+    };
+
 // TODO(markzipan): delete this when DDC's AMD module system is deprecated, https://github.com/flutter/flutter/issues/142060.
 ({DdcModuleFormat? ddcModuleFormat, bool? canaryFeatures})
 _ddcModuleFormatAndCanaryFeaturesFromFrontEndArgs(List<String>? extraFrontEndArgs) {
@@ -1244,16 +1200,4 @@ String? _uncapitalize(String? s) {
     return s;
   }
   return s.substring(0, 1).toLowerCase() + s.substring(1);
-}
-
-// flutter_ignore: deprecation_syntax (see analyze.dart)
-@Deprecated('Use TargetPlatform.getName() instead')
-String getNameForTargetPlatform(TargetPlatform platform, {CpuArch? cpuArch}) {
-  return platform.getName(cpuArch: cpuArch);
-}
-
-// flutter_ignore: deprecation_syntax (see analyze.dart)
-@Deprecated('Use TargetPlatform.fromName() instead')
-TargetPlatform getTargetPlatformForName(String platform) {
-  return TargetPlatform.fromName(platform);
 }
